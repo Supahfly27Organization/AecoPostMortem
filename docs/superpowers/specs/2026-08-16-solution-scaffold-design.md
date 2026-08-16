@@ -125,10 +125,17 @@ Five assertions, one per clause of the acceptance criteria:
 2. **No escape.** Every `ProjectReference` path, resolved against its own project directory and
    normalised, remains under the repository root.
 3. **No stray project.** Every project listed in the solution sits under `src/`, `test/` or `web/`.
-4. **Rules touches no persistence.** `AecoPostMortem.Rules.csproj` references no
-   `Microsoft.EntityFrameworkCore*` package, no `System.Data.*` package and no `*.Data` project.
-   This is what turns PRD §3.1's non-negotiable invariant from an assertion into a test: a project
-   with no persistence dependency has a very small surface in which a tool name could hide.
+4. **Rules references nothing at all** — no `PackageReference` and no `ProjectReference`. This is
+   what turns PRD §3.1's non-negotiable invariant from an assertion into a test: a project with no
+   dependencies has a very small surface in which a tool name could hide.
+
+   An earlier draft made this a denylist of persistence package prefixes — `Microsoft.EntityFrameworkCore`,
+   `System.Data.`, and so on. That was wrong, and the review caught it: `Npgsql` is not on any such
+   list anyone writes from memory, and `bench/bench.csproj` in this repository already references it,
+   so the guard would have gone green while `Rules` held a live database dependency. The denylist
+   also only rejected project references ending in `.Data`, so `Rules -> Findings` would have passed.
+   A denylist of package names can never be exhaustive; PRD §3.1's own wording — "`Rules` reaching
+   nothing" — is an allowlist of size zero, and that is what the assertion now enforces.
 5. **A test project per source project.** For every `src/<name>.csproj` there is a
    `test/<name>.Tests.csproj`.
 

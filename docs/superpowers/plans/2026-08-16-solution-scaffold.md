@@ -581,28 +581,14 @@ Append to `SolutionContainmentTests`:
     {
         var rules = Repository.ProjectFile("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj");
 
-        string[] persistencePrefixes =
-        [
-            "Microsoft.EntityFrameworkCore",
-            "Microsoft.Data.",
-            "System.Data.",
-            "Dapper",
-            "SQLite",
-        ];
-
-        var packages = Repository.References(rules, "PackageReference")
-            .Where(name => persistencePrefixes.Any(
-                prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            .ToArray();
-
-        var projects = Repository.References(rules, "ProjectReference")
-            .Where(include => Path.GetFileNameWithoutExtension(include)
-                .EndsWith(".Data", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        var packages = Repository.References(rules, "PackageReference").ToArray();
+        var projects = Repository.References(rules, "ProjectReference").ToArray();
 
         Assert.True(
             packages.Length == 0 && projects.Length == 0,
-            "AecoPostMortem.Rules must reference no persistence assembly (PRD §3.1, FR-34); found: "
+            "AecoPostMortem.Rules must reference nothing at all — no package and no project "
+            + "(PRD §3.1, FR-34): it takes plain inputs and returns results, and a project with "
+            + "no dependencies has a very small surface in which a tool name could hide. Found: "
             + string.Join(", ", packages.Concat(projects)));
     }
 ```
@@ -660,19 +646,33 @@ dotnet sln remove bench/bench.csproj
 
 Re-run; expected PASS. Confirm with `git diff AecoPostMortem.sln` that the solution file is back to its committed state.
 
-- [ ] **Step 6: Prove the Rules guard fires**
+- [ ] **Step 6: Prove the Rules guard fires — twice**
 
-Temporarily add to `src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj`:
+This assertion is an allowlist of size zero, not a denylist of known-bad packages, so it needs two demonstrations: one for each way a dependency can arrive.
+
+First, temporarily add to `src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj`:
 
 ```xml
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 ```
 
+`Npgsql` rather than an EF Core package on purpose: a denylist of persistence prefixes would have missed it, and `bench/bench.csproj` in this repository already references it, so it is the realistic case rather than the convenient one.
+
 Run: `dotnet test test/AecoPostMortem.Containment.Tests/AecoPostMortem.Containment.Tests.csproj --filter FullyQualifiedName~The_rules_project_references_no_persistence`
 
-Expected: FAIL naming `Microsoft.EntityFrameworkCore.Sqlite`. Then **remove it** and re-run; expected PASS.
+Expected: FAIL naming `Npgsql`. Remove it and re-run; expected PASS.
+
+Then temporarily add a project reference instead:
+
+```xml
+  <ItemGroup>
+    <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
+  </ItemGroup>
+```
+
+Expected: FAIL naming the `Findings` reference. This case would create a reference cycle and break a solution build, which is precisely why the containment project — referencing nothing it inspects — is the only thing that can observe it. Remove it and re-run; expected PASS.
 
 - [ ] **Step 7: Confirm the tree is clean and the suite is green**
 

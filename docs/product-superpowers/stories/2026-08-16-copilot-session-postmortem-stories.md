@@ -4,7 +4,7 @@
 **Based on PRD:** `docs/product-superpowers/prds/2026-08-16-copilot-session-postmortem.md` (approved; FR-1 … FR-59, FR-47 cut, Phase E gated)
 **Discovery:** `docs/product-superpowers/discovery/2026-08-16-copilot-session-postmortem.md`
 **Supporting measurements:** `docs/product-superpowers/discovery/2026-08-16-content-check-false-positives.md`, `docs/product-superpowers/research/2026-08-16-scope-resolution-design.md`
-**Status:** Draft — pending User Review Gate
+**Status:** Approved 2026-08-16 by the operator at the User Review Gate — cleared to GitHub issues
 
 **Persona.** One persona recurs throughout: **the operator** — the engineer who steers GitHub Copilot CLI with written rules in `AGENTS.md` and `CLAUDE.md`, edits those rules continuously to tune the process, and today has no way to find out whether any of it worked (PRD Part 1). They are the sole user. Where a story's direct beneficiary is a *downstream story builder* rather than the operator, that is stated honestly rather than dressed up as end-user value.
 
@@ -85,6 +85,12 @@ Scenario: No network call exists
   When its dependencies are inspected
   Then no HTTP client, socket or outbound transport is referenced
 
+Scenario: The indexes the read path depends on exist
+  Given the created schema
+  When its indexes are inspected
+  Then every index the measured query shapes depend on is present
+  And a missing one fails the schema test rather than degrading a surface quietly
+
 Scenario: The source is never written to
   Given a Copilot session directory with recorded file hashes
   When ingestion has run
@@ -92,7 +98,7 @@ Scenario: The source is never written to
   And the ingestion assembly opens every source file read-only
 ```
 
-**Edge cases:** byte-identical replay is Phase A's exit criterion (PRD §3.5), so the round-trip test must cover non-ASCII, embedded newlines and the largest measured system prompt; a store path colliding with an existing non-product file fails loudly rather than overwriting; store size must be queryable, since S-05's coverage report consumes it. **RAW is the only layer that carries a migration** (PRD §3.8) — a migration authored against NORMALIZED or FINDINGS is a defect, because those are required to be reproducible from RAW and a migration would hide a rebuild bug behind a preserved row. **The RAW insert path bypasses EF Core change tracking** (PRD §3.1): a measured 56,138 rows arrive in one full ingest, so this story's append is batched raw SQL against the same schema, not per-entity tracking.
+**Edge cases:** byte-identical replay is Phase A's exit criterion (PRD §3.5), so the round-trip test must cover non-ASCII, embedded newlines and the largest measured system prompt; a store path colliding with an existing non-product file fails loudly rather than overwriting; store size must be queryable, since S-05's coverage report consumes it. **RAW is the only layer that carries a migration** (PRD §3.8) — a migration authored against NORMALIZED or FINDINGS is a defect, because those are required to be reproducible from RAW and a migration would hide a rebuild bug behind a preserved row. **The RAW insert path bypasses EF Core change tracking** (PRD §3.1): a measured 56,138 rows arrive in one full ingest, so this story's append is batched raw SQL against the same schema, not per-entity tracking. **Covering indexes are load-bearing, not tuning** — measured, their absence cost a 13.8× regression on one aggregate at the design target, against a 1.6× gap once present (`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`), which is why the schema test asserts them rather than leaving them to a later profiling pass.
 
 ---
 
@@ -1394,9 +1400,15 @@ Scenario: Rule coverage is honest before rules are analysed
   Given a release in which no rules have been extracted
   When the masthead renders
   Then rule coverage reads "rules not yet analysed", never zero violations
+
+Scenario: The masthead reads stored counters, not live counts
+  Given a corpus at the design target size
+  When the masthead renders
+  Then its totals come from counters maintained at ingest
+  And rendering it runs no aggregate scan over the event table
 ```
 
-**Edge cases:** a finding touching one session is an anecdote and must be visually subordinate to one touching thirty, which is the ranking's entire purpose; the rule-coverage bar cannot be populated until Release 2 (FR-26, FR-40), which is why its Release 1 state is a stated requirement rather than an omission.
+**Edge cases:** a finding touching one session is an anecdote and must be visually subordinate to one touching thirty, which is the ranking's entire purpose; the rule-coverage bar cannot be populated until Release 2 (FR-26, FR-40), which is why its Release 1 state is a stated requirement rather than an omission. **The masthead's totals are the one place this surface could scan the corpus**, and measurement says it must not: counting a million rows measured 126 ms on SQLite and 118 ms on Postgres, so this is not an engine problem and cannot be tuned away (`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`).
 
 ---
 

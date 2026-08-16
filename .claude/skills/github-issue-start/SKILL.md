@@ -1,13 +1,13 @@
 ---
 name: github-issue-start
-description: Use right before beginning implementation work on a tracked GitHub issue. Moves the issue's Project Status to "In progress".
+description: Use right before beginning implementation work on a tracked GitHub issue. Moves the issue's Project Status to "In Progress".
 ---
 
 # GitHub Issue Start
 
-When Superpowers begins implementing a tracked GitHub issue, the board should reflect that work has started — before any code changes. This moves the issue to "In progress" regardless of its current status (typically "Ready", but this skill doesn't check — it just sets the new value).
+When Superpowers begins implementing a tracked GitHub issue, the board should reflect that work has started — before any code changes. This moves the issue to "In Progress" regardless of its current status (typically "Ready", but this skill doesn't check — it just sets the new value).
 
-**Announce at start:** "I'm using the github-issue-start skill to move #N to In progress."
+**Announce at start:** "I'm using the github-issue-start skill to move #N to In Progress."
 
 <HARD-GATE>
 Only run this if you know the specific issue number the upcoming work is for. If the work isn't tied to a tracked issue, skip this skill entirely — do not guess an issue number.
@@ -17,7 +17,7 @@ Only run this if you know the specific issue number the upcoming work is for. If
 
 1. Resolve `owner`/`repo` from `git remote get-url origin`
 2. Find the issue's Project item
-3. Move its `Status` field to `In progress`
+3. Move its `Status` field to `In Progress`
 4. Confirm the update succeeded
 
 ## Step 1: Resolve owner/repo
@@ -36,9 +36,9 @@ gh project item-list <project-number> --owner <org> --format json
 
 Match on the issue's number/URL to get its item id. If the issue isn't on any Project board, tell the user and stop — nothing to update.
 
-## Step 3: Move Status to "In progress"
+## Step 3: Move Status to "In Progress"
 
-Look up the `Status` field's option id for `In progress` (cache per run if handling multiple issues):
+Look up the `Status` field's option id for `In Progress` (cache per run if handling multiple issues):
 
 ```
 gh api graphql -f query='

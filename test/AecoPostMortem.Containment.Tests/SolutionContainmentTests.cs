@@ -111,4 +111,17 @@ public sealed class SolutionContainmentTests
             + "no dependencies has a very small surface in which a tool name could hide. Found: "
             + string.Join(", ", packages.Concat(projects)));
     }
+
+    [Fact]
+    public void The_frontend_lives_under_web_and_not_at_the_repository_root()
+    {
+        Assert.True(
+            File.Exists(Path.Combine(Repository.Root.FullName, "web", "package.json")),
+            "web/package.json is missing: the React project must build from web (PRD §3.1).");
+
+        Assert.False(
+            File.Exists(Path.Combine(Repository.Root.FullName, "package.json")),
+            "A package.json at the repository root would let a frontend command run from there "
+            + "(Repo Rule 3, PRD §3.1).");
+    }
 }

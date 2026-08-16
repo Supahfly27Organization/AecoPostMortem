@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AecoPostMortem.Api\AecoPostMortem.Api.csproj" />
+    <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
+    <ProjectReference Include="..\AecoPostMortem.Ingestion\AecoPostMortem.Ingestion.csproj" />
+  </ItemGroup>
+
+</Project>

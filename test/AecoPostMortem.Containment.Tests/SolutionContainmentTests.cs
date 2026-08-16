@@ -101,28 +101,14 @@ public sealed class SolutionContainmentTests
     {
         var rules = Repository.ProjectFile("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj");
 
-        string[] persistencePrefixes =
-        [
-            "Microsoft.EntityFrameworkCore",
-            "Microsoft.Data.",
-            "System.Data.",
-            "Dapper",
-            "SQLite",
-        ];
-
-        var packages = Repository.References(rules, "PackageReference")
-            .Where(name => persistencePrefixes.Any(
-                prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            .ToArray();
-
-        var projects = Repository.References(rules, "ProjectReference")
-            .Where(include => Path.GetFileNameWithoutExtension(include)
-                .EndsWith(".Data", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        var packages = Repository.References(rules, "PackageReference").ToArray();
+        var projects = Repository.References(rules, "ProjectReference").ToArray();
 
         Assert.True(
             packages.Length == 0 && projects.Length == 0,
-            "AecoPostMortem.Rules must reference no persistence assembly (PRD §3.1, FR-34); found: "
+            "AecoPostMortem.Rules must reference nothing at all — no package and no project "
+            + "(PRD §3.1, FR-34): it takes plain inputs and returns results, and a project with "
+            + "no dependencies has a very small surface in which a tool name could hide. Found: "
             + string.Join(", ", packages.Concat(projects)));
     }
 }

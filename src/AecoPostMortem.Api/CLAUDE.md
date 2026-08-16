@@ -9,4 +9,4 @@ reason to reach into `Data` or `Rules` directly, only through what `Findings` al
 
 ## Status
 
-Empty. S-47 created it; S-48 populates it.
+Empty. Endpoints for the three surfaces are the first thing that lands here.

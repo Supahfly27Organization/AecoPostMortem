@@ -12,4 +12,4 @@ orchestrator can name tools and repositories, the checker never sees them.
 
 ## Status
 
-Empty. S-47 created it; E3 populates it.
+Empty. The four finding classes are the first thing that lands here.

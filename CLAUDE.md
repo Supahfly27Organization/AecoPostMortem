@@ -30,8 +30,8 @@ Session Post-Mortem reads GitHub Copilot CLI’s own event logs and reports wher
 Tech: .NET 10, C#, EF Core over SQLite, xUnit; TypeScript, React, Vite in `web/`.
 
 Layout (PRD §3.1): `src/AecoPostMortem.{Data,Ingestion,Rules,Findings,Api,Cli}/`, `test/` one
-project per source project plus `AecoPostMortem.Containment.Tests`, `web/` the React app,
-`fixtures/` the frozen corpus, `scripts/` the checkers.
+project per source project (+ Containment.Tests), `web/` the React app, `fixtures/` the frozen
+corpus, `scripts/` the checkers.
 
 ## Task → Read These First
 
@@ -49,8 +49,8 @@ project per source project plus `AecoPostMortem.Containment.Tests`, `web/` the R
 | Frontend page | the `web` router → shared types → page file |
 | Product intent, requirements, stories | `docs/product-superpowers/prds/2026-08-16-copilot-session-postmortem.md`, then the stories doc |
 | Add new project / module | Create/update its `CLAUDE.md` (architecture + playbook, keep in sync — see Working Rules) |
-| Add a CLI command | `src/AecoPostMortem.Cli/CLAUDE.md` playbook → `CommandSurface.Commands` |
-| Change the solution's shape | `test/AecoPostMortem.Containment.Tests/` — the rules are tests, not conventions |
+| Add a CLI command | `Cli` router → `CommandSurface.Commands` |
+| Change the solution's shape | `Containment.Tests` enforces it |
 | Security / quality review | `docs/claude/SCANNING_TOOLS.md` |
 | _(add project-specific rows here as modules are built out)_ | |
 
@@ -80,10 +80,8 @@ The `github` MCP server (`mcp__github__*`) is always configured — general GitH
    non-negotiable invariant, structural so one project's source proves it (FR-34).
 7. No project references an AecoLedger assembly; no project reference resolves outside this
    repo (PRD §3.1).
-8. `bench/bench.csproj` is deliberately outside the solution — it sits at the repository root, and
-   adding it breaks the containment rule that every project lives under `src`, `test` or `web`.
-9. Shared MSBuild settings live in `src/Directory.Build.props` and `test/Directory.Build.props`.
-   Do not create one at the repository root: it would reach `bench/` and change how it builds.
+8. `bench/bench.csproj` sits outside the solution; a root project breaks containment.
+9. MSBuild settings live under `src/` and `test/`, not the repo root (reaches `bench/`).
 
 ## Local DB Defaults
 

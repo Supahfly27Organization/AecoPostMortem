@@ -11,4 +11,5 @@ passing `--prefix`, for the same reason.
 
 ## Status
 
-Vite scaffold only. Routing, the three surfaces and the two zero-data states arrive with S-48.
+Vite scaffold only. Routing, the three surfaces and the two zero-data states are the next things
+that land here.

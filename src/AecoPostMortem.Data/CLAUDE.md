@@ -18,4 +18,5 @@ migration against them is a defect (Repo Rule 4, PRD §3.8).
 
 ## Status
 
-Empty. S-47 created it; S-01 populates it.
+Empty. The `DbContext`, the entity model and the first migration are the next things that land
+here.

@@ -11,15 +11,15 @@ command needs; it holds no logic of its own beyond parsing and dispatch.
 
 `CommandSurface.Commands` is the single source of truth for what commands exist — the listing
 (`CommandListing`) is rendered from it and dispatch (`CommandRunner`) reads from it, so nothing else
-enumerates commands. `CommandSpec.ArrivesWith` names the story that implements each command's
-behaviour; the surface exists now (S-47), the behaviour does not yet, and `serve` reports that
-rather than failing when invoked.
+enumerates commands. `CommandSpec.ArrivesWith` names what implements each command's behaviour; the
+surface exists, the behaviour does not yet, and `serve` reports that rather than failing when
+invoked.
 
 ## Status
 
 The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `CommandListing`,
-`CommandRunner`, `Program`). Behaviour behind each command arrives with the story named in its
-`CommandSpec.ArrivesWith`.
+`CommandRunner`, `Program`). Behaviour behind each command arrives next, in the order its
+`CommandSpec.ArrivesWith` names.
 
 ## Playbook — adding a command
 

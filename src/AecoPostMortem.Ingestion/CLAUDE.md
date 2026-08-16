@@ -9,4 +9,4 @@ see rule checks or findings, only to land raw events and reconstruct sessions fr
 
 ## Status
 
-Empty. S-47 created it; S-02 through S-07 populate it.
+Empty. Path discovery and the event-line reader are the first things that land here.

@@ -1,7 +1,7 @@
 # Copilot Session Post-Mortem v1 — PRD
 
 **Date:** 2026-08-16
-**Status:** Draft — awaiting operator approval
+**Status:** Approved 2026-08-16 by the operator — cleared to stories
 **Format:** Amazon PR/FAQ (adapted for internal tooling)
 **Product:** Standalone. Not part of AecoLedger, not part of AecoLedger Insights. No shared code,
 no shared store, no shared contract. It lives in its own repository, `AecoPostMortem` (§3.1).
@@ -244,6 +244,19 @@ discovered under load: **the RAW append path bypasses change tracking**, using a
 insert, because a measured 56,138 rows arrive in a single full ingest and per-entity tracking is the
 wrong shape for that. Everything else — NORMALIZED, FINDINGS, and every query behind the three
 surfaces — goes through the `DbContext`.
+
+**SQLite rather than PostgreSQL, and this was measured rather than argued** —
+`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`, run over the
+frozen corpus and again at §3.7's design target of a measured 1,010,484 rows. SQLite is measured
+faster on every shape the surfaces actually issue: a measured 43.4× on a single raw-event fetch and
+a measured 12.5× on the digest's ranked read — both because an in-process query pays no round
+trip — and a measured 2.1× on pulling a whole session's payload, which never crosses a socket. Postgres is measured faster on the
+three analytical shapes, by 1.6× to 3.1× — **and those are findings, not queries**: FR-15, FR-16 and
+FR-31 are computed at analysis time and persisted, so they run once per ingest. Two consequences,
+both measured: **keeping FINDINGS materialised is load-bearing**, since an aggregation that leaks
+into the request path costs that 1.6×–3.1× and a measured 13.8× if its covering index is also
+missed; and **FR-41's masthead must read stored counters**, because counting a million rows measured
+a measured 126 ms on SQLite and 118 ms on Postgres — slow on both, so not an engine problem.
 
 The statelessness rule that governed the ccusage-port projects and Insights belonged to the
 AecoLedger repository and does not follow the product here; this product owns its store outright,

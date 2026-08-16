@@ -8,7 +8,7 @@
 
 **Persona.** One persona recurs throughout: **the operator** — the engineer who steers GitHub Copilot CLI with written rules in `AGENTS.md` and `CLAUDE.md`, edits those rules continuously to tune the process, and today has no way to find out whether any of it worked (PRD Part 1). They are the sole user. Where a story's direct beneficiary is a *downstream story builder* rather than the operator, that is stated honestly rather than dressed up as end-user value.
 
-**Containment.** Every project named here is created under `SessionPostMortem/` per CLAUDE.md Repo Rule 6 and PRD §3.1. No story adds anything to `src/`, `test/`, `tools/` or `FrontEnd/`, and no story references `AecoLedger.Core` or `AecoLedger.Insights.*`. A story that appears to need an AecoLedger type copies it.
+**Containment.** Every project named here is created at the root of this repository, `AecoPostMortem`, per PRD §3.1, and no story references `AecoLedger.Core` or `AecoLedger.Insights.*`. A story that appears to need an AecoLedger type copies it. **This replaces the earlier `SessionPostMortem/`-subtree rule**, which existed so the directory could one day be lifted into its own repository by `git subtree split`; that lift has happened, so the rule's purpose is served and its directory level is gone. What it guaranteed — no dependency on AecoLedger in either direction — is unchanged, and the assembly prefix is now `AecoPostMortem.*`.
 
 **How this document treats dependencies.** The PRD's four phases (§3.5) are a *delivery* sequence with exit criteria, not a build order. Stories depend on **contracts** — a record shape, a response contract, an interface — not on other stories being finished, wherever that is genuinely true. Each `Depends on:` line is **labelled** — `contract X · implementation Y` — so the claim is checkable rather than aspirational. A contract dependency means the story can start the day that shape is committed, even if the producing story's tests are still red. An implementation dependency means it cannot, and says so. `Deps:` beneath it is the machine-readable union of both, and `Blocks:` is generated from it.
 
@@ -34,9 +34,9 @@ its number was kept so nothing that references it goes stale. Story ids are not 
 epic either: S-41 was cut along with FR-47, and the contract and split stories were added to the
 epics they serve rather than renumbered into them.
 
-**Projects per PRD §3.1.** E1 → `SessionPostMortem.Ingestion`, plus the solution, CLI, host and web shell (S-47, S-48). E4, E5, E6 (resolution and shapes) → `SessionPostMortem.Rules`. E3, E6 (findings), E7, E8 → `SessionPostMortem.Findings`. Surface stories → `SessionPostMortem.Api` and `SessionPostMortem/web/`.
+**Projects per PRD §3.1.** E1 → `AecoPostMortem.Data` (the DbContext, the entity model and the EF Core migrations) and `AecoPostMortem.Ingestion`, plus the solution, CLI, host and web shell (S-47, S-48). E4, E5, E6 (resolution and shapes) → `AecoPostMortem.Rules`. E3, E6 (findings), E7, E8 → `AecoPostMortem.Findings`. Surface stories → `AecoPostMortem.Api` and `web/`.
 
-**The invariant that outranks the others.** Nothing in `SessionPostMortem.Rules` may name a tool, an MCP server or a repository (FR-34). Several stories below carry a guardrail criterion enforcing it, because it is the requirement the operator stated as non-negotiable in the discovery interview.
+**The invariant that outranks the others.** Nothing in `AecoPostMortem.Rules` may name a tool, an MCP server or a repository (FR-34). Several stories below carry a guardrail criterion enforcing it, because it is the requirement the operator stated as non-negotiable in the discovery interview.
 
 ---
 
@@ -65,7 +65,14 @@ Scenario: The store is created under the operator's control
   Given no store exists
   When ingestion first writes
   Then the store is created at its documented per-user path
+  And its schema is created by applying the migrations, with no command from the operator
   And the file carries owner-only permissions
+
+Scenario: A store from an older build is brought forward, not rejected
+  Given a store written by a build with an earlier RAW schema
+  When the product next opens it
+  Then the outstanding migrations are applied automatically
+  And the RAW rows already in it are preserved unchanged
 
 Scenario: Purge is total
   Given a populated store
@@ -85,7 +92,7 @@ Scenario: The source is never written to
   And the ingestion assembly opens every source file read-only
 ```
 
-**Edge cases:** byte-identical replay is Phase A's exit criterion (PRD §3.5), so the round-trip test must cover non-ASCII, embedded newlines and the largest measured system prompt; a store path colliding with an existing non-product file fails loudly rather than overwriting; store size must be queryable, since S-05's coverage report consumes it.
+**Edge cases:** byte-identical replay is Phase A's exit criterion (PRD §3.5), so the round-trip test must cover non-ASCII, embedded newlines and the largest measured system prompt; a store path colliding with an existing non-product file fails loudly rather than overwriting; store size must be queryable, since S-05's coverage report consumes it. **RAW is the only layer that carries a migration** (PRD §3.8) — a migration authored against NORMALIZED or FINDINGS is a defect, because those are required to be reproducible from RAW and a migration would hide a rebuild bug behind a preserved row. **The RAW insert path bypasses EF Core change tracking** (PRD §3.1): a measured 56,138 rows arrive in one full ingest, so this story's append is batched raw SQL against the same schema, not per-entity tracking.
 
 ---
 
@@ -385,8 +392,8 @@ Scenario: An incremental re-ingest meets its time target
 ```gherkin
 Scenario: The solution builds and is contained
   Given a clean checkout
-  When the SessionPostMortem solution is built
-  Then it builds from its own solution file, not from any root solution
+  When the AecoPostMortem solution is built
+  Then it builds from the solution file at the repository root
   And no project in it references any AecoLedger assembly
 
 Scenario: The command surface exists
@@ -400,14 +407,20 @@ Scenario: The test projects exist and run
   When the test suite is discovered
   Then a test project exists for each source project and all of them execute
 
+Scenario: The frontend lives in web and builds from there
+  Given a clean checkout
+  When the React project is built
+  Then it builds from web, and no frontend command is run from the repository root
+
 Scenario: Containment is enforced, not conventional
   Given the repository
   When the containment test runs
-  Then it fails if any project under SessionPostMortem references a project outside it
-  And it fails if any project outside SessionPostMortem references one inside it
+  Then it fails if any project references an AecoLedger assembly
+  And it fails if any project reference resolves to a path outside this repository
+  And it fails if any project in the solution sits outside src, test or web
 ```
 
-**Edge cases:** Repo Rule 6 requires the subtree to stay liftable by `git subtree split`, so the containment test is the mechanical form of that requirement and belongs here rather than in a review checklist; the `serve` command is specified here but has nothing to serve until S-48.
+**Edge cases:** the containment test is the mechanical form of PRD §3.1's requirement and belongs here rather than in a review checklist — but **what it tests changed with the repository**. It once asserted that no project crossed the `SessionPostMortem/` directory boundary in either direction, because the subtree had to stay liftable by `git subtree split`. The lift has happened, so the test now asserts the thing that boundary was protecting: no AecoLedger assembly reference, and no project reference escaping the repository. A path-shaped assertion would now pass trivially and prove nothing. The `serve` command is specified here but has nothing to serve until S-48.
 
 ---
 
@@ -2037,7 +2050,7 @@ story because they must constrain code that does not exist yet:
 
 - [ ] No outbound transport anywhere in the product — no HTTP client, socket or remote call
 - [ ] No check reads the wall clock, samples randomly, or calls a model; all temporal ordering derives from event timestamps
-- [ ] No project under `SessionPostMortem/` references anything outside it, and nothing outside references in
+- [ ] No project references an AecoLedger assembly, and no project reference resolves outside this repository
 - [ ] Every finding the change can produce carries a provenance level; every adherence figure carries its resolution and rule version
 - [ ] The product never writes to `~/.copilot/`
 - [ ] Findings remain re-derivable from RAW alone (checkable by running S-46's harness, which is why S-46 is a story and these are not)

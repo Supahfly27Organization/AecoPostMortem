@@ -27,7 +27,10 @@
 
 Session Post-Mortem reads GitHub Copilot CLI’s own event logs and reports where a session diverged from the process it was given: which written rules were followed, which were ignored, where effort was wasted, and which capability was missing.
 
-Tech: Dotnet, Typescript, React , Vite
+Tech: .NET 10, C#, EF Core over SQLite, xUnit; TypeScript, React, Vite in `web/`.
+
+Layout (PRD §3.1): `src/AecoPostMortem.{Data,Ingestion,Rules,Findings,Api}/`, `test/` one project
+per source project, `web/` the React app, `fixtures/` the frozen corpus, `scripts/` the checkers.
 
 ## Task → Read These First
 
@@ -37,11 +40,13 @@ Tech: Dotnet, Typescript, React , Vite
 
 | Task | Read These |
 |------|-----------|
-| Add entity / model | Relevant module's `CLAUDE.md` → add entity → migration/schema update |
-| Add API endpoint | Relevant module's `CLAUDE.md` → controller/handler + service interface |
-| Add business logic | Relevant module's `CLAUDE.md` → service interface + implementation |
-| Add data access | Relevant module's `CLAUDE.md` → data-access interface + implementation |
-| Frontend page | Frontend app's `CLAUDE.md` → shared types → page file |
+| Add entity / model | `AecoPostMortem.Data` router → entity → DbContext → migration (RAW only; Repo Rule 4) |
+| Add API endpoint | `AecoPostMortem.Api` router → endpoint + service interface |
+| Add business logic | Relevant module's router → service interface + implementation |
+| Add data access | `AecoPostMortem.Data` router → data-access interface + implementation |
+| Add a rule check | `AecoPostMortem.Rules` router → check shape + operand resolution (name no tool — Repo Rule 6) |
+| Frontend page | the `web` router → shared types → page file |
+| Product intent, requirements, stories | `docs/product-superpowers/prds/2026-08-16-copilot-session-postmortem.md`, then the stories doc |
 | Add new project / module | Create/update its `CLAUDE.md` (architecture + playbook, keep in sync — see Working Rules) |
 | Security / quality review | `docs/claude/SCANNING_TOOLS.md` |
 | _(add project-specific rows here as modules are built out)_ | |
@@ -61,17 +66,26 @@ The `github` MCP server (`mcp__github__*`) is always configured — general GitH
 
 ## Repo Rules
 
-1. Never read `AecoPostMortem.Data/Migrations/` (or this project's equivalent migrations folder) unless the task is explicitly about migrations.
+1. Never read `src/AecoPostMortem.Data/Migrations/` unless the task is explicitly about migrations.
 2. Preserve existing project names and namespaces when refactoring.
-3. Frontend commands run from `FrontEnd/AecoPostMortem.React/` (or this project's equivalent frontend folder), not the repo root.
-
-<!-- Adjust or replace these with this project's actual do/don't rules as the codebase takes shape. -->
+3. Frontend commands run from `web/`, not the repo root.
+4. Only RAW carries a migration. NORMALIZED and FINDINGS are re-derived from RAW, never
+   migrated — a migration against them is a defect (PRD §3.8).
+5. RAW appends bypass EF Core change tracking: batched raw SQL, a measured 56,138 rows per
+   full ingest (PRD §3.1).
+6. Nothing in `src/AecoPostMortem.Rules/` may name a tool, MCP server or repository — the
+   non-negotiable invariant, structural so one project's source proves it (FR-34).
+7. No project references an AecoLedger assembly; no project reference resolves outside this
+   repo (PRD §3.1).
 
 ## Local DB Defaults
 
+One local SQLite file, owner-only, no server or account (FR-11). Migrations apply on first use, so
+there is no database command to run.
+
 | DB | Connection String |
 |---|---|
-| | |
+| Store (SQLite) | `Data Source=<per-user store path>` — set by the product; `purge` deletes it |
 
 <!-- Add one row per database this project connects to locally, and note any env var
      used to override each connection string (e.g. `<NAME>_DB_CONNECTION`). -->

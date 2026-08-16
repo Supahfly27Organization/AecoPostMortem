@@ -4,7 +4,7 @@
 **Status:** Draft — awaiting operator approval
 **Format:** Amazon PR/FAQ (adapted for internal tooling)
 **Product:** Standalone. Not part of AecoLedger, not part of AecoLedger Insights. No shared code,
-no shared store, no shared contract. Repo Rule 6 confines every line of it to `SessionPostMortem/`.
+no shared store, no shared contract. It lives in its own repository, `AecoPostMortem` (§3.1).
 **Scope:** GitHub Copilot CLI only. Offline only. Behaviour only — never whether the work was correct.
 
 **Evidence base** — every factual claim in this document traces to one of:
@@ -99,7 +99,7 @@ mistaken for compliance.
 **How is this different from AecoLedger Insights?**
 Different question, different product, no shared code. Insights asks *where did the tokens go*. This
 asks *where did my process fail*. They share no entities, no store and no UI — a deliberate decision
-recorded in discovery §Problem Statement and enforced by Repo Rule 6.
+recorded in discovery §Problem Statement and enforced by the repository boundary (§3.1).
 
 **Does it need my repositories?**
 No, and it deliberately never reads them. It reads what the agent was actually given, which is
@@ -186,42 +186,68 @@ tracked guardrail (§5.4), not a footnote.
 
 ### 3.1 Where the code lives
 
-Everything, backend and frontend, is created under `SessionPostMortem/`. Nothing is added to `src/`,
-`test/`, `tools/` or `FrontEnd/`, and nothing references `AecoLedger.Core` or `AecoLedger.Insights.*`.
-The boundary exists so `git subtree split` can lift the directory into its own repository without
-touching the rest of the tree (`SessionPostMortem/CLAUDE.md`).
+Everything, backend and frontend, is created at the root of this repository, `AecoPostMortem`, and
+nothing references `AecoLedger.Core` or `AecoLedger.Insights.*`.
+
+**This supersedes the containment rule as originally written**, and the change is a completion of it
+rather than a relaxation. Earlier drafts confined the product to a `SessionPostMortem/` subtree
+inside the AecoLedger repository so that `git subtree split` could one day lift it out. That lift has
+happened: the product now owns its repository outright, so the subtree rule has nothing left to
+protect and the directory level it required is gone. What the rule existed to guarantee is unchanged
+and still binding — **no dependency on AecoLedger, in either direction** — and it is now enforced by
+the repository boundary itself rather than by a path convention. The assembly prefix moves with it,
+from `SessionPostMortem.*` to `AecoPostMortem.*`, so that one name identifies the repository, the
+solution and every project in it.
 
 ```
-SessionPostMortem/
-  SessionPostMortem.sln                    ← its own solution; not added to any root solution
+AecoPostMortem/                            ← the repository root
+  AecoPostMortem.sln
   src/
-    SessionPostMortem.Ingestion/           ← path discovery, event-line reader, RAW store,
+    AecoPostMortem.Data/                   ← the DbContext, the entity model and the EF Core
+                                             migrations; the only project that owns the schema
+    AecoPostMortem.Ingestion/              ← path discovery, event-line reader, RAW store,
                                              session/turn/agent reconstruction, self-exclusion
-    SessionPostMortem.Rules/               ← <custom_instruction> extraction, rule-set versioning,
+    AecoPostMortem.Rules/                  ← <custom_instruction> extraction, rule-set versioning,
                                              tool-vocabulary and role derivation, operand
                                              resolution, the check-shape catalogue
-    SessionPostMortem.Findings/            ← the four finding classes, provenance, recurrence,
+    AecoPostMortem.Findings/               ← the four finding classes, provenance, recurrence,
                                              the Monitor comparison, suggestions
-    SessionPostMortem.Api/                 ← endpoints for the three surfaces
+    AecoPostMortem.Api/                    ← endpoints for the three surfaces
   test/
-    SessionPostMortem.Ingestion.Tests/
-    SessionPostMortem.Rules.Tests/
-    SessionPostMortem.Findings.Tests/
-    SessionPostMortem.Api.Tests/
-  web/                                     ← React + TypeScript + Vite; the three surfaces
+    AecoPostMortem.Data.Tests/
+    AecoPostMortem.Ingestion.Tests/
+    AecoPostMortem.Rules.Tests/
+    AecoPostMortem.Findings.Tests/
+    AecoPostMortem.Api.Tests/
+  web/                                     ← the React project: React + TypeScript + Vite,
+                                             the three surfaces; all frontend commands run here
+  docs/                                    ← this document and its evidence base
+  fixtures/                                ← the frozen corpus manifest (FR-55)
+  scripts/                                 ← the document and corpus checkers
 ```
 
 **Why `Rules` is its own project.** It is the "no hard-coding" boundary made structural. Nothing in
-`SessionPostMortem.Rules` may name a tool, an MCP server or a repository. That is a compile-unit-level
+`AecoPostMortem.Rules` may name a tool, an MCP server or a repository. That is a compile-unit-level
 invariant a reviewer can check by reading one project's source, rather than a convention that erodes.
+**This invariant is unaffected by the move**: it was never about where the code sits, and it is the
+one the operator called non-negotiable in the discovery interview.
 
 **Tech.** .NET 10, C#, xUnit; React + TypeScript + Vite. Same stack as the rest of the machine's work
 so the operator has one toolchain, but zero shared projects.
 
-**Store.** One local SQLite file, no EF Core, no server — bulk append plus graph queries, not an
-object graph. Note that `CLAUDE.md` Repo Rule 1 does **not** govern this product: Rule 1 scopes
-statelessness to the ccusage-port projects and Insights. Session Post-Mortem is outside both, governed
-by Rule 6, and owns its store outright.
+**Store.** One local SQLite file, no server, accessed through **EF Core**. Earlier drafts specified
+no ORM, on the grounds that the workload is bulk append plus graph queries rather than an object
+graph. That still describes the workload accurately; the decision it produced has been reversed
+deliberately, because EF Core puts the schema, the migration path and the model in one place, and
+that is worth more here than the overhead it costs. One carve-out, stated now so it is not
+discovered under load: **the RAW append path bypasses change tracking**, using a batched raw-SQL
+insert, because a measured 56,138 rows arrive in a single full ingest and per-entity tracking is the
+wrong shape for that. Everything else — NORMALIZED, FINDINGS, and every query behind the three
+surfaces — goes through the `DbContext`.
+
+The statelessness rule that governed the ccusage-port projects and Insights belonged to the
+AecoLedger repository and does not follow the product here; this product owns its store outright,
+and §3.8's rebuildability requirement is what disciplines it instead.
 
 ### 3.2 The data source, and the three layers
 
@@ -375,6 +401,8 @@ Phase E is not scheduled. It enters the plan when its entry condition is met, an
   none of which any finding class needs. Recorded as a decision so it is not rediscovered.
 - **FR-11** Store at a single local SQLite file in a documented per-user location, created with
   owner-only permissions, with a documented purge command. No server, no account, no network call.
+  The schema is created and advanced by **EF Core migrations applied automatically on first use**, so
+  the operator never runs a database command and a store from an older build is usable without one.
 - **FR-12** De-duplicate system-prompt text by content hash. Measured: 337 system messages, of a
   measured median 54,335 characters each, mostly near-duplicates; storing them naively stores the same
   prompt hundreds of times.
@@ -391,8 +419,8 @@ Phase E is not scheduled. It enters the plan when its entry condition is met, an
   and FR-7 removes sessions from the census by design, so a criterion pinned to live counts is either
   unachievable or vacuous and nobody can tell which. The frozen census is the **post-exclusion** one.
   **Where it lives, decided:** the session bytes are **not** checked in. They hold the operator's
-  source code and possibly secrets (§3.8), and 176.7 MB of them would break §6's `git subtree split`
-  liftability. What is checked in is a manifest — per session, the file's content hash, its size, and
+  source code and possibly secrets (§3.8), and committing 176.7 MB of them would bloat a repository
+  whose entire source tree is a fraction of that. What is checked in is a manifest — per session, the file's content hash, its size, and
   the post-exclusion event census — plus a small hand-picked set of redacted fixtures for parser
   tests. The full corpus stays on the machine, referenced by hash, so a mismatch is detectable without
   the bytes being in the repository.
@@ -497,7 +525,7 @@ Phase E is not scheduled. It enters the plan when its entry condition is met, an
   per operand and the resulting call counts — because a measured fivefold spread on one rule came from
   that choice alone. A figure rendered without its resolution is a defect, not a cosmetic issue.
 - **FR-34** **The check-shape catalogue is parameterised and names no tool, MCP server or
-  repository.** Those three, exactly, are what may not appear in `SessionPostMortem.Rules`. Argument
+  repository.** Those three, exactly, are what may not appear in `AecoPostMortem.Rules`. Argument
   *field* names — `path`, `pattern`, `old_str` — are how FR-30 derives roles from shapes and are
   permitted; the invariant is about the vocabulary of a particular machine's tools, not about the
   provider's event schema. The shapes measured to fire are
@@ -682,7 +710,13 @@ Part 8 rather than left to be discovered.
   produce identical output. **The store carries a schema version**, and a version change triggers
   re-derivation rather than migration — the store outlives the source's rotating window, so it will
   outlive several derived schemas, and rebuildability is the answer to that rather than a migration
-  path per change. RAW itself is never rewritten.
+  path per change. RAW itself is never rewritten. **EF Core does not soften this — it splits it, and
+  the split is the rule.** RAW is the only layer that gets a migration: it holds provider events that
+  no longer exist at the source once the window rotates, so its schema moves forward under EF Core
+  migrations and its rows are never rewritten. The derived layers get none. A schema change there
+  drops and re-derives them, which is cheap precisely because RAW survived. **A migration authored
+  against NORMALIZED or FINDINGS is a defect, not a shortcut** — it would preserve a derived row the
+  product is required to be able to reproduce from scratch, and hide a rebuild bug behind it.
 - **Provenance is structural.** Every finding record carries its level; the API cannot serve a finding
   without one; the UI renders the three levels distinguishably.
 - **Determinism.** The same store produces the same findings, in the same order. No sampling, no
@@ -833,8 +867,8 @@ spans a measured 41.8%–71.7%. It must not appear in the product, in a report, 
 
 - **Offline.** No network call, no auth, no remote service. From the interview, not a preference.
 - **Nothing hard-coded.** No tool, MCP server or repository name in the checking layer.
-- **Containment.** Everything under `SessionPostMortem/`; no reference to any AecoLedger project; the
-  subtree must stay liftable by `git subtree split`.
+- **Containment.** Its own repository, `AecoPostMortem`; no reference to any AecoLedger project, in
+  either direction; no shared type, store or contract (§3.1).
 - **Behaviour only.** No git, no GitHub, no notion of whether the work was correct.
 - **No currency.** Copilot prices in premium requests and nano-AIU; no local file states a conversion
   rate, so no dollar figure appears anywhere.
@@ -845,7 +879,8 @@ spans a measured 41.8%–71.7%. It must not appear in the product, in a report, 
 
 - `~/.copilot/session-state/` existing and readable. No other external dependency.
 - **No dependency on AecoLedger, Insights, or any shared type.** Duplicating a type is the correct
-  call here, for the reason `SessionPostMortem/CLAUDE.md` gives.
+  call here: a shared type would reintroduce the coupling the separate repository exists to prevent,
+  and the two products answer different questions over different entities (§3.1, Part 2).
 - The mockups as the layout reference for FR-21 and FR-41 — layout only, per the evidence base.
 - **The operator's own time**, on the critical path twice: the §5.1 scoring conversation after the
   first digest, and — if Phase E is ever entered — FR-54's adjudication sitting, which gates that
@@ -870,7 +905,7 @@ spans a measured 41.8%–71.7%. It must not appear in the product, in a report, 
 | Rules about the code the agent writes | Gated out of v1 into Phase E, §3.4.3. A measured 0 of 43 statements in the Copilot corpus are content-shaped, so the class has no input here yet |
 | Any tool other than Copilot CLI | Claude Code and Codex are not in v1 and are not planned here |
 | Any market beyond this operator | Unassessed by choice |
-| Sharing code, storage or UI with AecoLedger | Standalone product, Repo Rule 6 |
+| Sharing code, storage or UI with AecoLedger | Standalone product in its own repository (§3.1) |
 | Editing the operator's markdown files | The product reports and suggests; it never writes a rule |
 
 ---

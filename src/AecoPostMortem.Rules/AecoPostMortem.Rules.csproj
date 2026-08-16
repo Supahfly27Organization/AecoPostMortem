@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AecoPostMortem.Rules references no persistence assembly and no other project. PRD §3.1 calls
+    this the non-negotiable invariant: a project with no persistence dependency has a very small
+    surface in which a tool name could hide. Adding a reference here breaks a containment test.
+  -->
+
+</Project>

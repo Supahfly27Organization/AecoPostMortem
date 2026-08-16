@@ -21,7 +21,8 @@
 - **Do not create a `Directory.Build.props` or `Directory.Packages.props` at the repository root.** `bench/bench.csproj` sits at the root and is not in the solution; a root-level props file would reach it and change how it builds. This deviates from spec §2, which placed both at the root — the collision with `bench` was found while planning. Shared package versions live in `test/Directory.Build.props` instead, which is where all seven test projects and none of the source projects need them.
 - **`bench/bench.csproj` is never added to the solution.** It would violate the "no project outside `src`, `test`, `web`" rule.
 - **No project may reference an `AecoLedger` assembly, in either direction** (PRD §3.1).
-- **`AecoPostMortem.Rules` references no persistence assembly** — no `Microsoft.EntityFrameworkCore*`, no `Microsoft.Data.*`, no `System.Data.*`, no `*.Data` project (PRD §3.1, FR-34).
+- **`AecoPostMortem.Rules` references nothing at all** — no package and no project (PRD §3.1's
+  "Rules reaching nothing", FR-34).
 - **Project reference direction:** `Cli → Api, Findings, Ingestion`; `Api → Findings`; `Findings → Rules, Data`; `Ingestion → Data`; `Rules →` nothing; `Data →` nothing.
 - **No frontend command runs from the repository root** (Repo Rule 3). There is no `package.json` at the root.
 - **No EF Core model, `DbContext` or migration in this plan** — that is S-01, and Repo Rule 4 governs it.
@@ -74,9 +75,11 @@
 There is no solution yet, so the test project has to exist before the test can run. Create only these two things in this step.
 
 ```powershell
-dotnet new sln -n AecoPostMortem
+dotnet new sln -n AecoPostMortem --format sln
 New-Item -ItemType Directory -Force test/AecoPostMortem.Containment.Tests | Out-Null
 ```
+
+`--format sln` is required: SDK 10.0.400's `dotnet new sln` defaults to the newer `.slnx` format, and both the PRD and the story's acceptance criteria name `AecoPostMortem.sln`. The containment test looks for that filename when it walks up to find the repository root.
 
 - [ ] **Step 2: Write `test/Directory.Build.props`**
 
@@ -163,6 +166,13 @@ public static class Repository
 {
     public const string SolutionFileName = "AecoPostMortem.sln";
 
+    // Declared before the properties whose initializers use it: C# runs static field and property
+    // initializers in textual order, so a regex declared below SolutionProjectPaths would still be
+    // null when SolutionProjectPaths is built.
+    static readonly Regex SolutionEntry = new(
+        """^Project\("\{[^}]+\}"\)\s*=\s*"[^"]+",\s*"([^"]+)",""",
+        RegexOptions.Multiline);
+
     public static DirectoryInfo Root { get; } = FindRoot();
 
     /// <summary>Every .csproj listed in the solution, repository-relative, with forward slashes.</summary>
@@ -190,10 +200,6 @@ public static class Repository
         return directory ?? throw new InvalidOperationException(
             $"{SolutionFileName} was not found above {AppContext.BaseDirectory}.");
     }
-
-    static readonly Regex SolutionEntry = new(
-        """^Project\("\{[^}]+\}"\)\s*=\s*"[^"]+",\s*"([^"]+)",""",
-        RegexOptions.Multiline);
 
     static IReadOnlyList<string> ReadSolutionProjectPaths()
     {
@@ -576,28 +582,14 @@ Append to `SolutionContainmentTests`:
     {
         var rules = Repository.ProjectFile("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj");
 
-        string[] persistencePrefixes =
-        [
-            "Microsoft.EntityFrameworkCore",
-            "Microsoft.Data.",
-            "System.Data.",
-            "Dapper",
-            "SQLite",
-        ];
-
-        var packages = Repository.References(rules, "PackageReference")
-            .Where(name => persistencePrefixes.Any(
-                prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            .ToArray();
-
-        var projects = Repository.References(rules, "ProjectReference")
-            .Where(include => Path.GetFileNameWithoutExtension(include)
-                .EndsWith(".Data", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        var packages = Repository.References(rules, "PackageReference").ToArray();
+        var projects = Repository.References(rules, "ProjectReference").ToArray();
 
         Assert.True(
             packages.Length == 0 && projects.Length == 0,
-            "AecoPostMortem.Rules must reference no persistence assembly (PRD §3.1, FR-34); found: "
+            "AecoPostMortem.Rules must reference nothing at all — no package and no project "
+            + "(PRD §3.1, FR-34): it takes plain inputs and returns results, and a project with "
+            + "no dependencies has a very small surface in which a tool name could hide. Found: "
             + string.Join(", ", packages.Concat(projects)));
     }
 ```
@@ -632,7 +624,11 @@ Temporarily change the `ProjectReference` in `src/AecoPostMortem.Api/AecoPostMor
 
 Run: `dotnet test test/AecoPostMortem.Containment.Tests/AecoPostMortem.Containment.Tests.csproj --filter FullyQualifiedName~No_project_reference_resolves_outside`
 
-Expected: FAIL naming that reference. The referenced file does not exist, so the build will also fail — that is fine; read the test output. Then **restore the original line** and re-run; expected PASS.
+Expected: FAIL naming that reference.
+
+This works because the containment test project references no source project — it reads them as files. `AecoPostMortem.Api` is therefore never built by this command, so the dangling reference cannot break the build before the test gets to report it. That is the same property that makes the test trustworthy in the first place. Running the same filter against the whole solution would fail at build time instead, and prove nothing.
+
+Then **restore the original line** and re-run; expected PASS.
 
 - [ ] **Step 5: Prove the stray-project guard fires**
 
@@ -651,19 +647,33 @@ dotnet sln remove bench/bench.csproj
 
 Re-run; expected PASS. Confirm with `git diff AecoPostMortem.sln` that the solution file is back to its committed state.
 
-- [ ] **Step 6: Prove the Rules guard fires**
+- [ ] **Step 6: Prove the Rules guard fires — twice**
 
-Temporarily add to `src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj`:
+This assertion is an allowlist of size zero, not a denylist of known-bad packages, so it needs two demonstrations: one for each way a dependency can arrive.
+
+First, temporarily add to `src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj`:
 
 ```xml
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 ```
 
+`Npgsql` rather than an EF Core package on purpose: a denylist of persistence prefixes would have missed it, and `bench/bench.csproj` in this repository already references it, so it is the realistic case rather than the convenient one.
+
 Run: `dotnet test test/AecoPostMortem.Containment.Tests/AecoPostMortem.Containment.Tests.csproj --filter FullyQualifiedName~The_rules_project_references_no_persistence`
 
-Expected: FAIL naming `Microsoft.EntityFrameworkCore.Sqlite`. Then **remove it** and re-run; expected PASS.
+Expected: FAIL naming `Npgsql`. Remove it and re-run; expected PASS.
+
+Then temporarily add a project reference instead:
+
+```xml
+  <ItemGroup>
+    <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
+  </ItemGroup>
+```
+
+Expected: FAIL naming the `Findings` reference. This case would create a reference cycle and break a solution build, which is precisely why the containment project — referencing nothing it inspects — is the only thing that can observe it. Remove it and re-run; expected PASS.
 
 - [ ] **Step 7: Confirm the tree is clean and the suite is green**
 
@@ -856,7 +866,7 @@ public sealed class CommandParserTests
         var invocation = CommandParser.Parse(["ingest", "C:/copilot/session-state"]);
 
         Assert.Equal("ingest", invocation.Command?.Name);
-        Assert.Equal(["C:/copilot/session-state"], invocation.Arguments);
+        Assert.Equal(new[] { "C:/copilot/session-state" }, invocation.Arguments);
     }
 
     [Fact]

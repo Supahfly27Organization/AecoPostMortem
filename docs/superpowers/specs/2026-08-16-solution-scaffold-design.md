@@ -21,9 +21,8 @@ erodes. This story makes it a test.
 
 ```
 AecoPostMortem.sln                       ← the only solution, at the repository root
-Directory.Build.props                    ← net10.0, nullable, warnings-as-errors, LangVersion
-Directory.Packages.props                 ← central package version management
 src/
+  Directory.Build.props                  ← net10.0, nullable, warnings-as-errors, LangVersion
   AecoPostMortem.Data/                   ← class library; references nothing yet (S-01 fills it)
   AecoPostMortem.Ingestion/              ← class library → Data
   AecoPostMortem.Rules/                  ← class library → nothing
@@ -31,6 +30,7 @@ src/
   AecoPostMortem.Api/                    ← class library → Findings
   AecoPostMortem.Cli/                    ← executable → Ingestion, Findings, Api
 test/
+  Directory.Build.props                  ← the same, plus the xUnit v3 package set
   AecoPostMortem.Data.Tests/
   AecoPostMortem.Ingestion.Tests/
   AecoPostMortem.Rules.Tests/
@@ -51,6 +51,15 @@ command that will reach the host, and it reaches it through `Api`.
 **Why `Containment.Tests` owns no src project.** Its subject is the solution, not a module. The
 acceptance criterion is that a test project exists *for each* source project — a requirement over
 source projects, which an additional test project does not violate.
+
+**No MSBuild props file at the repository root, and that is because of `bench`.** An earlier draft of
+this design put `Directory.Build.props` and `Directory.Packages.props` at the root. Both are
+discovered by walking up from a project, so both would reach `bench/bench.csproj` — which carries
+its own package versions and would fail outright under central package management. The shared
+settings therefore sit in `src/` and `test/`, one file each, which also states plainly that `src`,
+`test` and `web` are the only places code lives. The xUnit v3 package versions live in
+`test/Directory.Build.props`, shared by all seven test projects and needed by none of the source
+projects.
 
 **`bench/bench.csproj` stays out of the solution, deliberately.** It is the harness from the
 SQLite-versus-Postgres latency research, it sits at the repository root, and adding it to the
@@ -143,13 +152,15 @@ The web shell's actual content — routing, the three surfaces, the two empty st
 
 ## 6. The five smoke tests
 
-`Data.Tests`, `Ingestion.Tests`, `Rules.Tests`, `Findings.Tests` and `Api.Tests` each get one test
-asserting their subject assembly's name and target framework. Stated plainly: these are thin, and
-they exist because the acceptance criterion requires every test project to execute while the source
-projects are still empty. They do catch a target-framework drift. Each is replaced by real coverage
-by the story that fills its project — S-01 for `Data`, and so on.
+`Data.Tests`, `Ingestion.Tests`, `Rules.Tests`, `Findings.Tests`, `Api.Tests` and `Cli.Tests` each
+get one test asserting their subject assembly's name and target framework. Stated plainly: these are
+thin, and they exist because the acceptance criterion requires every test project to execute while
+the source projects are still empty. They do catch a target-framework drift. Each is replaced by
+real coverage by the story that fills its project — S-01 for `Data`, and so on.
 
-`Cli.Tests` and `Containment.Tests` carry real tests from the start.
+`Cli.Tests` gets one as well, rather than waiting for its real tests, because a test project holding
+zero tests makes `dotnet test` report "no test is available" and exit non-zero — a failure about the
+harness rather than about the code. `Containment.Tests` carries real tests from the start.
 
 ## 7. Implementation order
 

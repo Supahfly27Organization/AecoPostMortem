@@ -74,9 +74,11 @@
 There is no solution yet, so the test project has to exist before the test can run. Create only these two things in this step.
 
 ```powershell
-dotnet new sln -n AecoPostMortem
+dotnet new sln -n AecoPostMortem --format sln
 New-Item -ItemType Directory -Force test/AecoPostMortem.Containment.Tests | Out-Null
 ```
+
+`--format sln` is required: SDK 10.0.400's `dotnet new sln` defaults to the newer `.slnx` format, and both the PRD and the story's acceptance criteria name `AecoPostMortem.sln`. The containment test looks for that filename when it walks up to find the repository root.
 
 - [ ] **Step 2: Write `test/Directory.Build.props`**
 
@@ -163,6 +165,13 @@ public static class Repository
 {
     public const string SolutionFileName = "AecoPostMortem.sln";
 
+    // Declared before the properties whose initializers use it: C# runs static field and property
+    // initializers in textual order, so a regex declared below SolutionProjectPaths would still be
+    // null when SolutionProjectPaths is built.
+    static readonly Regex SolutionEntry = new(
+        """^Project\("\{[^}]+\}"\)\s*=\s*"[^"]+",\s*"([^"]+)",""",
+        RegexOptions.Multiline);
+
     public static DirectoryInfo Root { get; } = FindRoot();
 
     /// <summary>Every .csproj listed in the solution, repository-relative, with forward slashes.</summary>
@@ -190,10 +199,6 @@ public static class Repository
         return directory ?? throw new InvalidOperationException(
             $"{SolutionFileName} was not found above {AppContext.BaseDirectory}.");
     }
-
-    static readonly Regex SolutionEntry = new(
-        """^Project\("\{[^}]+\}"\)\s*=\s*"[^"]+",\s*"([^"]+)",""",
-        RegexOptions.Multiline);
 
     static IReadOnlyList<string> ReadSolutionProjectPaths()
     {

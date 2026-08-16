@@ -232,6 +232,22 @@ invariant a reviewer can check by reading one project's source, rather than a co
 **This invariant is unaffected by the move**: it was never about where the code sits, and it is the
 one the operator called non-negotiable in the discovery interview.
 
+**`Rules` references no persistence assembly**, and that is what turns the invariant from an
+assertion into a test. It takes plain inputs — rule statements as text, the discovered tool
+vocabulary as a list, call counts as numbers — and returns results; `Findings` does the
+orchestration, reading through `Data` and writing findings back. Three things follow. The invariant
+becomes provable by the containment test rather than by reading source, because a project with no
+persistence dependency has a very small surface in which a tool name could hide. The subtlest logic
+in the product — four-layer operand resolution and A-minus-B subtraction, where a wrong mapping
+produces a confident wrong number — becomes unit-testable with no database. And it matches the
+precedent the sibling project already learned: the data map's Part 9 records that its extractors
+take already-parsed shapes rather than raw events.
+
+The dependency direction is therefore `Api → Findings → Rules`, with `Ingestion` and `Findings`
+reaching `Data`, and `Rules` reaching nothing. The projects are **pipeline stages rather than
+horizontal layers** — each owns a phase of the transformation, which is why a change to adherence
+checking touches `Rules` and nothing else.
+
 **Tech.** .NET 10, C#, xUnit; React + TypeScript + Vite. Same stack as the rest of the machine's work
 so the operator has one toolchain, but zero shared projects.
 

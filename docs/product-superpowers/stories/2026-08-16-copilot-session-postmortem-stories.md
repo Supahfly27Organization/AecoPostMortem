@@ -424,6 +424,7 @@ Scenario: Containment is enforced, not conventional
   Then it fails if any project references an AecoLedger assembly
   And it fails if any project reference resolves to a path outside this repository
   And it fails if any project in the solution sits outside src, test or web
+  And it fails if the rules project references any persistence assembly
 ```
 
 **Edge cases:** the containment test is the mechanical form of PRD §3.1's requirement and belongs here rather than in a review checklist — but **what it tests changed with the repository**. It once asserted that no project crossed the `SessionPostMortem/` directory boundary in either direction, because the subtree had to stay liftable by `git subtree split`. The lift has happened, so the test now asserts the thing that boundary was protecting: no AecoLedger assembly reference, and no project reference escaping the repository. A path-shaped assertion would now pass trivially and prove nothing. The `serve` command is specified here but has nothing to serve until S-48.
@@ -1263,13 +1264,19 @@ Scenario: The checking project names nothing
   When it is inspected
   Then no tool name, MCP server name or repository name appears in it
 
+Scenario: The checking project reaches no store
+  Given the rules project
+  When its references are inspected
+  Then it references no persistence assembly
+  And its checks run against inputs passed to them, with no database in the test
+
 Scenario: A rule matching no shape is not silently dropped
   Given a statement that matches no shape
   When matching completes
   Then it is recorded for the inventory as checkable-not-built or not-checkable, with a reason
 ```
 
-**Edge cases:** this is the invariant the operator called non-negotiable, and it is enforced structurally by living in its own project (PRD §3.1) so a reviewer can verify it by reading one project; a measured 8 rules became checkable with nothing hard-coded across five shapes, which is the floor this must at least reproduce.
+**Edge cases:** this is the invariant the operator called non-negotiable, and it is enforced structurally by living in its own project (PRD §3.1) so a reviewer can verify it by reading one project; a measured 8 rules became checkable with nothing hard-coded across five shapes, which is the floor this must at least reproduce. **The no-persistence rule is what makes the invariant testable rather than merely reviewable** — a project that reaches no store has a very small surface in which a tool name could hide, and it lets this story's logic be exercised without a database, which matters because a wrong operand mapping produces a confident wrong number (PRD §3.1).
 
 ---
 

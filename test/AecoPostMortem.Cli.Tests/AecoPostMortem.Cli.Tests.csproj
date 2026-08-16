@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AecoPostMortem.Cli\AecoPostMortem.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -24,4 +24,16 @@ public sealed class SolutionContainmentTests
             missing.Length == 0,
             $"Not present in {Repository.SolutionFileName}: {string.Join(", ", missing)}");
     }
+
+    [Fact]
+    public void Every_source_project_has_a_test_project_in_the_solution()
+    {
+        var missing = SourceProjects
+            .Where(name => !Repository.SolutionProjectPaths.Contains($"test/{name}.Tests/{name}.Tests.csproj"))
+            .ToArray();
+
+        Assert.True(
+            missing.Length == 0,
+            $"Source projects with no test project in {Repository.SolutionFileName}: {string.Join(", ", missing)}");
+    }
 }

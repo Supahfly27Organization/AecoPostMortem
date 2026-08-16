@@ -9,9 +9,12 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 requirement the operator called non-negotiable, and it is structural rather than conventional so
 that one project's source proves it.
 
-**This project references nothing** — no other project, and no persistence assembly. That is what
-turns the invariant from an assertion into a test: a project with no persistence dependency has a
-very small surface in which a tool name could hide.
+**This project references nothing** — no package, no project and no assembly. Stated as an
+allowlist of zero rather than a list of dependencies to reject, because a list of what to reject can
+never be exhaustive: an earlier version named persistence packages by prefix and would have passed
+`Npgsql`, which this repository already uses in `bench/`. That is what turns the invariant from an
+assertion into a test: a project with no dependencies has a very small surface in which a tool name
+could hide.
 `The_rules_project_references_no_persistence_assembly` in `test/AecoPostMortem.Containment.Tests`
 enforces it, so adding a reference here fails the build.
 

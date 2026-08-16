@@ -121,15 +121,20 @@ public sealed class SolutionContainmentTests
     {
         var rules = Repository.ProjectFile("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj");
 
+        // All three item kinds, because "nothing at all" is only as strong as the enumeration
+        // behind it. A bare <Reference Include="Npgsql" HintPath="..."/> is a persistence
+        // dependency that names neither a package nor a project, and the acceptance criterion
+        // says this test fails if Rules references any persistence assembly — by any route.
         var references = Repository.References(rules, "PackageReference")
             .Concat(Repository.References(rules, "ProjectReference"))
+            .Concat(Repository.References(rules, "Reference"))
             .ToArray();
 
         Assert.True(
             references.Length == 0,
-            "AecoPostMortem.Rules must reference nothing at all — no package and no project "
-            + "(PRD §3.1, FR-34): it takes plain inputs and returns results, and a project with "
-            + "no dependencies has a very small surface in which a tool name could hide. Found: "
+            "AecoPostMortem.Rules must reference nothing at all — no package, no project and no "
+            + "assembly (PRD §3.1, FR-34): it takes plain inputs and returns results, and a project "
+            + "with no dependencies has a very small surface in which a tool name could hide. Found: "
             + string.Join(", ", references.Select(reference =>
                 Repository.Describe("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj", reference))));
     }

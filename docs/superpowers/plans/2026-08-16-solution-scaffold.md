@@ -21,7 +21,8 @@
 - **Do not create a `Directory.Build.props` or `Directory.Packages.props` at the repository root.** `bench/bench.csproj` sits at the root and is not in the solution; a root-level props file would reach it and change how it builds. This deviates from spec §2, which placed both at the root — the collision with `bench` was found while planning. Shared package versions live in `test/Directory.Build.props` instead, which is where all seven test projects and none of the source projects need them.
 - **`bench/bench.csproj` is never added to the solution.** It would violate the "no project outside `src`, `test`, `web`" rule.
 - **No project may reference an `AecoLedger` assembly, in either direction** (PRD §3.1).
-- **`AecoPostMortem.Rules` references no persistence assembly** — no `Microsoft.EntityFrameworkCore*`, no `Microsoft.Data.*`, no `System.Data.*`, no `*.Data` project (PRD §3.1, FR-34).
+- **`AecoPostMortem.Rules` references nothing at all** — no package and no project (PRD §3.1's
+  "Rules reaching nothing", FR-34).
 - **Project reference direction:** `Cli → Api, Findings, Ingestion`; `Api → Findings`; `Findings → Rules, Data`; `Ingestion → Data`; `Rules →` nothing; `Data →` nothing.
 - **No frontend command runs from the repository root** (Repo Rule 3). There is no `package.json` at the root.
 - **No EF Core model, `DbContext` or migration in this plan** — that is S-01, and Repo Rule 4 governs it.

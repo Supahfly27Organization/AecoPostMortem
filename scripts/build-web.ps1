@@ -11,8 +11,9 @@ $web = Join-Path $PSScriptRoot '..' 'web'
 
 Push-Location $web
 try {
-    if (Test-Path 'package-lock.json') { npm ci } else { npm install }
-    if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+    $installCommand = if (Test-Path 'package-lock.json') { 'npm ci' } else { 'npm install' }
+    if ($installCommand -eq 'npm ci') { npm ci } else { npm install }
+    if ($LASTEXITCODE -ne 0) { throw "$installCommand failed with exit code $LASTEXITCODE" }
 
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }

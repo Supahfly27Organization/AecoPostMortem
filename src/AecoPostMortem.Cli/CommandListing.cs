@@ -20,7 +20,7 @@ public static class CommandListing
                 : $"{command.Name} {command.Arguments}")
             .ToArray();
 
-        var width = invocations.Max(invocation => invocation.Length);
+        var width = invocations.DefaultIfEmpty(string.Empty).Max(invocation => invocation.Length);
 
         foreach (var (command, invocation) in CommandSurface.Commands.Zip(invocations))
         {

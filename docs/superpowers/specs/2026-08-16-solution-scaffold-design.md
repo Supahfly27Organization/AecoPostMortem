@@ -79,15 +79,16 @@ sealed record CommandSpec(
     string Name,
     string Arguments,
     string OutputChannel,
-    string Summary);
+    string Summary,
+    string ArrivesWith);
 ```
 
-| Name | Arguments | Output channel | Summary |
-|---|---|---|---|
-| `ingest` | `[path]` | stdout — the coverage report (FR-14) | Read the Copilot session state and re-derive |
-| `rebuild` | — | stdout — the re-derivation summary | Re-derive NORMALIZED and FINDINGS from RAW |
-| `purge` | — | stdout — what was deleted | Delete the store (FR-11) |
-| `serve` | `[--port <n>]` | stdout — the listening URL | Start the local API and web shell |
+| Name | Arguments | Output channel | Summary | Arrives with |
+|---|---|---|---|---|
+| `ingest` | `[path]` | stdout — the coverage report (FR-14) | Read the Copilot session state and re-derive | the ingestion stories in E1 |
+| `rebuild` | — | stdout — the re-derivation summary | Re-derive NORMALIZED and FINDINGS from RAW | the ingestion stories in E1 |
+| `purge` | — | stdout — what was deleted | Delete the store (FR-11) | S-01 (local store and its governance) |
+| `serve` | `[--port <n>]` | stdout — the listening URL | Start the local API and web shell | S-48 (API host, web shell and the zero-data state) |
 
 The same array renders the listing and dispatches the invocation, so the two cannot drift.
 
@@ -118,16 +119,32 @@ reference. Solution membership and reference paths are build-graph facts, not ru
 The repository root is located by walking up from `AppContext.BaseDirectory` until the directory
 holding `AecoPostMortem.sln` is found.
 
-Five assertions, one per clause of the acceptance criteria:
+Seven assertions — the four clauses the "Containment is enforced" scenario enumerates, plus the
+three structural facts the other scenarios need (that every source project exists, that each has a
+test project, and that the frontend lives under `web/`):
 
-1. **No AecoLedger.** No `ProjectReference` or `PackageReference` in any project names an
-   `AecoLedger*` assembly.
-2. **No escape.** Every `ProjectReference` path, resolved against its own project directory and
-   normalised, remains under the repository root.
-3. **No stray project.** Every project listed in the solution sits under `src/`, `test/` or `web/`.
-4. **Rules references nothing at all** — no `PackageReference` and no `ProjectReference`. This is
-   what turns PRD §3.1's non-negotiable invariant from an assertion into a test: a project with no
-   dependencies has a very small surface in which a tool name could hide.
+1. **Every source project exists.** Each of the six named projects — `Data`, `Ingestion`, `Rules`,
+   `Findings`, `Api`, `Cli` — is present in the solution at its expected path. This is a fixed list,
+   checking a narrower thing than assertion 2: that these six specific projects exist, nothing more.
+2. **A test project per source project.** Derived, not hardcoded: for every `.csproj` the solution
+   actually lists under `src/`, there is a `test/<name>.Tests/<name>.Tests.csproj` sibling also in
+   the solution. Deriving the source-project set from the solution — rather than reusing assertion
+   1's fixed list — means a seventh source project added later without a test project is caught even
+   though it is not named anywhere in this test file.
+3. **No AecoLedger.** No `ProjectReference` or `PackageReference` in any project — including one
+   contributed by a `Directory.Build.props`/`.targets` between the project and the repository root —
+   names an `AecoLedger*` assembly.
+4. **No escape.** Every `ProjectReference` path, and every `<Reference>` item's `HintPath`, resolved
+   against its own project directory and normalised, remains under the repository root. A raw
+   assembly `Reference` with a `HintPath` is a second way out of the repository that `ProjectReference`
+   alone does not cover.
+5. **No stray project.** Every project **of any type** listed in the solution sits under `src/`,
+   `test/` or `web/` — checked against the solution's full project list, not narrowed to `.csproj`,
+   so a stray `.fsproj` or `.vbproj` cannot hide from a check whose own wording is "any project".
+6. **Rules references nothing at all** — no `PackageReference` and no `ProjectReference`, found in
+   the project file itself or in any `Directory.Build.props`/`.targets` from its directory up to the
+   repository root. This is what turns PRD §3.1's non-negotiable invariant from an assertion into a
+   test: a project with no dependencies has a very small surface in which a tool name could hide.
 
    An earlier draft made this a denylist of persistence package prefixes — `Microsoft.EntityFrameworkCore`,
    `System.Data.`, and so on. That was wrong, and the review caught it: `Npgsql` is not on any such
@@ -136,13 +153,25 @@ Five assertions, one per clause of the acceptance criteria:
    also only rejected project references ending in `.Data`, so `Rules -> Findings` would have passed.
    A denylist of package names can never be exhaustive; PRD §3.1's own wording — "`Rules` reaching
    nothing" — is an allowlist of size zero, and that is what the assertion now enforces.
-5. **A test project per source project.** For every `src/<name>.csproj` there is a
-   `test/<name>.Tests.csproj`.
 
-Assertion 3 is the one that changed with the repository. It once asserted that no project crossed
+   A later review round found the allowlist itself had a blind spot one level up: it read only the
+   `.csproj`, so a `PackageReference` added to `src/Directory.Build.props` — which applies to every
+   source project including `Rules` — passed silently. The reference lookup now walks
+   `Directory.Build.props`/`.targets` from the project's directory to the repository root, for every
+   assertion that reads references, not only this one; a failure message names the file a reference
+   came from when that file is not the project itself, since a props-file reference is not something
+   a reader will find by opening the `.csproj`.
+7. **The frontend lives under `web/`.** `web/package.json` exists, and no `package.json` sits at the
+   repository root.
+
+Elements are matched by local XML name (`element.Name.LocalName`) rather than
+`Descendants(itemName)`, so a project file that declares the legacy MSBuild XML namespace cannot
+make every `Descendants` call return nothing and pass every reference guard vacuously.
+
+Assertion 5 is the one that changed with the repository. It once asserted that no project crossed
 the `SessionPostMortem/` directory boundary, because the subtree had to stay liftable by
 `git subtree split`. The lift has happened, so a path-shaped assertion of that kind would now pass
-trivially and prove nothing; what the boundary protected is assertions 1 and 2.
+trivially and prove nothing; what the boundary protected is assertions 3 and 4.
 
 ## 5. web/
 
@@ -157,7 +186,7 @@ would add the frontend build's duration to every backend test run.
 
 The web shell's actual content — routing, the three surfaces, the two empty states — is S-48.
 
-## 6. The five smoke tests
+## 6. The six smoke tests
 
 `Data.Tests`, `Ingestion.Tests`, `Rules.Tests`, `Findings.Tests`, `Api.Tests` and `Cli.Tests` each
 get one test asserting their subject assembly's name and target framework. Stated plainly: these are
@@ -173,7 +202,7 @@ harness rather than about the code. `Containment.Tests` carries real tests from 
 
 Test-first, in two passes:
 
-1. **Containment.** Write the five structural assertions. They fail because no solution exists — the
+1. **Containment.** Write the seven structural assertions. They fail because no solution exists — the
    honest red for a scaffold story. Create the solution, the props files, the thirteen projects —
    six under `src/`, seven under `test/` — and the project references until they pass.
 2. **Command surface.** Write the parser and listing tests against the table. Implement
@@ -189,5 +218,5 @@ Then the Vite scaffold and `scripts/build-web.ps1`, verified by running it, and 
 - Any endpoint, route or real web shell — S-48.
 - Any behaviour behind `ingest`, `rebuild`, `purge` or `serve`.
 - The FR-34 source scan proving `Rules` names no tool, MCP server or repository. S-47 delivers the
-  reference-level half of that invariant (assertion 4); the source-level half belongs to the story
+  reference-level half of that invariant (assertion 6); the source-level half belongs to the story
   that builds the check-shape catalogue.

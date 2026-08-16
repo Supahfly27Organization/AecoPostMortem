@@ -11,10 +11,9 @@ that one project's source proves it.
 
 **This project references nothing** — no other project, and no persistence assembly. That is what
 turns the invariant from an assertion into a test: a project with no persistence dependency has a
-very small surface in which a tool name could hide. Two tests in
-`test/AecoPostMortem.Containment.Tests` enforce it —
-`Every_project_in_the_solution_lives_under_src_test_or_web` and
-`The_rules_project_references_no_persistence_assembly` — so adding a reference here fails the build.
+very small surface in which a tool name could hide.
+`The_rules_project_references_no_persistence_assembly` in `test/AecoPostMortem.Containment.Tests`
+enforces it, so adding a reference here fails the build.
 
 It takes plain inputs — rule statements as text, the discovered tool vocabulary as a list, call
 counts as numbers — and returns results. `AecoPostMortem.Findings` does the orchestration, reading

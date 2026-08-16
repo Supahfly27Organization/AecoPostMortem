@@ -2,7 +2,14 @@ namespace AecoPostMortem.Containment.Tests;
 
 public sealed class SolutionContainmentTests
 {
-    /// <summary>The five modules of PRD §3.1, plus the CLI the stories document adds.</summary>
+    /// <summary>
+    /// The six modules of PRD §3.1, plus the CLI the stories document adds. This is a fixed list, not
+    /// a derived one, and it checks a narrower thing than
+    /// <see cref="Every_source_project_has_a_test_project_in_the_solution"/>: that these six specific
+    /// projects exist in the solution at all. A seventh source project added later is this test's
+    /// blind spot by design — <see cref="Every_source_project_has_a_test_project_in_the_solution"/>
+    /// derives its own set from the solution instead, precisely so it is not blind to that case.
+    /// </summary>
     internal static readonly string[] SourceProjects =
     [
         "AecoPostMortem.Data",
@@ -12,6 +19,15 @@ public sealed class SolutionContainmentTests
         "AecoPostMortem.Api",
         "AecoPostMortem.Cli",
     ];
+
+    /// <summary>Every source project the solution actually contains under src/, derived from
+    /// <see cref="Repository.SolutionProjectPaths"/> rather than hardcoded — so a project added to
+    /// src/ without a matching test project is caught even though it is not named in
+    /// <see cref="SourceProjects"/>.</summary>
+    static IEnumerable<string> SourceProjectsInSolution =>
+        Repository.SolutionProjectPaths
+            .Where(path => path.StartsWith("src/", StringComparison.Ordinal))
+            .Select(Path.GetFileNameWithoutExtension)!;
 
     [Fact]
     public void Solution_contains_every_source_project()
@@ -28,7 +44,7 @@ public sealed class SolutionContainmentTests
     [Fact]
     public void Every_source_project_has_a_test_project_in_the_solution()
     {
-        var missing = SourceProjects
+        var missing = SourceProjectsInSolution
             .Where(name => !Repository.SolutionProjectPaths.Contains($"test/{name}.Tests/{name}.Tests.csproj"))
             .ToArray();
 
@@ -45,8 +61,8 @@ public sealed class SolutionContainmentTests
             let project = Repository.ProjectFile(path)
             from reference in Repository.References(project, "PackageReference")
                 .Concat(Repository.References(project, "ProjectReference"))
-            where reference.Contains("AecoLedger", StringComparison.OrdinalIgnoreCase)
-            select $"{path} -> {reference}").ToArray();
+            where reference.Value.Contains("AecoLedger", StringComparison.OrdinalIgnoreCase)
+            select Repository.Describe(path, reference)).ToArray();
 
         Assert.True(
             offenders.Length == 0,
@@ -63,13 +79,14 @@ public sealed class SolutionContainmentTests
         var escapes = (
             from path in Repository.SolutionProjectPaths
             let project = Repository.ProjectFile(path)
-            from include in Repository.References(project, "ProjectReference")
+            from reference in Repository.References(project, "ProjectReference")
+                .Concat(Repository.ReferenceHintPaths(project))
             let resolved = Path.GetFullPath(Path.Combine(
                 project.DirectoryName!,
-                include.Replace('\\', Path.DirectorySeparatorChar)
+                reference.Value.Replace('\\', Path.DirectorySeparatorChar)
                        .Replace('/', Path.DirectorySeparatorChar)))
             where !resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase)
-            select $"{path} -> {include}").ToArray();
+            select Repository.Describe(path, reference)).ToArray();
 
         Assert.True(
             escapes.Length == 0,
@@ -86,7 +103,10 @@ public sealed class SolutionContainmentTests
         // failure here by relaxing the rule.
         string[] allowed = ["src/", "test/", "web/"];
 
-        var stray = Repository.SolutionProjectPaths
+        // AllProjectPaths, not SolutionProjectPaths: this check is over "any project in the
+        // solution" (the acceptance criterion's own words), and narrowing to .csproj would make a
+        // stray .fsproj or .vbproj outside src/test/web invisible to it.
+        var stray = Repository.AllProjectPaths
             .Where(path => !allowed.Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)))
             .ToArray();
 
@@ -101,15 +121,17 @@ public sealed class SolutionContainmentTests
     {
         var rules = Repository.ProjectFile("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj");
 
-        var packages = Repository.References(rules, "PackageReference").ToArray();
-        var projects = Repository.References(rules, "ProjectReference").ToArray();
+        var references = Repository.References(rules, "PackageReference")
+            .Concat(Repository.References(rules, "ProjectReference"))
+            .ToArray();
 
         Assert.True(
-            packages.Length == 0 && projects.Length == 0,
+            references.Length == 0,
             "AecoPostMortem.Rules must reference nothing at all — no package and no project "
             + "(PRD §3.1, FR-34): it takes plain inputs and returns results, and a project with "
             + "no dependencies has a very small surface in which a tool name could hide. Found: "
-            + string.Join(", ", packages.Concat(projects)));
+            + string.Join(", ", references.Select(reference =>
+                Repository.Describe("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj", reference))));
     }
 
     [Fact]

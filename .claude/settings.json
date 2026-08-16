@@ -1,0 +1,33 @@
+{
+  "enabledPlugins": {
+    "superpowers@superpowers-dev": true,
+    "product-superpowers@product-superpowers-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "superpowers-dev": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers"
+      }
+    },
+    "product-superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "guhcostan/product-superpowers"
+      }
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "Write-Output '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"GitHub issue workflow: after product-superpowers stories are approved, use the github-issue-sync skill to create GitHub issues (epics + linked stories) from the approved stories doc. Use github-issue-start right before beginning implementation on a tracked issue, and github-issue-commit when closing out that work.\"}}'",
+            "shell": "powershell"
+          }
+        ]
+      }
+    ]
+  }
+}

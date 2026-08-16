@@ -1,0 +1,5 @@
+{
+  "post-session": [
+    "cm reflect --days 1"
+  ]
+}

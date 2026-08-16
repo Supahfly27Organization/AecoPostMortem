@@ -1,0 +1,589 @@
+<title>Session Flight Recorder</title>
+<style>
+  :root{
+    --ground:#EEF0F4; --surface:#FFFFFF; --sunk:#E4E7EC;
+    --ink:#14161C; --ink-2:#5C6473; --ink-3:#6A7280;
+    --rule:#D5D9E0; --rule-2:#C3C8D2;
+    --accent:#A85E00; --accent-soft:#F4E3C9;
+    --flag:#9E3323; --flag-soft:#F5DED9;
+    --ok:#2C665E; --ok-soft:#D9EAE6;
+    --lane:#7B5EA7;
+  --infer:#5B4B8A; --infer-soft:#E7E2F2;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --tape-w:58px; --insp-w:376px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1014; --surface:#15181E; --sunk:#1B1F27;
+      --ink:#E7E9EE; --ink-2:#89909F; --ink-3:#8E96A4;
+      --rule:#242832; --rule-2:#2F3542;
+      --accent:#EFA83F; --accent-soft:#3A2C14;
+      --flag:#E47760; --flag-soft:#3A1F1A;
+      --ok:#5FB8A6; --ok-soft:#15302C;
+      --lane:#A48BD0; --infer:#A48BD0; --infer-soft:#241E38;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1014; --surface:#15181E; --sunk:#1B1F27;
+    --ink:#E7E9EE; --ink-2:#89909F; --ink-3:#6B7280;
+    --rule:#242832; --rule-2:#2F3542;
+    --accent:#EFA83F; --accent-soft:#3A2C14;
+    --flag:#E47760; --flag-soft:#3A1F1A;
+    --ok:#5FB8A6; --ok-soft:#15302C;
+    --lane:#A48BD0; --infer:#A48BD0; --infer-soft:#241E38;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--sans); font-size:15px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:var(--mono)}
+  .num{font-variant-numeric:tabular-nums}
+  .lbl{
+    font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3);
+  }
+  a{color:var(--accent)}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:2px}
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} }
+
+  /* ---------- masthead ---------- */
+  .mast{
+    background:var(--surface); border-bottom:1px solid var(--rule);
+    padding:18px 24px 0;
+  }
+  .mast-top{display:flex; flex-wrap:wrap; gap:16px; align-items:baseline; justify-content:space-between}
+  .title{font-size:19px; font-weight:640; letter-spacing:-.01em; margin:0; text-wrap:balance}
+  .sid{font-family:var(--mono); font-size:12px; color:var(--ink-2)}
+  .strip{
+    display:flex; flex-wrap:wrap; gap:0; margin:14px -24px 0;
+    border-top:1px solid var(--rule);
+  }
+  .cell{
+    flex:1 1 130px; padding:10px 24px 12px;
+    border-right:1px solid var(--rule);
+  }
+  .cell:last-child{border-right:0}
+  .cell .v{font-family:var(--mono); font-size:16px; font-variant-numeric:tabular-nums; margin-top:3px; letter-spacing:-.01em}
+  .cell .v small{font-size:11px; color:var(--ink-3); letter-spacing:.02em}
+
+  /* ---------- findings bar ---------- */
+  .findings{
+    display:flex; gap:8px; overflow-x:auto; padding:12px 24px;
+    background:var(--sunk); border-bottom:1px solid var(--rule);
+  }
+  .chip{
+    flex:0 0 auto; display:flex; gap:9px; align-items:center;
+    background:var(--surface); border:1px solid var(--rule);
+    border-left:3px solid var(--flag);
+    padding:7px 12px 7px 10px; cursor:pointer; font-size:13px;
+    color:var(--ink); text-align:left;
+  }
+  .chip.warn{border-left-color:var(--accent)}
+  .chip:hover{border-color:var(--rule-2)}
+  .chip[aria-pressed="true"]{background:var(--flag-soft); border-color:var(--flag)}
+  .chip.warn[aria-pressed="true"]{background:var(--accent-soft); border-color:var(--accent)}
+  .chip b{font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:600}
+  .chip span{color:var(--ink-2)}
+
+  /* ---------- shell ---------- */
+  .shell{display:grid; grid-template-columns:var(--tape-w) minmax(0,1fr) var(--insp-w); min-height:70vh}
+
+  /* ---------- tape ---------- */
+  .tape{
+    position:sticky; top:0; align-self:start; height:100vh;
+    background:var(--sunk); border-right:1px solid var(--rule);
+    padding:10px 0; display:flex; flex-direction:column; align-items:center; gap:8px;
+  }
+  .tape .lbl{writing-mode:vertical-rl; letter-spacing:.2em}
+  #tapeCanvas{flex:1; width:26px; cursor:default; border:1px solid var(--rule); background:var(--surface)}
+
+  /* ---------- transcript ---------- */
+  .roll{padding:22px 26px 60px; min-width:0}
+  .turn{margin-bottom:26px}
+  .turn-hd{
+    display:flex; gap:12px; align-items:baseline;
+    padding-bottom:7px; border-bottom:1px solid var(--rule-2); margin-bottom:12px;
+  }
+  .turn-hd .n{font-family:var(--mono); font-size:12px; color:var(--accent); font-weight:600}
+  .turn-hd .t{font-family:var(--mono); font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; margin-left:auto}
+
+  .said{
+    border-left:2px solid var(--rule-2); padding:2px 0 2px 14px; margin:0 0 14px;
+    max-width:68ch;
+  }
+  .said .who{font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:4px}
+  .said.user{border-left-color:var(--accent)}
+  .said p{margin:0; color:var(--ink)}
+
+  .steps{display:flex; flex-direction:column}
+  .step{border-bottom:1px solid var(--rule)}
+  .step-row{
+    display:grid; grid-template-columns:52px 18px 1fr auto; gap:10px; align-items:center;
+    width:100%; text-align:left; background:none; border:0; color:inherit;
+    padding:7px 6px; cursor:pointer; font:inherit;
+  }
+  .step-row:hover{background:var(--sunk)}
+  .step.sel .step-row{background:var(--accent-soft)}
+  .step-row .off{font-family:var(--mono); font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .glyph{
+    width:16px; height:16px; display:grid; place-items:center;
+    font-family:var(--mono); font-size:10px; font-weight:700;
+    border:1px solid var(--rule-2); color:var(--ink-2);
+  }
+  .g-tool{border-color:var(--rule-2)}
+  .g-skill{border-color:var(--accent); color:var(--accent)}
+  .g-mcp{border-color:var(--ok); color:var(--ok)}
+  .g-agent{border-color:var(--lane); color:var(--lane)}
+  .g-think{border-style:dashed}
+  .step-name{font-family:var(--mono); font-size:13px; min-width:0}
+  .step-name em{font-style:normal; color:var(--ink-2); font-family:var(--sans); font-size:13px; margin-left:9px}
+  .meta{display:flex; gap:9px; align-items:center; font-family:var(--mono); font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .pill{padding:1px 6px; border:1px solid var(--rule-2); font-size:10px; letter-spacing:.04em}
+  .pill.bad{color:var(--flag); border-color:var(--flag); background:var(--flag-soft)}
+  .pill.good{color:var(--ok); border-color:var(--ok)}
+  .pill.viol{color:var(--flag); border-color:var(--flag); background:var(--flag-soft)}
+
+  .step-body{display:none; padding:2px 6px 14px 62px}
+  .step.open .step-body{display:block}
+  .kv{display:grid; grid-template-columns:88px minmax(0,1fr); gap:4px 12px; margin-bottom:10px}
+  .kv dt{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); padding-top:3px}
+  .kv dd{margin:0; font-family:var(--mono); font-size:12px; overflow-x:auto}
+  pre{
+    margin:0; background:var(--sunk); border:1px solid var(--rule);
+    padding:9px 11px; overflow-x:auto; font-family:var(--mono); font-size:12px; line-height:1.5;
+  }
+  .flagbox{
+    border:1px solid var(--flag); border-left-width:3px; background:var(--flag-soft);
+    padding:10px 12px; margin:10px 0 0; max-width:70ch;
+  }
+  .flagbox h4{margin:0 0 5px; font-size:13px; color:var(--flag)}
+  .flagbox p{margin:0 0 6px; font-size:13px; color:var(--ink)}
+  .flagbox .inferline{margin:0 0 8px}
+  .flagbox .prov{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ok); border:1px solid var(--ok); padding:1px 5px; display:inline-block}
+  .flagbox .prov.der{color:var(--accent); border-color:var(--accent)}
+  .flagbox .prov.inf{color:var(--infer); border-color:var(--infer); border-style:dashed}
+  .flagbox .scope{font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-3); margin-left:8px}
+
+  /* subagent lane */
+  .lane{
+    border-left:2px solid var(--lane); margin:8px 0 8px 26px; padding-left:14px;
+  }
+  .lane-hd{display:flex; flex-wrap:wrap; gap:10px; align-items:baseline; padding:4px 0 8px}
+  .lane-hd .nm{font-family:var(--mono); font-size:13px; color:var(--lane); font-weight:600}
+  .lane-hd .m{font-family:var(--mono); font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+
+  /* ---------- inspector ---------- */
+  .insp{
+    border-left:1px solid var(--rule); background:var(--surface);
+    position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto;
+  }
+  .insp-hd{padding:14px 18px 10px; border-bottom:1px solid var(--rule)}
+  .insp-hd h3{margin:3px 0 0; font-family:var(--mono); font-size:14px; font-weight:640}
+  .tabs{display:flex; border-bottom:1px solid var(--rule)}
+  .tab{
+    flex:1; background:none; border:0; border-bottom:2px solid transparent;
+    padding:9px 4px; font-family:var(--mono); font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--ink-3); cursor:pointer;
+  }
+  .tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+  .panel{padding:14px 18px 40px}
+  .panel[hidden]{display:none}
+  .empty{color:var(--ink-3); font-size:13px; font-family:var(--mono)}
+  .void{
+    border:1px dashed var(--rule-2); padding:14px; text-align:center;
+    color:var(--ink-2); font-size:13px;
+  }
+  .void .lbl{display:block; margin-bottom:6px}
+
+  footer{
+    border-top:1px solid var(--rule); background:var(--surface);
+    padding:16px 24px 26px; color:var(--ink-2); font-size:12.5px;
+  }
+  footer p{margin:0 0 6px; max-width:88ch}
+  footer code{font-family:var(--mono); font-size:11.5px; color:var(--ink)}
+
+  @media (max-width:1180px){
+    .shell{grid-template-columns:var(--tape-w) minmax(0,1fr)}
+    .insp{grid-column:1 / -1; position:static; height:auto; border-left:0; border-top:1px solid var(--rule)}
+  }
+  @media (max-width:680px){
+    .shell{grid-template-columns:1fr}
+    .tape{display:none}
+    .roll{padding:16px 14px 40px}
+    .step-body{padding-left:14px}
+  }
+</style>
+
+<header class="mast">
+  <div class="mast-top">
+    <div>
+      <h1 class="title">Money movements &mdash; confirm flow</h1>
+      <div class="sid">88042877-ee59-45c2-9dad-40ff7cdb8ea5 &nbsp;·&nbsp; Supahfly27Organization/UpFront &nbsp;·&nbsp; confirm-Money-movements &nbsp;·&nbsp; copilot 1.0.73</div>
+    </div>
+    <div class="lbl">22 Jul 2026, 20:11 &rarr; 23 Jul, 11:46</div>
+  </div>
+  <div class="strip">
+    <div class="cell"><div class="lbl">Elapsed</div><div class="v num">15h 35m</div></div>
+    <div class="cell"><div class="lbl">Turns</div><div class="v num">84</div></div>
+    <div class="cell"><div class="lbl">Tool calls</div><div class="v num">764</div></div>
+    <div class="cell"><div class="lbl">Subagents</div><div class="v num">20</div></div>
+    <div class="cell"><div class="lbl">Skills</div><div class="v num">55 <small>/ 8 distinct</small></div></div>
+    <div class="cell"><div class="lbl">Models</div><div class="v num" style="font-size:13px">gpt-5.4 <small>· gpt-5.6-sol</small></div></div>
+    <div class="cell"><div class="lbl">Context at end</div><div class="v num">138,524 <small>tok</small></div></div>
+  </div>
+</header>
+
+<div class="findings" id="findings">
+  <button class="chip" aria-pressed="false" data-filter="rule">
+    <b>8%</b><span>rule adherence &mdash; codebase&#8209;memory</span>
+  </button>
+  <button class="chip" aria-pressed="false" data-filter="repeat">
+    <b>13&times;</b><span>same file re&#8209;read</span>
+  </button>
+  <button class="chip" aria-pressed="false" data-filter="fail">
+    <b>17</b><span>failed tool calls</span>
+  </button>
+  <button class="chip warn" aria-pressed="false" data-filter="abort">
+    <b>1</b><span>aborted turn</span>
+  </button>
+  <button class="chip warn" aria-pressed="false" data-filter="hook">
+    <b>1</b><span>sessionStart hook failed</span>
+  </button>
+</div>
+
+<div class="shell">
+  <nav class="tape" aria-label="Session tape">
+    <span class="lbl">Tape</span>
+    <canvas id="tapeCanvas" width="26" height="800" aria-label="Decorative overview of the session; not interactive in this mockup"></canvas>
+  </nav>
+
+  <main class="roll" id="roll"></main>
+
+  <aside class="insp" aria-label="Step inspector">
+    <div class="insp-hd">
+      <span class="lbl">Inspector</span>
+      <h3 id="inspTitle">Nothing selected</h3>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-panel="detail">Detail</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="think">Thinking</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="raw">Raw</button>
+    </div>
+    <div class="panel" id="p-detail"><p class="empty">Pick a step in the roll.</p></div>
+    <div class="panel" id="p-think" hidden><p class="empty">Pick a step in the roll.</p></div>
+    <div class="panel" id="p-raw" hidden><p class="empty">Pick a step in the roll.</p></div>
+  </aside>
+</div>
+
+<footer>
+  <p><strong>Mockup.</strong> Every figure in the masthead and the finding chips is measured from this
+  real session on 2026-08-16 &mdash; 84 turns, 764 tool calls, 20 subagents, 55 skill invocations,
+  403 raw navigation calls against 37 graph calls, 17 failed calls, 1 abort, 1 hook failure. The
+  individual step rows are representative, not transcribed.</p>
+  <p>Rule findings here are tool-choice checks. Rules that constrain the <em>code</em> the agent writes are checkable too — from the <code>apply_patch</code>, <code>edit</code> and <code>create</code> content the log carries — but only when scoped to the rule's own target, and this session's rule set contains none of that kind.</p>
+    <p>The <em>Thinking</em> lane is empty for this session by measurement, not by omission: it ran on
+  <code>gpt-5.4</code> and <code>gpt-5.6-sol</code>, where 90.3% of assistant messages carry
+  provider-encrypted <code>reasoningOpaque</code> (measured on this model) and only 3.5% carry readable
+  <code>reasoningText</code>. On <code>claude-sonnet-4.5</code> that flips to 88.2% readable.</p>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var STEPS = [
+    {id:1, turn:1, off:"00:00", kind:"hook", name:"sessionStart", note:"PowerShell profile hook",
+     status:"fail", tag:"hook", detail:{Hook:"sessionStart", Result:"ParserError"},
+     raw:'{"type":"hook.end","data":{"hookType":"sessionStart","success":false,\n  "error":"ParserError: Unexpected token \'}\' in expression"}}',
+     flag:{t:"Hook failed before the session began", p:"This same hook failed in 34 of your 35 sessions, and in 32 of the 33 that got as far as a tool call. Nothing in the CLI surfaces it \u2014 the session just starts without whatever the hook was meant to set up.", prov:"Observed \u00b7 hook.end.success = false"}},
+
+    {id:2, turn:1, off:"00:00", kind:"say", name:"user", prose:"the money movement confirm screen doesn't reconcile against KashCash. figure out why and fix it",
+     detail:{Source:"terminal", Interaction:"3e8bb098"}, raw:'{"type":"user.message","data":{"content":"the money movement confirm ...","interactionId":"3e8bb098"}}'},
+
+    {id:3, turn:1, off:"00:04", kind:"skill", name:"skill", arg:"using-superpowers", status:"ok",
+     detail:{Skill:"using-superpowers", Plugin:"superpowers 6.2.0", Path:".copilot/installed-plugins/\u2026/SKILL.md"},
+     raw:'{"type":"skill.invoked","data":{"name":"using-superpowers","pluginName":"superpowers",\n  "pluginVersion":"6.2.0","content":"---\\nname: using-superpowers\\n\u2026"}}'},
+
+    {id:4, turn:1, off:"00:11", kind:"tool", name:"rg", arg:"pattern: KashCash|reconcil", status:"ok", ms:340, tag:"rule",
+     detail:{Tool:"rg", Pattern:"KashCash|reconcil", Paths:"F:\\git\\upfront", Mode:"content"},
+     raw:'{"type":"tool.execution_start","data":{"toolName":"rg","arguments":{\n  "pattern":"KashCash|reconcil","paths":"F:\\\\git\\\\upfront","output_mode":"content"}}}',
+     flag:{t:"Rule says prefer codebase-memory-mcp for navigation", p:"Your CLAUDE.md is inlined into this session's system prompt verbatim: \u201cPrefer querying codebase-memory-mcp over Glob/Grep/Read for navigation.\u201d Resolved through four layers -- exact tool name, the logged mcpServerName field, then a role derived from each tool's argument shape. In this session that is 403 raw calls against 37 graph calls \u2014 8% under this resolution. Corpus-wide the same rule scores 57.4% when only the tools it actually names are counted.", prov:"Derived \u00b7 rule text in system.message, calls in tool.execution_start", scope:"this session", sug:"Before rewriting the rule, read the reliability finding below. Note also that the rule says \u201cRead\u201d, which is not a tool this agent has \u2014 its file reader is `view`. And it says “Grep”, which matches `grep` at 129 calls, while `rg` does that job 1,346 times and is never named."}},
+
+    {id:5, turn:1, off:"00:12", kind:"mcp", name:"codebase-memory-mcp", arg:"search_graph \u00b7 MoneyMovement", status:"fail", ms:8100,
+     detail:{Server:"codebase-memory-mcp", Tool:"search_graph", Query:"MoneyMovement confirm", Error:"index not ready for project"},
+     raw:'{"type":"tool.execution_complete","data":{"toolCallId":"call_9fT\u2026","success":false,\n  "error":{"message":"index not ready for project","code":"MCP_TOOL_ERROR"}}}',
+     flag:{t:"The preferred tool failed, the deprioritised one worked", p:"This call failed after 8.1 s; the rg call one second earlier had already returned in 340 ms, so the agent kept the result it could trust. Across your corpus search_graph fails 11 of 37 calls (29.7%) and search_code 15 of 53 (28.3%), against rg at 16 of 1,346 (1.2%).", prov:"Observed \u00b7 tool.execution_complete.success", scope:"rates measured across your corpus", infer:"That this makes the rule wrong rather than merely disobeyed is judgment, not measurement. It has not been tested.", sug:"Fix or re-index the MCP before tightening the rule."}},
+
+    {id:6, turn:1, off:"00:31", kind:"tool", name:"view", arg:"UpFront.Payments/MoneyMovementService.cs", status:"ok", ms:60, tag:"repeat",
+     detail:{Tool:"view", Path:"F:\\git\\upfront\\UpFront.Payments\\MoneyMovementService.cs", Range:"1\u2013120", Scope:"this session"},
+     raw:'{"type":"tool.execution_start","data":{"toolName":"view","arguments":{\n  "path":"F:\\\\git\\\\upfront\\\\UpFront.Payments\\\\MoneyMovementService.cs","view_range":[1,120]}}}',
+     flag:{t:"Read 13 times in this session", p:"This path was opened 13 separate times across 84 turns \u2014 the most re-read file here. 18 paths in this session were opened 4 or more times, 134 reads in total.", prov:"Derived \u00b7 grouped view.arguments.path", sug:"Most re-reads follow a context compaction. Worth checking whether the file belongs in a rule as always-loaded context."}},
+
+    {id:7, turn:2, off:"01:47", kind:"say", name:"assistant", prose:"The confirm screen posts to the ledger before KashCash acknowledges the settlement, so a failed ack leaves a confirmed movement with no matching clearing row. I'll write the failing test first.",
+     detail:{Model:"gpt-5.4", "Output tok":"1,204", Request:"req_7ac1"}, raw:'{"type":"assistant.message","data":{"messageId":"m_41c\u2026","outputTokens":1204,\n  "reasoningOpaque":"<encrypted>","model":"gpt-5.4"}}'},
+
+    {id:8, turn:2, off:"01:52", kind:"skill", name:"skill", arg:"test-driven-development", status:"ok",
+     detail:{Skill:"test-driven-development", Invocations:"8 this session"},
+     raw:'{"type":"skill.invoked","data":{"name":"test-driven-development","pluginName":"superpowers"}}'},
+
+    {id:9, turn:2, off:"02:10", kind:"agentstart", name:"task", arg:"general-purpose \u00b7 confirm-flow-fix", status:"ok",
+     detail:{"Agent type":"general-purpose", Name:"confirm-flow-fix", Model:"claude-sonnet-4.6", Mode:"background", "Prompt chars":"3,918"},
+     raw:'{"type":"subagent.started","data":{"toolCallId":"call_HHEb\u2026","agentName":"general-purpose",\n  "agentDisplayName":"General Purpose Agent"},"agentId":"call_HHEb\u2026"}'},
+
+    {id:10, lane:1, turn:2, off:"02:11", kind:"tool", name:"view", arg:"MoneyMovementService.cs", status:"ok", ms:55,
+     detail:{Tool:"view", Path:"UpFront.Payments\\MoneyMovementService.cs", Agent:"confirm-flow-fix"},
+     raw:'{"type":"tool.execution_start","data":{"toolName":"view","arguments":{"path":"\u2026"}},\n  "agentId":"call_HHEb\u2026"}'},
+
+    {id:11, lane:1, turn:2, off:"02:14", kind:"tool", name:"apply_patch", arg:"+ ConfirmAwaitsAck test", status:"ok", ms:180,
+     detail:{Tool:"apply_patch", Files:"UpFront.Payments.Tests/ConfirmFlowTests.cs", Shape:"arguments is a string, not an object"},
+     raw:'*** Begin Patch\n*** Update File: UpFront.Payments.Tests\\ConfirmFlowTests.cs\n+    [Fact]\n+    public async Task Confirm_DoesNotPostLedger_UntilAckReceived()\n*** End Patch'},
+
+    {id:12, lane:1, turn:2, off:"04:22", kind:"tool", name:"powershell", arg:"dotnet test --filter ConfirmFlow", status:"ok", ms:126400,
+     detail:{Tool:"powershell", Command:"dotnet test UpFront.Payments.Tests --filter ConfirmFlow", "Write redirect":"false"},
+     raw:'{"type":"tool.execution_start","data":{"toolName":"powershell","arguments":{\n  "command":"dotnet test UpFront.Payments.Tests --filter ConfirmFlow","initial_wait":30},\n  "shellToolInfo":{"hasWriteFileRedirection":false}}}'},
+
+    {id:13, lane:1, turn:2, off:"06:30", kind:"agentend", name:"subagent.completed", arg:"confirm-flow-fix", status:"ok",
+     detail:{"Tool calls":"34", "Total tokens":"598,844", Duration:"3m 58s", Model:"claude-sonnet-4.6"},
+     raw:'{"type":"subagent.completed","data":{"agentName":"general-purpose","model":"claude-sonnet-4.6",\n  "totalToolCalls":34,"totalTokens":598844,"durationMs":237802}}'},
+
+    {id:14, turn:3, off:"06:44", kind:"tool", name:"read_agent", arg:"confirm-flow-fix", status:"ok", ms:40,
+     detail:{Tool:"read_agent", Returned:"48 chars", Note:"parent log truncates the report"},
+     raw:'{"type":"tool.execution_complete","data":{"result":{"content":\n  "Perfect! Task 1 is complete.\\n\\n(Full response provided to agent)"}}}',
+     flag:{t:"The parent only sees a stub", p:"Copilot hands the parent 48 characters and the marker \u201c(Full response provided to agent)\u201d. The subagent's real 4,100-word report is recoverable only from its own message stream \u2014 which is what the lane above renders.", prov:"Observed \u00b7 read_agent result, median 48 chars across 200 calls"}},
+
+    {id:15, turn:3, off:"07:02", kind:"tool", name:"ask_user", arg:"Roll back the ledger post, or gate it?", status:"ok",
+     detail:{Question:"Roll back the ledger post, or gate it behind the ack?", Choices:"2 + freeform", Answer:"Gate it behind the ack"},
+     raw:'{"type":"tool.execution_complete","data":{"result":{"content":\n  "User selected: Gate it behind the ack"}}}'},
+
+    {id:16, turn:4, off:"08:15", kind:"perm", name:"permission.requested", arg:"git push origin confirm-Money-movements", status:"ok",
+     detail:{Intention:"push the fix branch", Result:"approved", Scope:"session"},
+     raw:'{"type":"permission.completed","data":{"requestId":"7206\u2026","result":{"kind":"approved"}}}'},
+
+    {id:17, turn:4, off:"09:40", kind:"abort", name:"abort", arg:"user interrupted", status:"fail", tag:"abort",
+     detail:{Reason:"user_interrupt", "Turn at abort":"71"},
+     raw:'{"type":"abort","data":{"reason":"user_interrupt"}}',
+     flag:{t:"Turn abandoned mid-flight", p:"One aborted turn in this session. Whatever the agent was part-way through is unfinished and unrecorded \u2014 there is no rollback event.", prov:"Observed \u00b7 abort.reason"}}
+  ];
+
+  var LANES = {1:{name:"confirm-flow-fix", meta:"general-purpose \u00b7 claude-sonnet-4.6 \u00b7 34 calls \u00b7 598,844 tok \u00b7 3m 58s"}};
+
+  var GLYPH = {
+    tool:{c:"g-tool", s:"\u25a0"}, mcp:{c:"g-mcp", s:"M"}, skill:{c:"g-skill", s:"S"},
+    agentstart:{c:"g-agent", s:"\u25b6"}, agentend:{c:"g-agent", s:"\u25c0"},
+    say:{c:"g-think", s:"\u201c"}, hook:{c:"g-tool", s:"H"}, perm:{c:"g-tool", s:"?"},
+    abort:{c:"g-tool", s:"\u00d7"}
+  };
+
+  var roll = document.getElementById("roll");
+  var selected = null;
+  var activeFilter = null;
+
+  function el(t, cls, txt){ var n=document.createElement(t); if(cls) n.className=cls; if(txt!=null) n.textContent=txt; return n; }
+
+  function stepNode(s){
+    var wrap = el("div","step"); wrap.dataset.id = s.id; if(s.tag) wrap.dataset.tag = s.tag;
+
+    var row = el("button","step-row");
+    row.setAttribute("aria-expanded","false");
+    row.appendChild(el("span","off",s.off));
+
+    var g = GLYPH[s.kind] || GLYPH.tool;
+    var gl = el("span","glyph "+g.c, g.s); row.appendChild(gl);
+
+    var nm = el("span","step-name");
+    if(s.kind === "say"){
+      nm.appendChild(el("span",null, s.name === "user" ? "you" : "agent"));
+      var pr = el("em", null, s.prose.length > 96 ? s.prose.slice(0,96)+"\u2026" : s.prose);
+      nm.appendChild(pr);
+    } else {
+      nm.appendChild(el("span",null,s.name));
+      if(s.arg) nm.appendChild(el("em",null,s.arg));
+    }
+    row.appendChild(nm);
+
+    var meta = el("div","meta");
+    if(s.flag) meta.appendChild(el("span","pill viol","finding"));
+    if(s.status === "fail") meta.appendChild(el("span","pill bad","failed"));
+    if(s.ms != null) meta.appendChild(el("span",null, s.ms >= 1000 ? (s.ms/1000).toFixed(1)+"s" : s.ms+"ms"));
+    row.appendChild(meta);
+
+    var body = el("div","step-body");
+    if(s.kind === "say"){
+      var q = el("div","said"+(s.name==="user"?" user":""));
+      q.appendChild(el("span","who", s.name === "user" ? "you said" : "agent said"));
+      q.appendChild(el("p",null,s.prose));
+      body.appendChild(q);
+    }
+    if(s.detail){
+      var dl = el("dl","kv");
+      Object.keys(s.detail).forEach(function(k){
+        dl.appendChild(el("dt",null,k));
+        dl.appendChild(el("dd",null,s.detail[k]));
+      });
+      body.appendChild(dl);
+    }
+    if(s.flag){
+      var fb = el("div","flagbox");
+      fb.appendChild(el("h4",null,s.flag.t));
+      fb.appendChild(el("p",null,s.flag.p));
+      if(s.flag.infer){
+        var ib = el("p","inferline");
+        ib.appendChild(el("span","prov inf","inferred"));
+        ib.appendChild(el("span",null," "+s.flag.infer));
+        fb.appendChild(ib);
+      }
+      if(s.flag.sug){ fb.appendChild(el("p",null,"Suggested: "+s.flag.sug)); }
+      var pr = el("div");
+      var lvl = (s.flag.prov||"").toLowerCase();
+      pr.appendChild(el("span","prov"+(lvl.indexOf("derived")===0?" der":""), s.flag.prov));
+      if(s.flag.scope) pr.appendChild(el("span","scope",s.flag.scope));
+      fb.appendChild(pr);
+      body.appendChild(fb);
+    }
+
+    row.addEventListener("click", function(){
+      var open = wrap.classList.toggle("open");
+      row.setAttribute("aria-expanded", open ? "true" : "false");
+      select(s, wrap);
+    });
+
+    wrap.appendChild(row); wrap.appendChild(body);
+    return wrap;
+  }
+
+  function select(s, node){
+    if(selected) selected.classList.remove("sel");
+    node.classList.add("sel"); selected = node;
+    document.getElementById("inspTitle").textContent = s.arg ? s.name+" \u00b7 "+s.arg : s.name;
+
+    var d = document.getElementById("p-detail"); d.innerHTML = "";
+    if(s.detail){
+      var dl = el("dl","kv");
+      Object.keys(s.detail).forEach(function(k){
+        dl.appendChild(el("dt",null,k)); dl.appendChild(el("dd",null,s.detail[k]));
+      });
+      d.appendChild(dl);
+    }
+    if(s.flag){
+      var fb = el("div","flagbox");
+      fb.appendChild(el("h4",null,s.flag.t));
+      fb.appendChild(el("p",null,s.flag.p));
+      if(s.flag.sug) fb.appendChild(el("p",null,"Suggested: "+s.flag.sug));
+      fb.appendChild(el("div","prov",s.flag.prov));
+      d.appendChild(fb);
+    }
+    if(!d.childNodes.length) d.appendChild(el("p","empty","No structured detail on this event."));
+
+    var t = document.getElementById("p-think"); t.innerHTML = "";
+    if(s.kind === "say" && s.name === "assistant"){
+      var v = el("div","void");
+      v.appendChild(el("span","lbl","Thinking unavailable"));
+      v.appendChild(el("p",null,"gpt-5.4 wrote reasoningOpaque here \u2014 encrypted by the provider. Readable reasoningText appears on 3.5% of this model's messages, against 88.2% on claude-sonnet-4.5."));
+      t.appendChild(v);
+    } else {
+      t.appendChild(el("p","empty","Thinking is recorded per assistant message. Select one."));
+    }
+
+    var r = document.getElementById("p-raw"); r.innerHTML = "";
+    r.appendChild(el("pre",null, s.raw || "\u2014"));
+  }
+
+  function render(){
+    roll.innerHTML = "";
+    var turns = {};
+    STEPS.forEach(function(s){ (turns[s.turn] = turns[s.turn] || []).push(s); });
+
+    Object.keys(turns).forEach(function(tn){
+      var list = turns[tn].filter(function(s){ return !activeFilter || s.tag === activeFilter; });
+      if(!list.length) return;
+
+      var tw = el("div","turn");
+      var hd = el("div","turn-hd");
+      hd.appendChild(el("span","n","TURN "+tn));
+      hd.appendChild(el("span","t", list[0].off + " into session"));
+      tw.appendChild(hd);
+
+      var container = el("div","steps"), lane = null, laneId = null;
+      list.forEach(function(s){
+        if(s.lane && s.lane !== laneId){
+          laneId = s.lane;
+          lane = el("div","lane");
+          var lh = el("div","lane-hd");
+          lh.appendChild(el("span","nm","\u21b3 "+LANES[s.lane].name));
+          lh.appendChild(el("span","m",LANES[s.lane].meta));
+          lane.appendChild(lh);
+          container.appendChild(lane);
+        }
+        if(!s.lane){ laneId = null; lane = null; }
+        (lane || container).appendChild(stepNode(s));
+      });
+      tw.appendChild(container);
+      roll.appendChild(tw);
+    });
+
+    if(!roll.childNodes.length){
+      roll.appendChild(el("p","empty","No steps match that finding in this session."));
+    }
+  }
+
+  /* ---- tape ---- */
+  function drawTape(){
+    var c = document.getElementById("tapeCanvas");
+    var rect = c.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    c.width = 26 * dpr; c.height = Math.max(400, rect.height) * dpr;
+    var g = c.getContext("2d");
+    g.scale(dpr, dpr);
+    var css = getComputedStyle(document.documentElement);
+    var rule = css.getPropertyValue("--rule-2").trim();
+    var accent = css.getPropertyValue("--accent").trim();
+    var flag = css.getPropertyValue("--flag").trim();
+    var h = c.height / dpr;
+
+    g.clearRect(0,0,26,h);
+    var n = 240;                       // representative density for 764 calls
+    for(var i=0;i<n;i++){
+      var y = 6 + (h-12) * (i/n);
+      g.strokeStyle = rule; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(5, y); g.lineTo(5 + 6 + (i%7), y); g.stroke();
+    }
+    [0.01,0.05,0.08,0.22,0.35,0.51,0.66,0.79,0.93].forEach(function(p, idx){
+      var y = 6 + (h-12)*p;
+      g.strokeStyle = idx % 3 === 0 ? flag : accent;
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(3, y); g.lineTo(23, y); g.stroke();
+    });
+  }
+
+  /* ---- filters ---- */
+  document.getElementById("findings").addEventListener("click", function(e){
+    var b = e.target.closest(".chip"); if(!b) return;
+    var f = b.dataset.filter;
+    var on = b.getAttribute("aria-pressed") === "true";
+    Array.prototype.forEach.call(this.querySelectorAll(".chip"), function(c){ c.setAttribute("aria-pressed","false"); });
+    if(on){ activeFilter = null; } else { b.setAttribute("aria-pressed","true"); activeFilter = f; }
+    render();
+  });
+
+  /* ---- tabs ---- */
+  document.querySelector(".tabs").addEventListener("click", function(e){
+    var t = e.target.closest(".tab"); if(!t) return;
+    Array.prototype.forEach.call(this.querySelectorAll(".tab"), function(x){ x.setAttribute("aria-selected","false"); });
+    t.setAttribute("aria-selected","true");
+    ["detail","think","raw"].forEach(function(p){
+      document.getElementById("p-"+p).hidden = (p !== t.dataset.panel);
+    });
+  });
+
+  render();
+  drawTape();
+  window.addEventListener("resize", drawTape);
+  if(window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawTape);
+})();
+</script>

@@ -1,0 +1,112 @@
+name: Task
+description: A scoped unit of implementation work from an approved plan
+title: "[Task]: "
+type: Task
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a single Task from an approved implementation plan (`docs/superpowers/plans/*.md`).
+        Full TDD steps/code live in the plan doc — don't duplicate them here, link to them.
+
+  - type: input
+    id: plan-reference
+    attributes:
+      label: Plan reference
+      description: Path + heading anchor into the source plan doc
+      placeholder: "docs/superpowers/plans/2026-08-12-ccusage-port.md#task-2-tokenusage-..."
+    validations:
+      required: true
+
+  - type: input
+    id: source-reference
+    attributes:
+      label: Source reference
+      description: The ccusage file(s) this ports from, if any
+      placeholder: "rust/crates/ccusage-core/src/cost.rs"
+    validations:
+      required: false
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What does this task deliver?
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      value: |
+        Create:
+        -
+
+        Modify:
+        -
+
+        Test:
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: interfaces
+    attributes:
+      label: Interfaces
+      description: Consumes / Produces — exact types and signatures
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Concrete pass/fail conditions
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Other Task/Story issues this depends on. Use "None" if there aren't any.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      options:
+        - XS
+        - S
+        - M
+        - L
+        - XL
+    validations:
+      required: false
+
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      value: |
+        - [ ] Tests pass locally
+        - [ ] Implementation matches the plan's step
+        - [ ] No new placeholders/TODOs introduced
+        - [ ] Committed per the plan's commit step
+    validations:
+      required: false
+
+  - type: input
+    id: parent-epic
+    attributes:
+      label: Parent Epic
+      description: Issue number or link to the epic this task belongs to (if created manually, not via sync tooling)
+      placeholder: "#123"
+    validations:
+      required: false

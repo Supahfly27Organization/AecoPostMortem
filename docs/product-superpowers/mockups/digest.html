@@ -1,0 +1,536 @@
+<title>Process Digest</title>
+<style>
+  :root{
+    --ground:#EEF0F4; --surface:#FFFFFF; --sunk:#E4E7EC;
+    --ink:#14161C; --ink-2:#5C6473; --ink-3:#6A7280;
+    --rule:#D5D9E0; --rule-2:#C3C8D2;
+    --accent:#A85E00; --accent-soft:#F4E3C9;
+    --flag:#9E3323; --flag-soft:#F5DED9;
+    --ok:#2C665E; --ok-soft:#D9EAE6;
+    --infer:#5B4B8A; --infer-soft:#E7E2F2;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1014; --surface:#15181E; --sunk:#1B1F27;
+      --ink:#E7E9EE; --ink-2:#89909F; --ink-3:#8E96A4;
+      --rule:#242832; --rule-2:#2F3542;
+      --accent:#EFA83F; --accent-soft:#3A2C14;
+      --flag:#E47760; --flag-soft:#3A1F1A;
+      --ok:#5FB8A6; --ok-soft:#15302C;
+      --infer:#A48BD0; --infer-soft:#241E38;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1014; --surface:#15181E; --sunk:#1B1F27;
+    --ink:#E7E9EE; --ink-2:#89909F; --ink-3:#6B7280;
+    --rule:#242832; --rule-2:#2F3542;
+    --accent:#EFA83F; --accent-soft:#3A2C14;
+    --flag:#E47760; --flag-soft:#3A1F1A;
+    --ok:#5FB8A6; --ok-soft:#15302C;
+    --infer:#A48BD0; --infer-soft:#241E38;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--ground); color:var(--ink);
+       font-family:var(--sans); font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased}
+  .lbl{font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
+  .num{font-variant-numeric:tabular-nums}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:2px}
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
+
+  .wrap{max-width:1120px; margin:0 auto; padding:0 24px}
+
+  /* masthead */
+  .mast{background:var(--surface); border-bottom:1px solid var(--rule); padding:26px 0 0}
+  .mast h1{margin:0; font-size:24px; font-weight:660; letter-spacing:-.015em; text-wrap:balance}
+  .mast .sub{color:var(--ink-2); font-size:14px; margin-top:5px; max-width:70ch}
+  .scope{display:flex; flex-wrap:wrap; margin:20px -24px 0; border-top:1px solid var(--rule)}
+  .scope div{flex:1 1 120px; padding:10px 24px 12px; border-right:1px solid var(--rule)}
+  .scope div:last-child{border-right:0}
+  .scope .v{font-family:var(--mono); font-size:17px; font-variant-numeric:tabular-nums; margin-top:2px}
+
+  /* coverage */
+  .cov{background:var(--sunk); border-bottom:1px solid var(--rule); padding:14px 0}
+  .cov-in{display:flex; flex-wrap:wrap; gap:18px; align-items:center}
+  .covbar{display:flex; height:9px; flex:1 1 260px; min-width:220px; border:1px solid var(--rule-2); overflow:hidden}
+  .covbar i{display:block; height:100%}
+  .covbar .w{background:var(--ok)} .covbar .b{background:var(--accent)} .covbar .n{background:var(--rule-2)}
+  .covkey{display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-2)}
+  .covkey b{font-family:var(--mono); color:var(--ink)}
+  .sw{display:inline-block; width:9px; height:9px; margin-right:5px; vertical-align:baseline}
+
+  /* section head */
+  h2{font-size:13px; font-family:var(--mono); letter-spacing:.1em; text-transform:uppercase;
+     color:var(--ink-2); margin:34px 0 3px; font-weight:600}
+  .hint{color:var(--ink-3); font-size:13px; margin:0 0 14px; max-width:76ch}
+
+  /* findings */
+  .find{background:var(--surface); border:1px solid var(--rule); margin-bottom:9px}
+  .find-hd{display:grid; grid-template-columns:26px minmax(0,1fr) 176px 108px; gap:14px; align-items:center;
+           width:100%; background:none; border:0; color:inherit; font:inherit; text-align:left;
+           padding:13px 15px; cursor:pointer}
+  .find-hd:hover{background:var(--sunk)}
+  .rank{font-family:var(--mono); font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .ttl{min-width:0}
+  .ttl .t{font-weight:560; letter-spacing:-.005em}
+  .ttl .s{font-family:var(--mono); font-size:11.5px; color:var(--ink-2); margin-top:3px; font-variant-numeric:tabular-nums}
+  .strip{display:flex; gap:1.5px; align-items:flex-end; height:20px}
+  .strip i{flex:1; height:8px; background:var(--rule-2)}
+  .strip i.on{height:18px; background:var(--flag)}
+  .strip.warn i.on{background:var(--accent)}
+  .recur{text-align:right}
+  .recur .big{font-family:var(--mono); font-size:19px; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+  .recur .of{font-family:var(--mono); font-size:10.5px; color:var(--ink-3)}
+  .prov{display:inline-block; font-family:var(--mono); font-size:9.5px; letter-spacing:.1em;
+        text-transform:uppercase; padding:2px 6px; border:1px solid var(--rule-2); color:var(--ink-2)}
+  .prov.obs{color:var(--ok); border-color:var(--ok); background:var(--ok-soft)}
+  .prov.der{color:var(--accent); border-color:var(--accent); background:var(--accent-soft)}
+  .prov.inf{color:var(--infer); border-color:var(--infer); background:var(--infer-soft); border-style:dashed}
+
+  .find-bd{display:none; border-top:1px solid var(--rule); padding:14px 15px 16px 55px}
+  .find.open .find-bd{display:block}
+  .find-bd p{margin:0 0 10px; max-width:76ch}
+  .ev{background:var(--sunk); border:1px solid var(--rule); padding:10px 12px; margin:0 0 10px;
+      font-family:var(--mono); font-size:12px; overflow-x:auto}
+  .ev q{color:var(--ink); quotes:"\201C" "\201D"}
+  .sug{border-left:3px solid var(--accent); background:var(--accent-soft); padding:10px 12px; margin:0 0 10px}
+  .inferbox{border:1px dashed var(--infer); background:var(--infer-soft); padding:10px 12px; margin:0 0 10px}
+  .inferbox .ib-t{font-weight:560; font-size:13.5px; margin-left:8px}
+  .inferbox p{margin:5px 0 0; font-size:13.5px}
+  .sug .lbl{display:block; margin-bottom:4px}
+  .sug p{margin:0; font-size:14px}
+  .btn{font-family:var(--mono); font-size:12px; background:var(--surface); color:var(--ink);
+       border:1px solid var(--rule-2); padding:6px 11px; cursor:pointer}
+  .btn:hover{border-color:var(--accent); color:var(--accent)}
+  .loaded{margin-top:10px}
+  .loaded[hidden]{display:none}
+  .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); margin-bottom:10px}
+  .grid2 div{background:var(--surface); padding:9px 11px}
+  .grid2 .v{font-family:var(--mono); font-size:15px; font-variant-numeric:tabular-nums; margin-top:2px}
+  pre{margin:0; background:var(--sunk); border:1px solid var(--rule); padding:10px 12px;
+      overflow-x:auto; font-family:var(--mono); font-size:12px; line-height:1.55; white-space:pre-wrap}
+
+  /* clean checks */
+  .clean{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:9px}
+  .ck{background:var(--surface); border:1px solid var(--rule); border-left:3px solid var(--ok);
+      padding:11px 13px}
+  .ck-t{font-weight:550; font-size:14px}
+  .ck-s{font-family:var(--mono); font-size:11.5px; color:var(--ink-2); margin:4px 0 7px;
+        font-variant-numeric:tabular-nums; line-height:1.5}
+  .ck code{font-size:11px}
+
+  /* rules */
+  .filters{display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px}
+  .fb{font-family:var(--mono); font-size:11.5px; background:var(--surface); color:var(--ink-2);
+      border:1px solid var(--rule); padding:5px 10px; cursor:pointer}
+  .fb[aria-pressed="true"]{background:var(--ink); color:var(--ground); border-color:var(--ink)}
+  .tablewrap{overflow-x:auto; border:1px solid var(--rule); background:var(--surface)}
+  table{border-collapse:collapse; width:100%; min-width:720px}
+  th{text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+     color:var(--ink-3); font-weight:600; padding:9px 12px; border-bottom:1px solid var(--rule-2); white-space:nowrap}
+  td{padding:9px 12px; border-bottom:1px solid var(--rule); vertical-align:top; font-size:13.5px}
+  tr:last-child td{border-bottom:0}
+  td.r{font-family:var(--mono); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink-2)}
+  .st{font-family:var(--mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+      padding:2px 6px; border:1px solid var(--rule-2); white-space:nowrap; display:inline-block}
+  .st.watched{color:var(--ok); border-color:var(--ok); background:var(--ok-soft)}
+  .st.soon{color:var(--accent); border-color:var(--accent); background:var(--accent-soft)}
+  .st.no{color:var(--ink-3)}
+  .st.nr{color:var(--ink-3); border-style:dashed; opacity:.75}
+  .why{color:var(--ink-3); font-size:12px; margin-top:3px; font-family:var(--mono)}
+  .viol{color:var(--flag); font-weight:600}
+
+  footer{border-top:1px solid var(--rule); background:var(--surface); margin-top:40px; padding:18px 0 34px}
+  footer p{margin:0 0 7px; color:var(--ink-2); font-size:12.5px; max-width:92ch}
+  footer code{font-family:var(--mono); font-size:11.5px; color:var(--ink)}
+
+  @media (max-width:820px){
+    .find-hd{grid-template-columns:22px minmax(0,1fr) 84px; gap:10px}
+    .strip{display:none}
+    .find-bd{padding-left:20px}
+  }
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <h1>What went wrong, and how often</h1>
+    <p class="sub">Every Copilot session on this machine, ranked by how many of them each problem
+      touched. Frequency first &mdash; a problem in one session is an anecdote, the same problem in
+      thirty is a process defect.</p>
+    <div class="scope">
+      <div><div class="lbl">Sessions</div><div class="v num">35</div></div>
+      <div><div class="lbl">Span</div><div class="v num">111 days</div></div>
+      <div><div class="lbl">Repositories</div><div class="v num">3</div></div>
+      <div><div class="lbl">Events</div><div class="v num">56,176</div></div>
+      <div><div class="lbl">Tool calls</div><div class="v num">16,085</div></div>
+      <div><div class="lbl">Subagents</div><div class="v num">470</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="cov">
+  <div class="wrap cov-in">
+    <div class="lbl" style="flex:0 0 auto">Rule coverage</div>
+    <div class="covbar" role="img" aria-label="Of 22 actual rules, 13 are mechanically checkable and 9 are not. A further 21 extracted lines are not rules at all.">
+      <i class="w" style="width:18.2%"></i><i class="b" style="width:40.9%"></i><i class="n" style="width:40.9%"></i>
+    </div>
+    <div class="covkey">
+      <span><i class="sw" style="background:var(--ok)"></i><b>4</b> watched</span>
+      <span><i class="sw" style="background:var(--accent)"></i><b>9</b> checkable, not built</span>
+      <span><i class="sw" style="background:var(--rule-2)"></i><b>9</b> normative but unobservable</span>
+      <span style="color:var(--ink-3)"><b>21</b> extracted lines that are not rules</span>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+  <h2>Ranked by sessions affected, most first</h2>
+  <p class="hint">Click any row for the evidence and a suggested change. Provenance is on every
+    finding: <span class="prov obs">observed</span> read from a field,
+    <span class="prov der">derived</span> computed from fields,
+    <span class="prov inf">inferred</span> judgment.</p>
+  <div id="findings"></div>
+
+  <h2>Checks that found nothing</h2>
+  <p class="hint">A check that fires is a finding. A check that stays silent has to say so, or you
+    cannot tell the difference between &ldquo;clean&rdquo; and &ldquo;never looked&rdquo;.</p>
+  <div class="clean">
+    <div class="ck">
+      <div class="ck-t">Two rules contradicting each other in the same rule set</div>
+      <div class="ck-s">0 found &middot; 35 sessions checked &middot; the ban on <code>search_code</code>
+        and the recommendation to use it never co-existed &mdash; they are 23 May either side of an edit</div>
+      <span class="prov inf">inferred</span>
+    </div>
+    <div class="ck">
+      <div class="ck-t">Subagent spawned without a resolvable parent task</div>
+      <div class="ck-s">0 found &middot; 470 of 470 spawns resolve to their <code>task</code> call</div>
+      <span class="prov obs">observed</span>
+    </div>
+    <div class="ck">
+      <div class="ck-t">Malformed lines in the event log</div>
+      <div class="ck-s">0 found &middot; 56,176 lines parsed</div>
+      <span class="prov obs">observed</span>
+    </div>
+  </div>
+  <p class="hint" style="margin-top:10px">The contradiction check is marked <span class="prov inf">inferred</span>
+    on purpose. A first pass using keyword polarity returned 4 candidates and <em>all 4 were
+    spurious</em> &mdash; three matched a single bullet against itself, because
+    &ldquo;do not <strong>use it</strong>&rdquo; contains both a prohibition and a recommendation.
+    Contradiction detection needs pairwise comparison with self-matches excluded, and even then two
+    rules about one tool may simply be scoped differently. It will never be an observed check.</p>
+
+  <h2>Every rule in your md files</h2>
+  <p class="hint">All 43 rule statements extracted from the <code>&lt;custom_instruction&gt;</code>
+    blocks Copilot injects into each session, across 3 repositories. A rule this tool cannot check
+    says so &mdash; an empty violation count never means compliance unless the status says
+    <span class="st watched">watched</span>.</p>
+  <p class="hint"><strong>This table is the union of every rule ever seen, which is a simplification.</strong>
+    The set changed 6 times in 32 days in the main repository, and 34 of these 43 statements are
+    absent from the most recent session. A shipped version scopes this table &mdash; and every
+    adherence figure above it &mdash; to a single rule-set version, and keeps a retired rule visible
+    with its adherence frozen at the date it was removed.</p>
+  <div class="filters" id="filters">
+    <button class="fb" aria-pressed="true" data-st="all">All 43 extracted lines</button>
+    <button class="fb" aria-pressed="false" data-st="watched">Watched 4</button>
+    <button class="fb" aria-pressed="false" data-st="soon">Checkable, not built 9</button>
+    <button class="fb" aria-pressed="false" data-st="no">Not checkable 9</button>
+    <button class="fb" aria-pressed="false" data-st="nr">Not a rule 21</button>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Rule</th><th>Source</th><th>Sessions</th><th>Status</th><th>Violations</th></tr></thead>
+      <tbody id="rules"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>Mockup.</strong> The corpus scope, every adherence and failure rate, the rule-version
+      table and all 43 rule statements were measured from <code>~/.copilot/</code> on 2026-08-16
+      &mdash; 35 sessions, 56,176 events, 0 malformed lines. The rule text is verbatim, as Copilot
+      injected it.</p>
+    <p><strong>Not measured, and shown here only to demonstrate the layout:</strong> the per-session
+      counts on findings 02, 04, 07 and 11; the subagent report-length figures and the contents of
+      the &ldquo;load cost &amp; output&rdquo; panel. Treat those as placeholders, not evidence.</p>
+    <p>Recurrence strips show exact session positions where measured (hook failures, serial tool
+      calls, aborted turns, <code>web_fetch</code>, missing subagent metrics); positions are
+      representative for the remainder, though every count is measured.</p>
+    <p>No trend column yet &mdash; but the boundary it needs already exists. Rule edits are the
+      natural before/after line, and 5 of the 6 measured rule-set versions carry 3 or more sessions,
+      which is enough on each side of an edit to measure whether it worked. The comparison can run
+      against history rather than waiting for new sessions.</p>
+    <p>Finding 03 states its own resolution spread inline rather than deferring it here, because a
+      single adherence percentage is not a well-defined quantity: it depends on which tools the
+      rule&rsquo;s words are taken to name, and on which rule version is in scope. Finding 09 carries
+      the per-version breakdown.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var N = 35;
+  function idx(list){ var s = {}; list.forEach(function(i){ s[i]=1; }); return s; }
+
+  var FINDINGS = [
+    {t:"The sessionStart hook fails in almost every session", n:34, tone:"flag",
+     sub:"35 failures in 34 of 35 sessions · 32 of the 33 that made a tool call · every hook failure here is this one hook",
+     prov:"obs", on:idx([0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34]),
+     p:"A PowerShell ParserError kills the sessionStart hook. Nothing in the CLI surfaces it — the session simply starts without whatever the hook was meant to establish. It is the single most frequent problem in your corpus and the cheapest to fix. Both denominators are shown because both are true: 34 of all 35 sessions, and 32 of the 33 that got as far as a tool call.",
+     ev:'hook.end · {"hookType":"sessionStart","success":false,\n           "error":"ParserError: Unexpected token \'}\' in expression"}',
+     sug:"Fix the hook script. This is a bug, not a process question — it will drop off this list on its own once it stops failing."},
+
+    {t:"Tool calls issued one at a time, against an explicit CRITICAL rule", n:32, tone:"flag",
+     sub:"3,249 of 7,449 tool-issuing messages made exactly one call — 43.6%",
+     prov:"obs", on:idx([0,1,2,3,4,5,6,7,9,11,12,13,14,15,16,17,18,19,20,21,22,23,24,26,27,28,29,30,31,32,33,34]),
+     p:"Copilot’s own system prompt marks parallel tool calling CRITICAL. Nearly half of all tool-issuing messages ignore it. Each serial call is a full round trip that did not need to be one.",
+     ev:'system.message · <q>CRITICAL: Maximize tool efficiency: USE PARALLEL TOOL CALLING — when you need to perform multiple independent operations, make ALL tool calls in a SINGLE response.</q>',
+     sug:"This rule is Copilot’s, not yours, so you cannot edit it. Worth knowing it is weakly followed before you write rules that depend on batching."},
+
+    {t:"Your navigation rule scores 10.5% or 57.4% — depending on how its own words are read", n:12, tone:"flag",
+     sub:"155 graph calls · one rule, one corpus, a fivefold spread from operand resolution alone",
+     prov:"der", on:idx([2,4,5,8,11,14,16,18,22,26,30,33]),
+     p:"Your CLAUDE.md rule is injected verbatim into every session in these repos. Measuring whether it was followed means deciding which tools its words name — and that decision moves the answer further than the agent’s behaviour does. An adherence number without its resolution attached cannot be checked.",
+     ev:'custom_instruction · CLAUDE.md\n  <q>Prefer querying codebase-memory-mcp over Glob/Grep/Read for navigation</q>\n\nresolution of operand B             B calls   adherence\n  the rule’s own words                  115      57.4%\n  search tools only (rg/grep/glob)      479      24.4%\n  search tools plus `view`            1,325      10.5%\n\nhow the words were resolved, most confident first\n  1 exact tool name        → glob, grep\n  2 mcpServerName field    → 28 codebase-memory-mcp tools\n  3 derived role           → Read = file-read = view\n  4 unresolved             → reported, never dropped',
+     sug:"Rewrite the rule in your agent’s own vocabulary before rewriting its strength. It says “Read”, but Copilot has no file-reading tool of that name — the one it actually uses is `view`, called 5,201 times, which your rule never mentions. Then read the reliability finding below."},
+
+    {t:"The MCP your rule mandates is the least reliable tool you have", n:12, tone:"flag",
+     sub:"search_graph fails 11/37 (29.7%) · search_code fails 15/53 (28.3%) · rg fails 16/1,346 (1.2%)",
+     prov:"obs", infer:"That this makes the rule wrong rather than disobeyed is a hypothesis, not a measurement. The rates are Observed; the causal link is judgment and has not been tested.",
+     on:idx([2,4,5,8,11,14,16,18,22,26,30,33]),
+     p:"This is the other half of the finding above. The tools your rule deprioritises fail roughly one call in fifty; the one it mandates fails closer to one in three. Read alone, the adherence number suggests “write a firmer rule”. Read beside this one, “fix the server” becomes at least as plausible.",
+     ev:'tool.execution_complete · success=false\n  codebase-memory-mcp-search_graph   11 / 37    29.7%\n  codebase-memory-mcp-search_code    15 / 53    28.3%\n  view                              136 / 5,201  2.6%\n  rg                                 16 / 1,346  1.2%',
+     sug:"Re-index or repair codebase-memory-mcp, then re-measure adherence. If adherence rises without touching the rule, the rule was never the problem."},
+
+    {t:"The same file read over and over inside one session", n:16, tone:"warn",
+     sub:"worst single path opened 74 times · worst session made 1,367 such reads across 90 paths",
+     prov:"der", on:idx([0,2,4,5,7,8,11,13,16,18,21,24,26,29,31,33]),
+     p:"Your CLAUDE.md says “Do not re-read files already in context”. Sixteen sessions re-opened at least one file four or more times; the worst opened a single file 74 times.",
+     ev:'view.arguments.path, grouped per session\n  worst path        74 reads\n  worst session  1,367 reads over 90 hot paths',
+     sug:"Most re-reads cluster after a context compaction. A rule cannot fix forgetting — consider pinning the two or three files you always need as always-loaded context instead."},
+
+    {t:"Turns abandoned mid-flight", n:8, tone:"warn",
+     sub:"9 aborted turns across 8 sessions · no rollback event is recorded",
+     prov:"obs", on:idx([3,7,12,14,18,19,25,34]),
+     p:"Nine turns ended with an abort, spread over eight sessions. Whatever the agent was part-way through is unfinished, and nothing records what it had already changed on disk.",
+     ev:'abort · {"reason":"user_interrupt"}',
+     sug:"Worth reviewing whether these cluster on a task type. If they do, the task shape is wrong, not the agent."},
+
+    {t:"Subagents whose cost you cannot see", n:12, tone:"warn", verdict:true,
+     sub:"215 of 462 completions carry tokens and duration — 46.5%",
+     prov:"inf", on:idx([1,2,12,16,18,19,24,26,27,29,30,31]),
+     p:"Copilot omits totalTokens and durationMs from just over half its subagent completions. The work is fully recoverable from the agent’s own message stream — 88.1% of subagents end with a report of 400 characters or more — but the price is missing, so any verdict on whether a subagent earned its budget is inference, not observation.",
+     ev:'subagent.completed · with metrics    215 / 462\n                   · without metrics  247 / 462\nfinal message length · median 1,414 chars · max 33,925',
+     sug:"Verdicts are shown, marked inferred. Cost and output load on demand rather than up front."},
+
+    {t:"A tool you banned in writing, used anyway", n:3, tone:"flag",
+     sub:"15 calls to search_code in the 3 sessions carrying the ban",
+     prov:"obs", on:idx([16,26,33]),
+     p:"You wrote that this tool is broken and must not be used. The agent used it 15 times in exactly those sessions. Corpus-wide it fails 28.3% of the time, so you were right.",
+     ev:'custom_instruction · CLAUDE.md\n  <q>`search_code` is broken on Windows (built-in grep fails with path error) — do not use it</q>\nviolations: 15 calls across 3 sessions',
+     sug:"A prohibition buried in a bullet list is not reaching the agent. Either fix the tool and delete the rule, or remove the server so the tool cannot be called."},
+
+    {t:"Your rule set changed 6 times in 32 days", n:25, tone:"warn",
+     sub:"supahfly27/UpFront · 6 distinct rule-set versions · 39 of 43 rules moved in or out",
+     prov:"obs", on:idx([0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19,20,21,22,24,26,30]),
+     p:"You tune rules continuously, so a single adherence percentage across the whole corpus describes no rule version that ever existed — the measured range is 41.8% to 71.7%. Adherence belongs to a version: same text, same repository, contiguous window. This is context, not a defect, and it is what makes a before/after comparison possible at all.",
+     ev:'rule-set versions, and navigation-rule adherence within each\n\n  2026-04-28  a92ead84   4 bullets   3 sessions        —\n  2026-05-02  f9f5625d   9 bullets   4 sessions        —\n  2026-05-08  c2166d65  13 bullets   9 sessions        —\n  2026-05-11  7fdd06fd  21 bullets   2 sessions        —\n  2026-05-22  1a47450a  17 bullets   3 sessions     41.8%\n  2026-05-23  9579a981  17 bullets   4 sessions     71.7%   ← after the edit\n\n  other repo  54cd2cff  18 bullets   5 sessions     58.6%',
+     sug:"The 23 May edit is a worked example: adherence measured 41.8% before it and 71.7% after, on 3 and 4 sessions. Small samples, so this demonstrates the method rather than settling that edit — but it needs no new sessions, only the history you already have."},
+
+    {t:"A placeholder reached a live system prompt", n:1, tone:"warn",
+     sub:"a rule statement reading _(add rules here)_ was injected into a real session",
+     prov:"obs", on:idx([30]),
+     p:"An unfilled template line was shipped to the agent as an instruction. Harmless here, but it shows nothing checks the md files before they become the agent’s standing orders.",
+     ev:'custom_instruction · CLAUDE.md  <q>_(add rules here)_</q>   1 session',
+     sug:"Worth a lint on the md files themselves — empty sections, placeholder text, duplicated bullets."},
+
+    {t:"Your rule names `grep`. Your agent uses `rg` \u2014 1,346 times", n:12, tone:"flag",
+     sub:"the rule governs a role, but names the minor tool in it",
+     prov:"obs", on:idx([2,4,5,8,11,14,16,18,22,26,30,33]),
+     p:"Tool roles are derived from the arguments each tool takes \u2014 a tool taking `pattern` searches, one taking `path` reads. Checked against those roles, your navigation rule names `grep` (129 calls) but never `rg` (1,346), which does the same job ten times more often. The rule cannot govern behaviour it does not name.",
+     ev:'role      dominant tool         calls    named by the rule\n  search    `rg`                  1,346    no\n            `grep`                  129    yes (exact match)\n  file-read `view`                5,201    yes (via role)\n            `Read`                    \u2014    named, but no such tool exists here',
+     sug:"Rewrite the rule in your agent\u2019s own vocabulary: name `rg`, `glob` and `view`. This is a one-line edit and it is worth more than any change to the rule\u2019s strength."},
+
+    {t:"Most of your rules are about code, and this corpus cannot check them", n:35, tone:"warn",
+     sub:"13 of 22 real rules are checkable here \u00b7 the rest constrain what gets written, or nothing observable",
+     prov:"der", on:idx(Array.from({length:35},function(_,i){return i;})),
+     p:"Across a second corpus of 60 CLAUDE.md files from 4 repositories, only 6 of 105 normative rules matched a tool-choice shape \u2014 5.7%. The rest govern the code the agent writes: never raw `fetch()`, controllers never inject a DbContext, an entity that is append-only. Tool-call events cannot see any of that.",
+     ev:'this corpus, 43 extracted lines\n  watched, plus 9 checkable not yet built       4\n  normative but unobservable                    9\n  not a rule (documentation index, structure)  21\n\nsecond corpus, 4 other repositories\n  105 normative rules \u00b7 6 matched a tool-choice shape  (5.7%)',
+     sug:"The writes are in the logs \u2014 1.5 MB of them \u2014 so these are checkable. See the next finding for the condition attached."},
+
+    {t:"Code rules are checkable from the logs \u2014 but unscoped, the check lies", n:35, tone:"flag",
+     prov:"der", infer:"The scoped hits below are plausible, not confirmed. The check cannot yet distinguish a violation from the preferred wrapper\u2019s own implementation.",
+     sub:"842 write units \u00b7 380 files \u00b7 two of three test rules were wholly false-positive before scoping",
+     on:idx(Array.from({length:35},function(_,i){return i;})),
+     p:"apply_patch carries the patch body, edit carries new_str, create carries file_text \u2014 1,538,717 characters and 22,089 added lines, every write unit carrying a file path. A forbidden-symbol check runs over that. Run without the rule\u2019s own scope, it reports violations that do not exist.",
+     ev:'rule                                    unscoped   scoped\n  controllers never inject a DbContext         194        0\n  entity is append-only, never UpdateAsync      61        0\n  never raw `fetch()` in frontend sources       33       20\n\nscope came from the file path, present on 842 of 842 write units',
+     sug:"Ship content checks only with scoping derived from the rule itself \u2014 a path pattern, an entity name. Unscoped, this check is worse than no check."},
+
+    {t:"web_fetch fails more often than it succeeds", n:4, tone:"warn",
+     sub:"112 of 183 calls failed — 61.2%",
+     prov:"obs", tag:"fail", on:idx([14,18,32,34]),
+     p:"Only four sessions used it, but when they did it failed nearly two times in three. Every failure is a wasted round trip plus whatever the agent did to recover.",
+     ev:'tool.execution_complete · web_fetch  112 / 183 failed  61.2%',
+     sug:"Low frequency, so low priority — but if you plan to lean on web research, this needs an MCP that works first."}
+  ];
+
+  var RULES = [
+    ["Do not re-read files already in context","CLAUDE.md",29,"watched","16 sessions",""],
+    ["Prefer querying codebase-memory-mcp over Glob/Grep/Read for navigation","CLAUDE.md",12,"watched","1,325 calls",""],
+    ["**Never read `UpFront.Data/Migrations/`** unless the task is explicitly about migrations.","CLAUDE.md",12,"watched","28 calls",""],
+    ["`search_code` is broken on Windows (built-in grep fails with path error) — do not use it","CLAUDE.md",3,"watched","15 calls",""],
+
+    ["Prefer reading specific files over entire directories","CLAUDE.md",16,"soon","","needs a directory-scope check on glob/rg paths"],
+    ["**Never read `UpFront.Data/Migrations/`** unless the task is about migrations or migration history.","CLAUDE.md",11,"soon","","duplicate of a watched rule with different wording"],
+    ["Fall back to Grep tool only for raw text/config values not in the graph","CLAUDE.md",7,"soon","","needs intent classification per grep call"],
+    ["Only invoke Superpowers / Product Superpowers skills when explicitly named","CLAUDE.md",1,"soon","","checkable against skill.invoked vs user.message"],
+    ["When dispatching subagents, always pass an explicit model param — never rely on inheritance","CLAUDE.md",1,"soon","","checkable against task.arguments.model"],
+    ["Prefer querying codebase-memory-mcp over generic file search, once this repo is indexed","CLAUDE.md",1,"soon","","conditional on index state, which is not logged"],
+
+    ["Keep responses concise — no lengthy explanations unless asked","CLAUDE.md",29,"no","","style directive, no observable event"],
+    ["When implementing, write code directly — skip preamble","CLAUDE.md",29,"no","","style directive, no observable event"],
+    ["Read ONLY files directly needed for the current task","CLAUDE.md",29,"no","","“needed” is a judgment, not a field"],
+    ["Never explore the codebase broadly before starting","CLAUDE.md",29,"no","","“broadly” has no threshold in the logs"],
+    ["`docs/claude/03_DATA_FLOW.md` — import, API, auth, and migration flows","CLAUDE.md",28,"nr","","documentation index, not a rule"],
+    ["`docs/claude/04_DOMAIN_MODEL.md` — all entity schemas and DB columns","CLAUDE.md",28,"nr","","documentation index, not a rule"],
+    ["`docs/claude/05_PATTERNS.md` — coding conventions and architectural rules","CLAUDE.md",28,"nr","","documentation index, not a rule"],
+    ["Preserve existing project names and namespaces when refactoring.","CLAUDE.md",23,"no","","would need diff analysis, out of scope offline"],
+    ["Frontend commands run from `FrontEnd\\UpFront.React\\`, not the repo root.","CLAUDE.md",23,"soon","","checkable against a shell call’s working directory"],
+    ["Read `CLAUDE.md`.","AGENTS.md",12,"nr","","no event records which file the agent read into context"],
+    ["Use sub-guides for context — avoid re-reading entire codebases.","CLAUDE.md",11,"no","","overlaps the watched re-read rule"],
+    ["Use `get_code_snippet` after `search_graph` to read function source","CLAUDE.md",7,"soon","","use-A-after-B shape; both operands resolve to real tools"],
+    ["**SonarQube** — code quality, bugs, maintainability, coverage, technical debt","CLAUDE.md",5,"nr","","reference list, not a rule"],
+    ["**Semgrep** — source-code security patterns","CLAUDE.md",5,"nr","","reference list, not a rule"],
+    ["**Trivy** — dependency CVEs, Docker images, IaC, secrets","CLAUDE.md",5,"nr","","reference list, not a rule"],
+    ["`docs/claude/06_SCANNING_TOOLS.md` — when to use SonarQube, Semgrep, Trivy","CLAUDE.md",5,"nr","","documentation index, not a rule"],
+    ["`docs/claude/07_KNOWLEDGE_TOOLS.md` — when and how to use Codebase Memory MCP","CLAUDE.md",5,"nr","","documentation index, not a rule"],
+    ["`search_code` works — use it for text/pattern searches across the codebase","CLAUDE.md",4,"no","","superseded 23 May by an edit in the same repository — not a live contradiction"],
+    ["Use `search_graph` for symbols, functions, classes by name or natural language","CLAUDE.md",4,"no","","recommendation without a comparison, nothing to violate"],
+    ["`docs/claude/03_DATA_FLOW.md` — import flow, API flow, Docker networking","CLAUDE.md",3,"nr","","documentation index, not a rule"],
+    ["`docs/claude/04_DOMAIN_MODEL.md` — Product entity and DB schema","CLAUDE.md",3,"nr","","documentation index, not a rule"],
+    ["`docs/claude/05_PATTERNS.md` — coding conventions","CLAUDE.md",3,"nr","","documentation index, not a rule"],
+    ["`UpFront.Models/CLAUDE.md`, `UpFront.Data/CLAUDE.md`, `UpFront.Services/CLAUDE.md`, …","CLAUDE.md",3,"nr","","documentation index, not a rule"],
+    ["Use `search_graph` instead: finds symbols, functions, classes","CLAUDE.md",3,"nr","","fragment of a longer rule, no standalone predicate"],
+    ["Invoke `skill(using-superpowers)`.","Agent workflow",2,"soon","","checkable against skill.invoked events"],
+    ["If implementing or changing behavior, invoke the relevant Superpowers process skill.","Agent workflow",2,"no","","“relevant” is a judgment"],
+    ["Use `codebase-memory` MCP before broad file search when asking:","Agent workflow",2,"nr","","rule header; its conditions are the five bullets below"],
+    ["“where is X implemented?”","Agent workflow",2,"nr","","condition fragment, not a rule"],
+    ["“how does this subsystem work?”","Agent workflow",2,"nr","","condition fragment, not a rule"],
+    ["“what changed around this area?”","Agent workflow",2,"nr","","condition fragment, not a rule"],
+    ["“find related code/patterns”","Agent workflow",2,"nr","","condition fragment, not a rule"],
+    ["“summarize architecture”","Agent workflow",2,"nr","","condition fragment, not a rule"],
+    ["_(add rules here)_","CLAUDE.md",1,"nr","","placeholder text that reached a live system prompt"]
+  ];
+
+  function el(t,c,x){ var n=document.createElement(t); if(c) n.className=c; if(x!=null) n.textContent=x; return n; }
+
+  /* findings */
+  // The page claims a ranking, so it has to hold one. Stable sort keeps the paired
+  // adherence/reliability findings adjacent, since both carry the same session count.
+  FINDINGS.sort(function(a,b){ return b.n - a.n; });
+
+  var host = document.getElementById("findings");
+  FINDINGS.forEach(function(f,i){
+    var card = el("div","find");
+
+    var hd = el("button","find-hd"); hd.setAttribute("aria-expanded","false");
+    hd.appendChild(el("span","rank", String(i+1).padStart(2,"0")));
+
+    var ttl = el("div","ttl");
+    ttl.appendChild(el("div","t",f.t));
+    ttl.appendChild(el("div","s",f.sub));
+    hd.appendChild(ttl);
+
+    var strip = el("div","strip" + (f.tone === "warn" ? " warn" : ""));
+    strip.setAttribute("role","img");
+    strip.setAttribute("aria-label", f.n + " of " + N + " sessions affected");
+    for(var k=0;k<N;k++){ strip.appendChild(el("i", f.on[k] ? "on" : null)); }
+    hd.appendChild(strip);
+
+    var rc = el("div","recur");
+    var big = el("div","big", f.n); rc.appendChild(big);
+    rc.appendChild(el("div","of","of " + N + " sessions"));
+    rc.appendChild(el("span","prov " + f.prov, f.prov === "obs" ? "observed" : f.prov === "der" ? "derived" : "inferred"));
+    hd.appendChild(rc);
+
+    var bd = el("div","find-bd");
+    bd.appendChild(el("p",null,f.p));
+    var ev = el("div","ev"); ev.innerHTML = f.ev; bd.appendChild(ev);
+    if(f.infer){
+      var ib = el("div","inferbox");
+      var ih = el("div");
+      ih.appendChild(el("span","prov inf","inferred"));
+      ih.appendChild(el("span","ib-t","The reading, as opposed to the numbers"));
+      ib.appendChild(ih);
+      ib.appendChild(el("p",null,f.infer));
+      bd.appendChild(ib);
+    }
+    var sug = el("div","sug");
+    sug.appendChild(el("span","lbl","Suggested change"));
+    sug.appendChild(el("p",null,f.sug));
+    bd.appendChild(sug);
+
+    if(f.verdict){
+      var btn = el("button","btn","Load cost & output for these 12 sessions");
+      var out = el("div","loaded"); out.hidden = true;
+      out.innerHTML =
+        '<div class="grid2">' +
+        '<div><div class="lbl">Subagents</div><div class="v">470</div></div>' +
+        '<div><div class="lbl">With cost recorded</div><div class="v">215</div></div>' +
+        '<div><div class="lbl">Tokens, where known</div><div class="v">598,844 max</div></div>' +
+        '<div><div class="lbl">Longest run</div><div class="v">3m 58s</div></div>' +
+        '</div>' +
+        '<pre>confirm-flow-fix · general-purpose · claude-sonnet-4.6\n' +
+        'cost      598,844 tok · 34 tool calls · 237,802 ms\n' +
+        'verdict   produced a 4,100-word report and 2 file edits   [inferred]\n\n' +
+        'output    The confirm screen posts to the ledger before KashCash\n' +
+        '          acknowledges settlement, so a failed ack leaves a confirmed\n' +
+        '          movement with no clearing row. Added a failing test, then\n' +
+        '          gated the post behind the ack…</pre>';
+      btn.addEventListener("click", function(){
+        out.hidden = !out.hidden;
+        btn.textContent = out.hidden ? "Load cost & output for these 12 sessions" : "Hide";
+      });
+      bd.appendChild(btn); bd.appendChild(out);
+    }
+
+    hd.addEventListener("click", function(){
+      var open = card.classList.toggle("open");
+      hd.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+
+    card.appendChild(hd); card.appendChild(bd); host.appendChild(card);
+  });
+
+  /* rules */
+  var tbody = document.getElementById("rules");
+  function drawRules(filter){
+    tbody.innerHTML = "";
+    RULES.forEach(function(r){
+      if(filter !== "all" && r[3] !== filter) return;
+      var tr = document.createElement("tr");
+      var td1 = el("td"); td1.appendChild(el("div",null,r[0]));
+      if(r[5]) td1.appendChild(el("div","why",r[5]));
+      tr.appendChild(td1);
+      tr.appendChild(el("td","r",r[1]));
+      tr.appendChild(el("td","r",r[2]));
+      var td4 = el("td");
+      td4.appendChild(el("span","st " + r[3], r[3] === "watched" ? "watched" : r[3] === "soon" ? "not built" : r[3] === "nr" ? "not a rule" : "not checkable"));
+      tr.appendChild(td4);
+      var td5 = el("td","r"); if(r[4]){ var s = el("span","viol",r[4]); td5.appendChild(s); } else { td5.textContent = "—"; }
+      tr.appendChild(td5);
+      tbody.appendChild(tr);
+    });
+  }
+  document.getElementById("filters").addEventListener("click", function(e){
+    var b = e.target.closest(".fb"); if(!b) return;
+    Array.prototype.forEach.call(this.querySelectorAll(".fb"), function(x){ x.setAttribute("aria-pressed","false"); });
+    b.setAttribute("aria-pressed","true");
+    drawRules(b.dataset.st);
+  });
+  drawRules("all");
+})();
+</script>

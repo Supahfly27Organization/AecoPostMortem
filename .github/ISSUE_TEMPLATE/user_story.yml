@@ -1,0 +1,97 @@
+name: User Story
+description: Deliverable from the user's perspective
+title: "[Story]: "
+type: User Story
+body:
+  - type: input
+    id: persona
+    attributes:
+      label: As a
+      description: Who is this for?
+      placeholder: "Loop ops admin"
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: I want to
+      description: What do they want to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: benefit
+    attributes:
+      label: So that
+      description: Why do they want it?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Must Have
+        - Should Have
+        - Could Have
+        - Won't Have
+    validations:
+      required: true
+
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      options:
+        - XS
+        - S
+        - M
+        - L
+        - XL
+    validations:
+      required: false
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Other stories, services, or open questions this depends on. Use "None" if there aren't any.
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Gherkin scenarios (Given/When/Then)
+      render: gherkin
+    validations:
+      required: true
+
+  - type: textarea
+    id: edge-cases
+    attributes:
+      label: Edge Cases
+    validations:
+      required: false
+
+  - type: textarea
+    id: definition-of-ready
+    attributes:
+      label: Definition of Ready
+      description: Checklist of what must be confirmed before this can be estimated/built.
+      value: |
+        - [ ]
+    validations:
+      required: false
+
+  - type: input
+    id: parent-epic
+    attributes:
+      label: Parent Epic
+      description: Issue number or link to the epic this story belongs to (if created manually, not via github-issue-sync).
+      placeholder: "#123"
+    validations:
+      required: false

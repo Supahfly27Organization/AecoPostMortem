@@ -1,0 +1,33 @@
+name: Epic
+description: Large body of work composed of multiple stories
+title: "[Epic]: "
+type: Epic
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a Phase/theme-level body of work broken into several User Stories.
+        If this epic came from an approved stories doc, prefer letting the `github-issue-sync` skill create it so stories get linked automatically.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What can the user do/see once every story under this epic ships?
+      placeholder: "Dana can see the state of all Loop campaigns without opening the Campaigns table."
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Don't list stories here — use GitHub's native "Sub-issues" panel (below, after creation) to link each story. It tracks scope automatically; a hand-written checklist drifts out of sync.
+
+  - type: input
+    id: source-doc
+    attributes:
+      label: Source stories doc
+      description: Path to the approved stories doc this epic came from, if any.
+      placeholder: "docs/product-superpowers/stories/2026-07-17-loop-ops-dashboard-phase1-stories.md"
+    validations:
+      required: false

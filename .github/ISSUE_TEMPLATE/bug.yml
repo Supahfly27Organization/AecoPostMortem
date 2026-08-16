@@ -1,0 +1,109 @@
+name: Bug
+description: An unexpected problem or behavior
+title: "[Bug]: "
+type: Bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What's wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Impact if unfixed
+      options:
+        - Critical — blocks core functionality / data loss
+        - High — major feature broken, workaround exists
+        - Medium — minor feature broken
+        - Low — cosmetic / edge case
+    validations:
+      required: true
+
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      description: T-shirt size for the fix
+      options:
+        - XS
+        - S
+        - M
+        - L
+        - XL
+    validations:
+      required: false
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Frequency
+      description: How reliably does this reproduce?
+      options:
+        - Always
+        - Intermittent
+        - Once
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Where this was observed
+      placeholder: "dev3 / staging / prod, browser + OS if relevant"
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Is there a way to avoid this in the meantime? Say "None" if not.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Stack traces, console output, or screenshots
+    validations:
+      required: false
+
+  - type: input
+    id: regression
+    attributes:
+      label: Regression since
+      description: Last known working version/commit/date, if known
+    validations:
+      required: false

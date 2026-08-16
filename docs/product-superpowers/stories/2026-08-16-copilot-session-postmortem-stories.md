@@ -405,7 +405,7 @@ Scenario: The solution builds and is contained
 Scenario: The command surface exists
   Given the built product
   When the operator runs the CLI with no arguments
-  Then it lists ingest, purge and serve, each with its arguments and its output channel
+  Then it lists ingest, rebuild, purge and serve, each with its arguments and its output channel
   And serve reports which surfaces are not yet implemented rather than failing
 
 Scenario: The test projects exist and run
@@ -829,6 +829,13 @@ Scenario: No check depends on the clock or on chance
   Given the analysis code path
   When it is inspected
   Then no check reads the current time, samples randomly, or calls a model
+
+Scenario: The operator can invoke the rebuild
+  Given a populated store
+  When the operator runs the rebuild command
+  Then the derived layers are dropped and re-derived from RAW
+  And the source directory is not read
+  And RAW is unchanged
 ```
 
 **Edge cases:** identical *order* matters as much as identical content, because the digest ranks by sessions affected and a tie broken arbitrarily would reorder the operator's priorities between runs; a rebuild that is identical except for row ids is acceptable and the comparison must be defined accordingly; this story is what makes RAW load-bearing rather than merely stored.

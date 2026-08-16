@@ -440,7 +440,13 @@ Phase E is not scheduled. It enters the plan when its entry condition is met, an
 - **FR-58** **The command surface**, enumerated here rather than deferred, because Part 1 tells the
   operator to "run the ingest command" and something has to say what that is:
   - `ingest` — optional path override, defaults to the resolved Copilot directory; writes FR-14's
-    coverage report to stdout and exits non-zero if no source was found.
+    coverage report to stdout and exits non-zero if no source was found. **Ingest is
+    ingest-then-rebuild**: new RAW rows are worthless until the derived layers see them, so the
+    two are one operation from the operator's side.
+  - `rebuild` — drops NORMALIZED and FINDINGS and re-derives them from RAW, without re-reading
+    `~/.copilot/`. **§3.8 makes this the answer to every derived-schema change**, and a capability
+    the operator cannot invoke is not an answer; it is also what makes a re-derivation cheap enough
+    to be routine rather than a reason to reach for a migration. RAW is never touched.
   - `purge` — deletes the store (FR-11); reports and exits zero when there is nothing to purge.
   - `serve` — starts the local API and web shell on a stated default port, and opens nothing by
     itself.

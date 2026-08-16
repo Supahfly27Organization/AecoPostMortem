@@ -36,4 +36,93 @@ public sealed class SolutionContainmentTests
             missing.Length == 0,
             $"Source projects with no test project in {Repository.SolutionFileName}: {string.Join(", ", missing)}");
     }
+
+    [Fact]
+    public void No_project_references_an_AecoLedger_assembly()
+    {
+        var offenders = (
+            from path in Repository.SolutionProjectPaths
+            let project = Repository.ProjectFile(path)
+            from reference in Repository.References(project, "PackageReference")
+                .Concat(Repository.References(project, "ProjectReference"))
+            where reference.Contains("AecoLedger", StringComparison.OrdinalIgnoreCase)
+            select $"{path} -> {reference}").ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "No project may reference an AecoLedger assembly (PRD §3.1); found: "
+            + string.Join("; ", offenders));
+    }
+
+    [Fact]
+    public void No_project_reference_resolves_outside_the_repository()
+    {
+        var root = Repository.Root.FullName.TrimEnd(Path.DirectorySeparatorChar)
+                   + Path.DirectorySeparatorChar;
+
+        var escapes = (
+            from path in Repository.SolutionProjectPaths
+            let project = Repository.ProjectFile(path)
+            from include in Repository.References(project, "ProjectReference")
+            let resolved = Path.GetFullPath(Path.Combine(
+                project.DirectoryName!,
+                include.Replace('\\', Path.DirectorySeparatorChar)
+                       .Replace('/', Path.DirectorySeparatorChar)))
+            where !resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+            select $"{path} -> {include}").ToArray();
+
+        Assert.True(
+            escapes.Length == 0,
+            "Every project reference must resolve inside this repository (PRD §3.1); found: "
+            + string.Join("; ", escapes));
+    }
+
+    [Fact]
+    public void Every_project_in_the_solution_lives_under_src_test_or_web()
+    {
+        // bench/bench.csproj is deliberately NOT in the solution. It is the harness from the
+        // SQLite-versus-Postgres latency research, it sits at the repository root, and adding it
+        // to the solution is exactly the violation this test exists to catch. Do not "fix" a
+        // failure here by relaxing the rule.
+        string[] allowed = ["src/", "test/", "web/"];
+
+        var stray = Repository.SolutionProjectPaths
+            .Where(path => !allowed.Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)))
+            .ToArray();
+
+        Assert.True(
+            stray.Length == 0,
+            "Every project in the solution must live under src, test or web (PRD §3.1); found: "
+            + string.Join(", ", stray));
+    }
+
+    [Fact]
+    public void The_rules_project_references_no_persistence_assembly()
+    {
+        var rules = Repository.ProjectFile("src/AecoPostMortem.Rules/AecoPostMortem.Rules.csproj");
+
+        string[] persistencePrefixes =
+        [
+            "Microsoft.EntityFrameworkCore",
+            "Microsoft.Data.",
+            "System.Data.",
+            "Dapper",
+            "SQLite",
+        ];
+
+        var packages = Repository.References(rules, "PackageReference")
+            .Where(name => persistencePrefixes.Any(
+                prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+
+        var projects = Repository.References(rules, "ProjectReference")
+            .Where(include => Path.GetFileNameWithoutExtension(include)
+                .EndsWith(".Data", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        Assert.True(
+            packages.Length == 0 && projects.Length == 0,
+            "AecoPostMortem.Rules must reference no persistence assembly (PRD §3.1, FR-34); found: "
+            + string.Join(", ", packages.Concat(projects)));
+    }
 }

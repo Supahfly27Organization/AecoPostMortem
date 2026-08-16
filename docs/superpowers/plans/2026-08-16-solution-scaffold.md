@@ -632,7 +632,11 @@ Temporarily change the `ProjectReference` in `src/AecoPostMortem.Api/AecoPostMor
 
 Run: `dotnet test test/AecoPostMortem.Containment.Tests/AecoPostMortem.Containment.Tests.csproj --filter FullyQualifiedName~No_project_reference_resolves_outside`
 
-Expected: FAIL naming that reference. The referenced file does not exist, so the build will also fail — that is fine; read the test output. Then **restore the original line** and re-run; expected PASS.
+Expected: FAIL naming that reference.
+
+This works because the containment test project references no source project — it reads them as files. `AecoPostMortem.Api` is therefore never built by this command, so the dangling reference cannot break the build before the test gets to report it. That is the same property that makes the test trustworthy in the first place. Running the same filter against the whole solution would fail at build time instead, and prove nothing.
+
+Then **restore the original line** and re-run; expected PASS.
 
 - [ ] **Step 5: Prove the stray-project guard fires**
 
@@ -856,7 +860,7 @@ public sealed class CommandParserTests
         var invocation = CommandParser.Parse(["ingest", "C:/copilot/session-state"]);
 
         Assert.Equal("ingest", invocation.Command?.Name);
-        Assert.Equal(["C:/copilot/session-state"], invocation.Arguments);
+        Assert.Equal(new[] { "C:/copilot/session-state" }, invocation.Arguments);
     }
 
     [Fact]

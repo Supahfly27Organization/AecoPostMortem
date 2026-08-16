@@ -26,7 +26,7 @@ no shared store, no shared contract. Repo Rule 6 confines every line of it to `S
   mechanism that answers Part 8 Q1, built over that measurement. Cited as *scope design Part N*.
 
 Every corpus figure below was measured on the reference machine on 2026-08-16 against `~/.copilot/`:
-a measured 35 sessions, 56,176 events, 16,085 tool calls, 3 repositories, 176.7 MB, spanning a
+a measured 35 sessions, 56,138 events, 16,085 tool calls, 3 repositories, 176.7 MB, spanning a
 measured 111 days. Where a figure here is a goal rather than a finding it is labelled **target**;
 where it is a judgment it is labelled **estimate**.
 
@@ -155,7 +155,7 @@ labelled judgment everywhere it appears, because the rates are measured and the 
 **If a check finds nothing, does that mean I'm compliant?**
 Only if the product says the check ran. There is a dedicated "checks that found nothing" surface which
 states the denominator for each — a measured 0 contradictions found across 35 sessions checked, a
-measured 0 unresolvable subagent spawns out of 470, a measured 0 malformed lines out of 56,176. A
+measured 0 unresolvable subagent spawns out of 470, a measured 0 malformed lines out of 56,138. A
 check that never ran appears in the Rules Inventory as *not checkable*, with the reason.
 
 **Does it tell me whether the work was any good?**
@@ -225,7 +225,7 @@ by Rule 6, and owns its store outright.
 
 ### 3.2 The data source, and the three layers
 
-Everything comes from `~/.copilot/session-state/<sid>/events.jsonl` — measured 35 files, 56,176 lines,
+Everything comes from `~/.copilot/session-state/<sid>/events.jsonl` — measured 35 files, 56,138 lines,
 0 malformed (data map Part 1). `rewind-snapshots/index.json` is a secondary source for file-change
 history. `session-store.db` is **excluded from v1** (FR-10).
 
@@ -350,7 +350,7 @@ Phase E is not scheduled. It enters the plan when its entry condition is met, an
 - **FR-5** Ingestion is idempotent. Re-running over the same logs adds no events. Growth is by append
   only; a resumed session continues the same byte stream.
 - **FR-6** Tolerate malformed lines per-line, recording a skipped-line count per file. Measured 0 of
-  56,176 today; the tolerance is for tomorrow's CLI version, of which a measured 14 distinct ones
+  56,138 today; the tolerance is for tomorrow's CLI version, of which a measured 14 distinct ones
   already appear in this corpus. **Ingestion stops at the last newline-terminated line** and records
   that high-water offset: `events.jsonl` is live-written, so a trailing partial line is not malformed,
   it is unfinished. A skipped line is **retried on the next run**, never recorded as permanently bad.
@@ -522,7 +522,7 @@ Phase E is not scheduled. It enters the plan when its entry condition is met, an
   the evidence, and a refusable suggestion.
 - **FR-42** **The "checks that found nothing" surface** states each silent check with its denominator —
   a measured 0 contradictions across 35 sessions checked, a measured 0 unresolvable spawns of 470,
-  and a measured 0 malformed lines of 56,176. Silence is never indistinguishable from compliance.
+  and a measured 0 malformed lines of 56,138. Silence is never indistinguishable from compliance.
 - **FR-43** **The contradiction check** is pairwise, excludes self-matches, is scoped to a single
   rule-set version, and ships as **Inferred** in the silent-checks surface. A keyword-polarity first
   pass returned a measured 4 candidates and all 4 were spurious — three matched a bullet against
@@ -663,7 +663,7 @@ second domain. Full derivation and evidence: *scope design*.
 | Property | Measured today | Design target |
 |---|---|---|
 | Sessions | 35 | 500 (target) |
-| Events | 56,176 | 1,000,000 (target) |
+| Events | 56,138 | 1,000,000 (target) |
 | `events.jsonl` bytes | 176.7 MB | 2 GB (target) |
 | Repositories | 3 | 20 (target) |
 | Rule statements | 43 | 500 (target) |
@@ -951,6 +951,18 @@ What was checked in writing this document, and how.
   the dominant false-positive cause and measured second at 21.0% behind documentation files at 51.3%;
   and the Copilot corpus was assumed to carry content rules, where a measured 0 of its 43 statements
   do.
+- **Corrected 2026-08-16 by the frozen fixture: the event-line count is a measured 56,138, replacing
+  a measured 56,176 at every occurrence in this document.** The older figure comes from data map
+  Part 1 and contradicts that same document's Part 3 census table, which sums to a measured 56,138.
+  The live corpus matches that table exactly — a measured 31 of 31 event types, zero per-type
+  deltas — verified by extracting the table from the document mechanically rather than by
+  transcription, and the 2026-08-13 discovery independently measured the same total. Neither run
+  behind the older figure recorded how it was derived, which is the defect FR-33 exists to prevent,
+  committed one document upstream. The authority is now `fixtures/corpus-manifest.json`, whose
+  `--check` mode reproduces the measurement on demand, and `fixtures/README.md` records it in full.
+  The data map and the approved discovery were amended the same day, each logging the correction in
+  its own self-review rather than applying it silently, so no document in the set now carries the
+  older figure except where it is quoted as superseded.
 - **A defect this PRD's own evidence base commits.** Discovery finding 11's measured 194 / 61 / 33
   could not be reproduced, because neither run recorded the regex it matched with — the exact failure
   FR-33 exists to prevent, one document upstream. Figures sourced from the FP measurement are

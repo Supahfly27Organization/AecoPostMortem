@@ -8,7 +8,7 @@ fail". The operator has ruled out a connection.
 
 > Discovery conducted 2026-08-16. Two evidence sources: a structured interview with the operator
 > (the sole user), and a direct measurement of their local Copilot corpus — 35 sessions,
-> 56 176 events, measured the same day. Corpus method and field-level detail:
+> 56 138 events, measured the same day. Corpus method and field-level detail:
 > `docs/product-superpowers/discovery/2026-08-16-copilot-ingestion-data-map.md`.
 >
 > **Two review passes were run on this document and its mockups.** Their material corrections are
@@ -383,7 +383,7 @@ process and therefore has something to measure adherence *against*. A user with 
 gets nothing from finding class 1 — a real constraint, not a persona sketch.
 
 **3. How big is the opportunity?**
-Measured locally: 35 sessions over 111 days, 56 176 events, 16 085 tool calls, 3 repositories. Every
+Measured locally: 35 sessions over 111 days, 56 138 events, 16 085 tool calls, 3 repositories. Every
 finding class already fires on that corpus. Beyond this operator the market is unassessed and
 deliberately out of scope.
 
@@ -583,6 +583,14 @@ found nothing" surface.
   separately, 0 graph-tool calls), and circularity with the tool-failure finding (measured, rejected).
 - The causal reading linking adherence to tool reliability is labelled a hypothesis wherever it
   appears, including in the mockups.
+- **Corrected 2026-08-16, after approval: the event-line count is a measured 56 138, replacing a
+  measured 56 176 in the two places this document carried it.** The older figure came from the
+  ingestion data map's Part 1, which contradicts that document's own Part 3 census table; the
+  corpus matches the table
+  exactly, on a measured 31 of 31 event types with zero per-type deltas. The count is now frozen in
+  `fixtures/corpus-manifest.json`, whose `--check` mode reproduces it, and every document in this
+  set carries the corrected figure. Nothing else in this document depends on it: no finding, no
+  adherence figure and no phase exit criterion is computed from the corpus line total.
 - **Not validated:** that the operator will act on a digest. Mockups exist and have been reviewed;
   no behaviour has been observed.
 - **Not measured:** whether any session in this corpus is itself an analysis session that would

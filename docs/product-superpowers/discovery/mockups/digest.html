@@ -163,7 +163,7 @@
       <div><div class="lbl">Sessions</div><div class="v num">35</div></div>
       <div><div class="lbl">Span</div><div class="v num">111 days</div></div>
       <div><div class="lbl">Repositories</div><div class="v num">3</div></div>
-      <div><div class="lbl">Events</div><div class="v num">56,176</div></div>
+      <div><div class="lbl">Events</div><div class="v num">56,138</div></div>
       <div><div class="lbl">Tool calls</div><div class="v num">16,085</div></div>
       <div><div class="lbl">Subagents</div><div class="v num">470</div></div>
     </div>
@@ -210,7 +210,7 @@
     </div>
     <div class="ck">
       <div class="ck-t">Malformed lines in the event log</div>
-      <div class="ck-s">0 found &middot; 56,176 lines parsed</div>
+      <div class="ck-s">0 found &middot; 56,138 lines parsed</div>
       <span class="prov obs">observed</span>
     </div>
   </div>
@@ -250,8 +250,10 @@
   <div class="wrap">
     <p><strong>Mockup.</strong> The corpus scope, every adherence and failure rate, the rule-version
       table and all 43 rule statements were measured from <code>~/.copilot/</code> on 2026-08-16
-      &mdash; 35 sessions, 56,176 events, 0 malformed lines. The rule text is verbatim, as Copilot
-      injected it.</p>
+      &mdash; 35 sessions, 56,138 events, 0 malformed lines. The rule text is verbatim, as Copilot
+      injected it. The event count was corrected from 56,176 on 2026-08-16 against
+      <code>fixtures/corpus-manifest.json</code>, which reproduces the data map&rsquo;s own Part 3
+      census exactly on all 31 event types.</p>
     <p><strong>Not measured, and shown here only to demonstrate the layout:</strong> the per-session
       counts on findings 02, 04, 07 and 11; the subagent report-length figures and the contents of
       the &ldquo;load cost &amp; output&rdquo; panel. Treat those as placeholders, not evidence.</p>

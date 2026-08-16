@@ -29,7 +29,7 @@ Appendix.
 | `~/.copilot/session-state/` session directories | 48 |
 | …of those, holding an `events.jsonl` | 35 |
 | Total `events.jsonl` bytes | 176.7 MB |
-| Total event lines parsed | 56 176 |
+| Total event lines parsed | 56 138 — corrected 2026-08-16, see the self-review |
 | Lines that failed `json.loads` | 0 |
 | Distinct event `type` values | 31 |
 | `events.jsonl` mtime span (2026-04-20 → 2026-08-09) | 111 days |
@@ -162,7 +162,7 @@ Provenance uses discovery §5's ladder: **Observed** (read from a field the tool
 
 | Requirement | Copilot source | Level | Measured coverage |
 |---|---|---|---|
-| Byte-addressable append-only lines | `events.jsonl`, one JSON object per line | Observed | 56 176 lines, 0 malformed |
+| Byte-addressable append-only lines | `events.jsonl`, one JSON object per line | Observed | 56 138 lines, 0 malformed |
 | `RawEvent.ProviderVersion` | `session.start.data.copilotVersion`, always line 1 | Observed | 35/35 |
 | Parser version range (FR-4) | `session.start.data.version` — an explicit event-schema version | Observed | `1` on 35/35 |
 | Resume identity | file grows by append; `session.resume.eventsFileSizeBytes` records the size at resume | Observed | 2 resume events measured |
@@ -478,6 +478,22 @@ question, not an optimisation to defer.
   byte offset at which that same event begins, delta 0 in every case. A file rewritten rather than
   appended to could not hold that relationship, so byte offsets are safe to use as RAW identity, and
   a resumed session continues the same byte stream. This was listed as unchecked in the first draft.
+- **Corrected after the fact: Part 1's line total was wrong, and this document already contained the
+  evidence.** Part 1 stated a measured 56 176 event lines; Part 3's census table sums to a measured
+  56 138, and the live corpus matches that table exactly — a measured 31 of 31 event types, zero
+  per-type deltas — verified by extracting the table from this file mechanically rather than by
+  transcription. The 2026-08-13 discovery independently measured 56 138 on the same corpus. Both
+  figures above now carry the measured 56 138. The failure was not the count but the missing
+  convention: the run
+  behind Part 1 never recorded how it totalled lines, so the two figures could not be reconciled
+  without re-measuring. That is the defect this document's own Part 5 warns about in another form,
+  and the reason `fixtures/corpus-manifest.json` now holds the authoritative census with a
+  `--check` mode that reproduces it. Full record: `fixtures/README.md`.
+- **Part 1's directory count is left at a measured 48, and is not an error.** The corpus now holds
+  a measured 47, the lost directory carrying no `events.jsonl`, so the 35-session census is
+  unchanged. That is
+  the rotating window doing what it does — within the same day this was measured — not a mistake in
+  the measurement, and overwriting it would erase evidence of the rotation rather than record it.
 - **Not checked:** whether any Copilot session in this corpus is an Insights-analysis session that
   would self-contaminate its own signals.
 - **One corpus, one machine, 14 CLI versions measured.** Everything here is an observation about this

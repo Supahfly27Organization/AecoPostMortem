@@ -19,6 +19,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `Execution/IOwned.cs` | `OwnerKind` (`Main`/`Agent`) and the `IOwned` contract every subagent-ownable derived entity carries |
 | `Execution/Turn.cs` | one assistant turn, bounded by `assistant.turn_start`/`turn_end`, keyed by `(SessionId, TurnId)` |
 | `Execution/ToolCall.cs` | one tool invocation, bounded by `tool.execution_start`/`execution_complete`, keyed by `(SessionId, ToolCallId)`; carries its five measured indexes |
+| `Execution/Agent.cs` | one subagent, keyed by `(SessionId, AgentId)`; carries `AgentOutcome`'s four-state completion tri-state instead of `IOwned` — it is the owner |
 | `Migrations/` | generated; do not read unless the task is about migrations (Repo Rule 1) |
 
 ## References
@@ -103,6 +104,22 @@ each index literally so a rename can't pass unnoticed.
 
 A pooled handle outlives the context that opened it, and `purge` has to be able to delete the file
 immediately afterwards. One local file, one process — the pool buys nothing to weigh against that.
+
+### `Agent` is the owner, not `IOwned`, and its cost columns are gated by a check constraint
+
+`Agent` implements only `IDerivedEntity`. It never calls `MapOwnership` — that helper exists for
+entities a subagent can own, and `Agent` is the thing being owned's owner-of-record instead, with
+its own key column already `agent_id`. `MapAgent` therefore names its own table via `ToTable`
+directly, and it must stay the last statement in the method (the `HasCheckConstraint` call has to
+see every prior `Property` mapping).
+
+`subagent.completed` carries tokens and duration on only a measured 215 of 462 completions, so
+`AgentOutcome` has four states, not two: `CompletedCostUnknown` distinguishes "completed, cost
+unknown" from `Running`/`Failed` (did not complete), and the metric columns (`TotalTokens`,
+`TotalToolCalls`, `DurationMs`, `Model`) stay nullable rather than zero-filled so absence is never
+readable as zero. `ck_agent_cost` enforces that pairing in the database — metrics may accompany
+only `Outcome = 'Completed'` — and it compares against the capitalized C# member name because
+`Outcome` is persisted via `HasConversion<string>()`, not a lowercased form.
 
 ## Playbook — changing the RAW schema
 

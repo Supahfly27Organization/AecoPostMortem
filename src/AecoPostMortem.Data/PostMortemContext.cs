@@ -39,6 +39,8 @@ public sealed class PostMortemContext : DbContext
 
     public DbSet<ToolCall> ToolCalls => Set<ToolCall>();
 
+    public DbSet<Agent> Agents => Set<Agent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -75,6 +77,7 @@ public sealed class PostMortemContext : DbContext
         MapSession(modelBuilder);
         MapTurn(modelBuilder);
         MapToolCall(modelBuilder);
+        MapAgent(modelBuilder);
         ExcludeDerivedTypesFromMigrations(modelBuilder);
     }
 
@@ -177,6 +180,39 @@ public sealed class PostMortemContext : DbContext
         toolCall.HasIndex(row => new { row.SessionId, row.ToolName }).HasDatabaseName("ix_tc_session_name");
 
         MapOwnership(toolCall, "tool_call");
+    }
+
+    static void MapAgent(ModelBuilder modelBuilder)
+    {
+        var agent = modelBuilder.Entity<Agent>();
+
+        agent.HasKey(row => new { row.SessionId, row.AgentId });
+
+        agent.Property(row => row.SessionId).HasColumnName("session_id");
+        agent.Property(row => row.AgentId).HasColumnName("agent_id");
+        agent.Property(row => row.SpawningToolCallId).HasColumnName("spawning_tool_call_id");
+        agent.Property(row => row.ParentAgentId).HasColumnName("parent_agent_id");
+        agent.Property(row => row.Name).HasColumnName("name");
+        agent.Property(row => row.DisplayName).HasColumnName("display_name");
+        agent.Property(row => row.Description).HasColumnName("description");
+        agent.Property(row => row.StartedAt).HasColumnName("started_at");
+        agent.Property(row => row.TotalTokens).HasColumnName("total_tokens");
+        agent.Property(row => row.TotalToolCalls).HasColumnName("total_tool_calls");
+        agent.Property(row => row.DurationMs).HasColumnName("duration_ms");
+        agent.Property(row => row.Model).HasColumnName("model");
+        agent.Property(row => row.Error).HasColumnName("error");
+        agent.Property(row => row.Outcome)
+            .HasColumnName("outcome")
+            .HasConversion<string>()
+            .IsRequired();
+
+        agent.HasIndex(row => row.SessionId).HasDatabaseName("ix_agent_session");
+        agent.HasIndex(row => new { row.SessionId, row.ParentAgentId }).HasDatabaseName("ix_agent_parent");
+
+        agent.ToTable("agent", table => table.HasCheckConstraint(
+            "ck_agent_cost",
+            "outcome = 'Completed' OR (total_tokens IS NULL AND total_tool_calls IS NULL "
+            + "AND duration_ms IS NULL AND model IS NULL)"));
     }
 
     /// <summary>

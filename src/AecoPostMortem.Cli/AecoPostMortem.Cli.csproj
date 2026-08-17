@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AecoPostMortem.Api\AecoPostMortem.Api.csproj" />
+    <ProjectReference Include="..\AecoPostMortem.Data\AecoPostMortem.Data.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Ingestion\AecoPostMortem.Ingestion.csproj" />
   </ItemGroup>

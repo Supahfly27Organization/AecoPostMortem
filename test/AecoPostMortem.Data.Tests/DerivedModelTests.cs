@@ -45,4 +45,33 @@ public sealed class DerivedModelTests
         Assert.Equal("session", session.GetTableName());
         Assert.True(typeof(IDerivedEntity).IsAssignableFrom(session.ClrType));
     }
+
+    /// <summary>
+    /// Named literally rather than read back from the mapping: a test that took its expectations
+    /// from the code it checks would pass an index being renamed out of existence. Their absence
+    /// was measured at 776.06 ms against 56.15 ms on Postgres for the per-tool aggregate — a
+    /// measured 13.8× — falling to a measured 64.34 ms once present
+    /// (docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md Part 3).
+    /// </summary>
+    [Theory]
+    [InlineData("ix_tc_session", "session_id")]
+    [InlineData("ix_tc_name", "tool_name")]
+    [InlineData("ix_tc_session_path", "session_id,path")]
+    [InlineData("ix_tc_name_success", "tool_name,success")]
+    [InlineData("ix_tc_session_name", "session_id,tool_name")]
+    public void The_measured_tool_call_index_exists(string name, string columns)
+    {
+        using var context = new PostMortemContext();
+
+        var designTimeModel = context.GetService<IDesignTimeModel>().Model;
+
+        var index = designTimeModel.FindEntityType(typeof(ToolCall))!
+            .GetIndexes()
+            .SingleOrDefault(candidate => candidate.GetDatabaseName() == name);
+
+        Assert.True(index is not null, $"tool_call has no index '{name}'.");
+        Assert.Equal(
+            columns.Split(','),
+            index!.Properties.Select(property => property.GetColumnName()).ToArray());
+    }
 }

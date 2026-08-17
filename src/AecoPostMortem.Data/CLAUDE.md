@@ -18,6 +18,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `Execution/Session.cs` | the first derived entity: one Copilot session, keyed by `SessionId` |
 | `Execution/IOwned.cs` | `OwnerKind` (`Main`/`Agent`) and the `IOwned` contract every subagent-ownable derived entity carries |
 | `Execution/Turn.cs` | one assistant turn, bounded by `assistant.turn_start`/`turn_end`, keyed by `(SessionId, TurnId)` |
+| `Execution/ToolCall.cs` | one tool invocation, bounded by `tool.execution_start`/`execution_complete`, keyed by `(SessionId, ToolCallId)`; carries its five measured indexes |
 | `Migrations/` | generated; do not read unless the task is about migrations (Repo Rule 1) |
 
 ## References
@@ -86,6 +87,17 @@ null `agent_id` exactly, so a row can't claim the main thread while carrying an 
 an agent without one) no matter which code path writes it. The data map measured 115 of 115 agent
 ids resolving to a known subagent handle, so absence of an agent id means main thread, not "unknown"
 — there is deliberately no nullable third state.
+
+### `ToolCall`'s indexes ship with the contract, not with the story that queries through them
+
+`ix_tc_session`, `ix_tc_name`, `ix_tc_session_path`, `ix_tc_name_success` and `ix_tc_session_name`
+exist because their absence was measured at 776.06 ms against 56.15 ms on Postgres for the per-tool
+aggregate — a measured 13.8×, falling to 64.34 ms once present
+(`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md` Part 3). A
+measured 16,085 `tool.execution_start` events against 16,076 `execution_complete` means an
+unfinished call is a real state, so `CompletedAt`, `Success`, `ResultSizeBytes` and the MCP fields
+are nullable rather than zero-filled. `DerivedModelTests.The_measured_tool_call_index_exists` names
+each index literally so a rename can't pass unnoticed.
 
 ### `Pooling=False` on the connection
 

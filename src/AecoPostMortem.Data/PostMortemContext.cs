@@ -37,6 +37,8 @@ public sealed class PostMortemContext : DbContext
 
     public DbSet<Turn> Turns => Set<Turn>();
 
+    public DbSet<ToolCall> ToolCalls => Set<ToolCall>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -72,6 +74,7 @@ public sealed class PostMortemContext : DbContext
 
         MapSession(modelBuilder);
         MapTurn(modelBuilder);
+        MapToolCall(modelBuilder);
         ExcludeDerivedTypesFromMigrations(modelBuilder);
     }
 
@@ -146,6 +149,34 @@ public sealed class PostMortemContext : DbContext
         turn.HasIndex(row => row.SessionId).HasDatabaseName("ix_turn_session");
 
         MapOwnership(turn, "turn");
+    }
+
+    static void MapToolCall(ModelBuilder modelBuilder)
+    {
+        var toolCall = modelBuilder.Entity<ToolCall>();
+
+        toolCall.ToTable("tool_call");
+        toolCall.HasKey(row => new { row.SessionId, row.ToolCallId });
+
+        toolCall.Property(row => row.SessionId).HasColumnName("session_id");
+        toolCall.Property(row => row.ToolCallId).HasColumnName("tool_call_id");
+        toolCall.Property(row => row.ToolName).HasColumnName("tool_name");
+        toolCall.Property(row => row.StartedAt).HasColumnName("started_at");
+        toolCall.Property(row => row.CompletedAt).HasColumnName("completed_at");
+        toolCall.Property(row => row.Success).HasColumnName("success");
+        toolCall.Property(row => row.Path).HasColumnName("path");
+        toolCall.Property(row => row.ResultSizeBytes).HasColumnName("result_size_bytes");
+        toolCall.Property(row => row.McpServerName).HasColumnName("mcp_server_name");
+        toolCall.Property(row => row.McpToolName).HasColumnName("mcp_tool_name");
+        toolCall.Property(row => row.TurnId).HasColumnName("turn_id");
+
+        toolCall.HasIndex(row => row.SessionId).HasDatabaseName("ix_tc_session");
+        toolCall.HasIndex(row => row.ToolName).HasDatabaseName("ix_tc_name");
+        toolCall.HasIndex(row => new { row.SessionId, row.Path }).HasDatabaseName("ix_tc_session_path");
+        toolCall.HasIndex(row => new { row.ToolName, row.Success }).HasDatabaseName("ix_tc_name_success");
+        toolCall.HasIndex(row => new { row.SessionId, row.ToolName }).HasDatabaseName("ix_tc_session_name");
+
+        MapOwnership(toolCall, "tool_call");
     }
 
     /// <summary>

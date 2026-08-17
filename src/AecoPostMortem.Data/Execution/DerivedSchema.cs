@@ -28,6 +28,16 @@ namespace AecoPostMortem.Data.Execution;
 public static class DerivedSchema
 {
     /// <summary>Every derived table's <c>CREATE</c>, in a fixed order so the version is stable.</summary>
+    /// <remarks>
+    /// Emits exactly five relational features: column type and nullability, the primary key, check
+    /// constraints, and indexes (including uniqueness). This is a partial reimplementation of EF's
+    /// relational model, not a full one — a mapping feature outside that list (a default value, a
+    /// computed column, a collation, a foreign key, ...) is silently dropped from the generated DDL
+    /// rather than failing loudly, because <c>ExcludeFromMigrations</c> means nothing ever runs
+    /// these entities through EF's own script generator to catch the gap.
+    /// <c>DerivedSchemaTests.The_generator_covers_every_mapping_feature_the_derived_model_uses</c>
+    /// is what keeps this list honest as the derived mappings grow.
+    /// </remarks>
     public static IReadOnlyList<string> CreateStatements(PostMortemContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -94,6 +104,14 @@ public static class DerivedSchema
     /// them, which is exactly what §3.8 intends: they are re-derivable from RAW, and `rebuild`
     /// re-derives them.
     /// </summary>
+    /// <remarks>
+    /// The drop, the creates and the <c>store_metadata</c> upsert are separate statements, not one
+    /// transaction, so a process killed between them can leave the tables current but the recorded
+    /// version stale. That is harmless rather than a bug to guard against: the next
+    /// <see cref="LocalStore.Open"/> sees the stale version, drops and recreates the (already-current)
+    /// tables once more, and re-upserts the version — one redundant rebuild of empty, re-derivable
+    /// tables, then it self-heals.
+    /// </remarks>
     public static void EnsureCurrent(PostMortemContext context)
     {
         ArgumentNullException.ThrowIfNull(context);

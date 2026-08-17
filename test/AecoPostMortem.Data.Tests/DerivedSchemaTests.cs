@@ -58,11 +58,13 @@ public sealed class DerivedSchemaTests
     }
 
     /// <summary>
-    /// The version is a hash of the DDL that actually runs, so it cannot be out of step with the
-    /// schema the way a hand-maintained integer can.
+    /// The version is a hash of these statements (see
+    /// <see cref="The_version_is_the_same_every_time_it_is_computed"/>), so a change here is what
+    /// moves it; this test checks the statements themselves carry the pieces the contract depends
+    /// on — a table, both check constraints, and a measured index.
     /// </summary>
     [Fact]
-    public void The_version_moves_when_the_statements_move()
+    public void The_generated_statements_carry_the_tables_constraints_and_indexes()
     {
         using var context = new PostMortemContext();
 
@@ -70,7 +72,84 @@ public sealed class DerivedSchemaTests
 
         Assert.Contains(statements, sql => sql.Contains("CREATE TABLE IF NOT EXISTS turn", StringComparison.Ordinal));
         Assert.Contains(statements, sql => sql.Contains("ck_turn_owner", StringComparison.Ordinal));
+        Assert.Contains(statements, sql => sql.Contains("ck_agent_cost", StringComparison.Ordinal));
         Assert.Contains(statements, sql => sql.Contains("ix_tc_name_success", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <see cref="DerivedSchema.CreateStatements"/> hand-emits exactly five relational features:
+    /// columns (type and nullability), the primary key, check constraints, and indexes (including
+    /// uniqueness). It is a partial reimplementation of EF's relational model, not a full one, and
+    /// <c>ExcludeFromMigrations</c> means these entities never pass through EF's own script
+    /// generator — the one place a genuinely unsupported mapping would otherwise be caught. So a
+    /// later task that maps a default value, a computed column, a collation or a foreign key onto a
+    /// derived entity would have it silently dropped from the generated DDL: the table would still
+    /// get created, <see cref="DerivedSchema.EnsureCurrent"/> would still succeed, and nothing would
+    /// fail to say the feature never reached SQLite. This test is the failure mode's guard: it walks
+    /// every derived entity's design-time metadata and fails the moment one of them uses a feature
+    /// the generator does not emit.
+    /// </summary>
+    [Fact]
+    public void The_generator_covers_every_mapping_feature_the_derived_model_uses()
+    {
+        using var context = new PostMortemContext();
+
+        var derivedTypes = context.GetService<IDesignTimeModel>().Model.GetEntityTypes()
+            .Where(type => typeof(IDerivedEntity).IsAssignableFrom(type.ClrType));
+
+        foreach (var entityType in derivedTypes)
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                var label = $"{entityType.ClrType.Name}.{property.Name}";
+
+                // Not property.GetDefaultValue() is null: for a required, ValueGenerated.Never,
+                // value-typed property (every enum column here, via HasConversion<string>()) that
+                // extension falls back to the CLR default (e.g. OwnerKind.Main) even when nothing
+                // was ever configured — confirmed empirically and by FindAnnotation returning null
+                // for every one of them. Reading the annotation directly is the only way to ask "was
+                // .HasDefaultValue(...) actually called" rather than "what would EF report as this
+                // property's implied default."
+                Assert.True(
+                    property.FindAnnotation(RelationalAnnotationNames.DefaultValue) is null,
+                    $"{label} declares a default value, which DerivedSchema.CreateStatements does "
+                    + "not emit. Add it to the generator or drop the mapping.");
+
+                Assert.True(
+                    property.GetDefaultValueSql() is null,
+                    $"{label} declares a default value SQL, which DerivedSchema.CreateStatements "
+                    + "does not emit. Add it to the generator or drop the mapping.");
+
+                Assert.True(
+                    property.GetComputedColumnSql() is null,
+                    $"{label} is a computed column, which DerivedSchema.CreateStatements does not "
+                    + "emit. Add it to the generator or drop the mapping.");
+
+                Assert.True(
+                    property.GetCollation() is null,
+                    $"{label} declares a collation, which DerivedSchema.CreateStatements does not "
+                    + "emit. Add it to the generator or drop the mapping.");
+            }
+
+            Assert.True(
+                !entityType.GetForeignKeys().Any(),
+                $"{entityType.ClrType.Name} declares a foreign key, which DerivedSchema."
+                + "CreateStatements does not emit. Add it to the generator or drop the mapping.");
+
+            foreach (var index in entityType.GetIndexes())
+            {
+                // Unlike the other four checks, uniqueness IS already emitted (CreateStatements
+                // prefixes the CREATE INDEX with UNIQUE when index.IsUnique is set) — this branch
+                // exists so a new unique index is noticed and its generated statement verified by
+                // eye, not because the feature is unsupported.
+                Assert.False(
+                    index.IsUnique,
+                    $"{entityType.ClrType.Name}'s index '{index.GetDatabaseName()}' is unique. "
+                    + "DerivedSchema.CreateStatements already emits UNIQUE for a unique index — "
+                    + "confirm the generated CREATE INDEX statement carries it, then update this "
+                    + "guard's expectation for the new index.");
+            }
+        }
     }
 
     [Fact]

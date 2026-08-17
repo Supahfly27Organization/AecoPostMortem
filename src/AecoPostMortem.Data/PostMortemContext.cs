@@ -1,3 +1,4 @@
+using AecoPostMortem.Data.Execution;
 using Microsoft.EntityFrameworkCore;
 
 namespace AecoPostMortem.Data;
@@ -31,6 +32,8 @@ public sealed class PostMortemContext : DbContext
 
     public DbSet<RawEvent> RawEvents => Set<RawEvent>();
 
+    public DbSet<Session> Sessions => Set<Session>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -63,5 +66,52 @@ public sealed class PostMortemContext : DbContext
         rawEvent
             .HasIndex(row => row.EventType)
             .HasDatabaseName(RawEventSchema.EventTypeIndex);
+
+        MapSession(modelBuilder);
+        ExcludeDerivedTypesFromMigrations(modelBuilder);
+    }
+
+    static void MapSession(ModelBuilder modelBuilder)
+    {
+        var session = modelBuilder.Entity<Session>();
+
+        session.ToTable("session");
+        session.HasKey(row => row.SessionId);
+
+        session.Property(row => row.SessionId).HasColumnName("session_id");
+        session.Property(row => row.StartedAt).HasColumnName("started_at");
+        session.Property(row => row.EndedAt).HasColumnName("ended_at");
+        session.Property(row => row.CopilotVersion).HasColumnName("copilot_version");
+        session.Property(row => row.EventSchemaVersion).HasColumnName("event_schema_version");
+        session.Property(row => row.SourceFile).HasColumnName("source_file");
+        session.Property(row => row.Cwd).HasColumnName("cwd");
+        session.Property(row => row.GitRoot).HasColumnName("git_root");
+        session.Property(row => row.Branch).HasColumnName("branch");
+        session.Property(row => row.HeadCommit).HasColumnName("head_commit");
+        session.Property(row => row.Repository).HasColumnName("repository");
+        session.Property(row => row.HostType).HasColumnName("host_type");
+        session.Property(row => row.BaseCommit).HasColumnName("base_commit");
+        session.Property(row => row.InputTokens).HasColumnName("input_tokens");
+        session.Property(row => row.OutputTokens).HasColumnName("output_tokens");
+        session.Property(row => row.CacheReadTokens).HasColumnName("cache_read_tokens");
+        session.Property(row => row.CacheWriteTokens).HasColumnName("cache_write_tokens");
+        session.Property(row => row.ReasoningTokens).HasColumnName("reasoning_tokens");
+        session.Property(row => row.ModelCount).HasColumnName("model_count");
+    }
+
+    /// <summary>
+    /// Repo Rule 4 as a loop rather than as a call each new entity must remember. A derived type
+    /// added in a year is caught by this; one that omits the marker fails
+    /// <c>DerivedModelTests</c> instead of silently entering the migration set.
+    /// </summary>
+    static void ExcludeDerivedTypesFromMigrations(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
+        {
+            if (typeof(IDerivedEntity).IsAssignableFrom(entityType.ClrType))
+            {
+                modelBuilder.Entity(entityType.ClrType).ToTable(table => table.ExcludeFromMigrations());
+            }
+        }
     }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using AecoPostMortem.Data.Execution;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -65,6 +66,9 @@ public sealed class LocalStore
     /// Open the store, creating it if it is not there. The schema is created and advanced by
     /// applying the migrations (FR-11), so the operator never runs a database command and a store
     /// written by an older build is brought forward rather than rejected.
+    /// The derived tables are created from the model at the same time, and recreated when the
+    /// model's version moves — they are re-derivable from RAW, so they are rebuilt rather than
+    /// migrated (PRD §3.8).
     /// </summary>
     /// <exception cref="InvalidOperationException">The path holds a file this product did not
     /// create. Overwriting it would destroy whatever it is, so the open fails instead.</exception>
@@ -77,6 +81,7 @@ public sealed class LocalStore
 
         var context = new PostMortemContext(Options());
         context.Database.Migrate();
+        DerivedSchema.EnsureCurrent(context);
 
         OwnerOnlyAccess.ApplyToFile(FilePath);
 

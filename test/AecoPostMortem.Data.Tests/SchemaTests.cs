@@ -51,11 +51,18 @@ public sealed class SchemaTests
         using var temporary = new TemporaryStore();
         using var context = temporary.Store.Open();
 
+        var derived = context.Model.GetEntityTypes()
+            .Where(type => typeof(AecoPostMortem.Data.Execution.IDerivedEntity).IsAssignableFrom(type.ClrType))
+            .Select(type => type.GetTableName()!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // sqlite_% and __EF% are the engine's and EF Core's own bookkeeping, not the product's model.
         var tables = Query(
                 context,
                 "SELECT name FROM sqlite_master WHERE type = 'table' "
                 + "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_\\_EF%' ESCAPE '\\' "
                 + "ORDER BY name")
+            .Where(name => !derived.Contains(name))
             .ToArray();
 
         Assert.Equal(["raw_event", "store_metadata"], tables);

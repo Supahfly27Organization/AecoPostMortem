@@ -16,6 +16,8 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `OwnerOnlyAccess.cs` | owner-only permissions, per platform |
 | `Execution/IDerivedEntity.cs` | empty marker interface for the NORMALIZED/FINDINGS layers |
 | `Execution/Session.cs` | the first derived entity: one Copilot session, keyed by `SessionId` |
+| `Execution/IOwned.cs` | `OwnerKind` (`Main`/`Agent`) and the `IOwned` contract every subagent-ownable derived entity carries |
+| `Execution/Turn.cs` | one assistant turn, bounded by `assistant.turn_start`/`turn_end`, keyed by `(SessionId, TurnId)` |
 | `Migrations/` | generated; do not read unless the task is about migrations (Repo Rule 1) |
 
 ## References
@@ -74,6 +76,16 @@ model, which strips migrations-only annotations — calling `IsTableExcludedFrom
 throws rather than answering. Tests that assert on that annotation must read
 `context.GetService<IDesignTimeModel>().Model` instead (`Microsoft.EntityFrameworkCore.Metadata`
 namespace).
+
+### Ownership is a database constraint, not a convention
+
+`IOwned` (`OwnerKind` + `AgentId`) is carried by every derived entity a subagent can own; `Turn` is
+the first. `PostMortemContext.MapOwnership<TEntity>` is the shared helper every such entity's
+mapping calls — it adds a `ck_<table>_owner` check constraint pairing `owner_kind = 'main'` with a
+null `agent_id` exactly, so a row can't claim the main thread while carrying an agent id (or claim
+an agent without one) no matter which code path writes it. The data map measured 115 of 115 agent
+ids resolving to a known subagent handle, so absence of an agent id means main thread, not "unknown"
+— there is deliberately no nullable third state.
 
 ### `Pooling=False` on the connection
 

@@ -1,5 +1,6 @@
 using AecoPostMortem.Data.Execution;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace AecoPostMortem.Data;
 
@@ -33,6 +34,8 @@ public sealed class PostMortemContext : DbContext
     public DbSet<RawEvent> RawEvents => Set<RawEvent>();
 
     public DbSet<Session> Sessions => Set<Session>();
+
+    public DbSet<Turn> Turns => Set<Turn>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -68,6 +71,7 @@ public sealed class PostMortemContext : DbContext
             .HasDatabaseName(RawEventSchema.EventTypeIndex);
 
         MapSession(modelBuilder);
+        MapTurn(modelBuilder);
         ExcludeDerivedTypesFromMigrations(modelBuilder);
     }
 
@@ -97,6 +101,51 @@ public sealed class PostMortemContext : DbContext
         session.Property(row => row.CacheWriteTokens).HasColumnName("cache_write_tokens");
         session.Property(row => row.ReasoningTokens).HasColumnName("reasoning_tokens");
         session.Property(row => row.ModelCount).HasColumnName("model_count");
+    }
+
+    /// <summary>
+    /// The ownership columns and the check that binds them. A row claiming the main thread while
+    /// carrying an agent id — or claiming an agent without one — is refused by the database rather
+    /// than by whoever wrote it.
+    /// </summary>
+    static void MapOwnership<TEntity>(EntityTypeBuilder<TEntity> entity, string table)
+        where TEntity : class, IOwned
+    {
+        entity.Property(row => row.OwnerKind)
+            .HasColumnName("owner_kind")
+            .HasConversion(
+                kind => kind == OwnerKind.Main ? "main" : "agent",
+                text => text == "main" ? OwnerKind.Main : OwnerKind.Agent)
+            .IsRequired();
+
+        entity.Property(row => row.AgentId).HasColumnName("agent_id");
+
+        entity.ToTable(table, builder => builder.HasCheckConstraint(
+            $"ck_{table}_owner",
+            "(owner_kind = 'main') = (agent_id IS NULL)"));
+    }
+
+    static void MapTurn(ModelBuilder modelBuilder)
+    {
+        var turn = modelBuilder.Entity<Turn>();
+
+        turn.ToTable("turn");
+        turn.HasKey(row => new { row.SessionId, row.TurnId });
+
+        turn.Property(row => row.SessionId).HasColumnName("session_id");
+        turn.Property(row => row.TurnId).HasColumnName("turn_id");
+        turn.Property(row => row.StartedAt).HasColumnName("started_at");
+        turn.Property(row => row.EndedAt).HasColumnName("ended_at");
+        turn.Property(row => row.AbortReason).HasColumnName("abort_reason");
+        turn.Property(row => row.OutputTokens).HasColumnName("output_tokens");
+        turn.Property(row => row.Outcome)
+            .HasColumnName("outcome")
+            .HasConversion<string>()
+            .IsRequired();
+
+        turn.HasIndex(row => row.SessionId).HasDatabaseName("ix_turn_session");
+
+        MapOwnership(turn, "turn");
     }
 
     /// <summary>

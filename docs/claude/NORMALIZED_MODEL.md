@@ -159,9 +159,11 @@ Index: `ix_write_unit_session` (`SessionId`).
   nullable third ownership state.
 - **The agent completion states are gated by `ck_agent_cost`.** `Agent.Outcome` is one of `Running`,
   `Completed`, `CompletedCostUnknown` or `Failed` — four states, not two, because cost data does not
-  always accompany a completion. `agent.ck_agent_cost` requires
-  `outcome = 'Completed' OR (total_tokens IS NULL AND total_tool_calls IS NULL AND duration_ms IS`
-  `NULL AND model IS NULL)`, so cost metrics can accompany only a `Completed` outcome.
+  always accompany a completion. `agent.ck_agent_cost` requires:
+  ```sql
+  outcome = 'Completed' OR (total_tokens IS NULL AND total_tool_calls IS NULL AND duration_ms IS NULL AND model IS NULL)
+  ```
+  So cost metrics can accompany only a `Completed` outcome.
 
 Message text is not in this layer — it is read from `raw_event`, keyed by the same `session_id`
 these tables carry. `FileChange`, `RuleStatement` and `RuleSetVersion` are deliberately not among

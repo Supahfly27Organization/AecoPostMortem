@@ -106,6 +106,7 @@ per-column coverage. Read it before mapping or querying anything under `Executio
 1. Implement `IDerivedEntity` (and `IOwned`, if a subagent can own it) under `Execution/`.
 2. Map it in `OnModelCreating` with snake_case columns; call `MapOwnership` if it is `IOwned`.
 3. Add it to `DerivedModelTests.The_eight_shapes_are_published`.
-4. No migration — the table is created from the model (see the two decisions above).
+4. No migration — the table is created from the model, not from a migration
+   (`docs/DERIVED_LAYER.md`).
 
 A derived layer never reaches step 2: it is dropped and re-derived by `rebuild`.

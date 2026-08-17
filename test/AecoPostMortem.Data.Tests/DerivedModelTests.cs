@@ -74,4 +74,48 @@ public sealed class DerivedModelTests
             columns.Split(','),
             index!.Properties.Select(property => property.GetColumnName()).ToArray());
     }
+
+    /// <summary>Acceptance criterion 1, by name. Eight shapes, no more and no fewer — FileChange,
+    /// RuleStatement and RuleSetVersion belong to S-07, S-19 and S-20.</summary>
+    [Fact]
+    public void The_eight_shapes_are_published()
+    {
+        using var context = new PostMortemContext();
+
+        // context.Model returns the read-optimized runtime model, which strips migrations-only
+        // annotations; the design-time model still carries the full entity set (see the class
+        // remarks on Every_derived_entity_type_is_excluded_from_migrations).
+        var designTimeModel = context.GetService<IDesignTimeModel>().Model;
+
+        var published = designTimeModel.GetEntityTypes()
+            .Where(type => typeof(IDerivedEntity).IsAssignableFrom(type.ClrType))
+            .Select(type => type.ClrType.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            ["Agent", "Hook", "Permission", "Session", "Skill", "ToolCall", "Turn", "WriteUnit"],
+            published);
+    }
+
+    /// <summary>Acceptance criterion 2, read from the model's key metadata rather than restated.</summary>
+    [Fact]
+    public void Every_derived_key_contains_the_session()
+    {
+        using var context = new PostMortemContext();
+
+        var designTimeModel = context.GetService<IDesignTimeModel>().Model;
+
+        var unscoped = designTimeModel.GetEntityTypes()
+            .Where(type => typeof(IDerivedEntity).IsAssignableFrom(type.ClrType))
+            .Where(type => !type.FindPrimaryKey()!.Properties
+                .Any(property => property.GetColumnName() == "session_id"))
+            .Select(type => type.ClrType.Name)
+            .ToArray();
+
+        Assert.True(
+            unscoped.Length == 0,
+            "Every entity is scoped by its session, and the session is part of its key: "
+            + string.Join(", ", unscoped));
+    }
 }

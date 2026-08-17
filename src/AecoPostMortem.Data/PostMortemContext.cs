@@ -41,6 +41,14 @@ public sealed class PostMortemContext : DbContext
 
     public DbSet<Agent> Agents => Set<Agent>();
 
+    public DbSet<Skill> Skills => Set<Skill>();
+
+    public DbSet<Hook> Hooks => Set<Hook>();
+
+    public DbSet<Permission> Permissions => Set<Permission>();
+
+    public DbSet<WriteUnit> WriteUnits => Set<WriteUnit>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -78,6 +86,7 @@ public sealed class PostMortemContext : DbContext
         MapTurn(modelBuilder);
         MapToolCall(modelBuilder);
         MapAgent(modelBuilder);
+        MapEventScopedEntities(modelBuilder);
         ExcludeDerivedTypesFromMigrations(modelBuilder);
     }
 
@@ -213,6 +222,54 @@ public sealed class PostMortemContext : DbContext
             "ck_agent_cost",
             "outcome = 'Completed' OR (total_tokens IS NULL AND total_tool_calls IS NULL "
             + "AND duration_ms IS NULL AND model IS NULL)"));
+    }
+
+    static void MapEventScopedEntities(ModelBuilder modelBuilder)
+    {
+        var skill = modelBuilder.Entity<Skill>();
+        skill.HasKey(row => new { row.SessionId, row.EventId });
+        skill.Property(row => row.SessionId).HasColumnName("session_id");
+        skill.Property(row => row.EventId).HasColumnName("event_id");
+        skill.Property(row => row.Name).HasColumnName("name");
+        skill.Property(row => row.Path).HasColumnName("path");
+        skill.Property(row => row.Description).HasColumnName("description");
+        skill.Property(row => row.PluginName).HasColumnName("plugin_name");
+        skill.Property(row => row.PluginVersion).HasColumnName("plugin_version");
+        skill.Property(row => row.InvokedAt).HasColumnName("invoked_at");
+        skill.HasIndex(row => row.SessionId).HasDatabaseName("ix_skill_session");
+        MapOwnership(skill, "skill");
+
+        var hook = modelBuilder.Entity<Hook>();
+        hook.HasKey(row => new { row.SessionId, row.EventId });
+        hook.Property(row => row.SessionId).HasColumnName("session_id");
+        hook.Property(row => row.EventId).HasColumnName("event_id");
+        hook.Property(row => row.Name).HasColumnName("name");
+        hook.Property(row => row.StartedAt).HasColumnName("started_at");
+        hook.Property(row => row.EndedAt).HasColumnName("ended_at");
+        hook.Property(row => row.Success).HasColumnName("success");
+        hook.HasIndex(row => row.SessionId).HasDatabaseName("ix_hook_session");
+        MapOwnership(hook, "hook");
+
+        var permission = modelBuilder.Entity<Permission>();
+        permission.HasKey(row => new { row.SessionId, row.EventId });
+        permission.Property(row => row.SessionId).HasColumnName("session_id");
+        permission.Property(row => row.EventId).HasColumnName("event_id");
+        permission.Property(row => row.RequestedAt).HasColumnName("requested_at");
+        permission.Property(row => row.CompletedAt).HasColumnName("completed_at");
+        permission.Property(row => row.ResultKind).HasColumnName("result_kind");
+        permission.Property(row => row.ToolCallId).HasColumnName("tool_call_id");
+        permission.HasIndex(row => row.SessionId).HasDatabaseName("ix_permission_session");
+        MapOwnership(permission, "permission");
+
+        var writeUnit = modelBuilder.Entity<WriteUnit>();
+        writeUnit.HasKey(row => new { row.SessionId, row.EventId });
+        writeUnit.Property(row => row.SessionId).HasColumnName("session_id");
+        writeUnit.Property(row => row.EventId).HasColumnName("event_id");
+        writeUnit.Property(row => row.ToolCallId).HasColumnName("tool_call_id");
+        writeUnit.Property(row => row.Path).HasColumnName("path");
+        writeUnit.Property(row => row.AddedContent).HasColumnName("added_content");
+        writeUnit.HasIndex(row => row.SessionId).HasDatabaseName("ix_write_unit_session");
+        MapOwnership(writeUnit, "write_unit");
     }
 
     /// <summary>

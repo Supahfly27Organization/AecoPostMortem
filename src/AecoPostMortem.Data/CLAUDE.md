@@ -20,6 +20,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `Execution/Turn.cs` | one assistant turn, bounded by `assistant.turn_start`/`turn_end`, keyed by `(SessionId, TurnId)` |
 | `Execution/ToolCall.cs` | one tool invocation, bounded by `tool.execution_start`/`execution_complete`, keyed by `(SessionId, ToolCallId)`; carries its five measured indexes |
 | `Execution/Agent.cs` | one subagent, keyed by `(SessionId, AgentId)`; carries `AgentOutcome`'s four-state completion tri-state instead of `IOwned` — it is the owner |
+| `Execution/EventScopedEntities.cs` | `Skill`, `Hook`, `Permission`, `WriteUnit` — the four shapes Copilot writes no natural id for, each keyed `(SessionId, EventId)` off the envelope's own `id`; completes the contract's eight shapes |
 | `Migrations/` | generated; do not read unless the task is about migrations (Repo Rule 1) |
 
 ## References
@@ -120,6 +121,16 @@ unknown" from `Running`/`Failed` (did not complete), and the metric columns (`To
 readable as zero. `ck_agent_cost` enforces that pairing in the database — metrics may accompany
 only `Outcome = 'Completed'` — and it compares against the capitalized C# member name because
 `Outcome` is persisted via `HasConversion<string>()`, not a lowercased form.
+
+### `Skill`, `Hook`, `Permission` and `WriteUnit` key off the envelope's `id`, not a Copilot-issued one
+
+Copilot writes no natural id for a skill invocation, a hook pair, a permission request or a write.
+`EventId` is the event envelope's own `id` instead — measured present on 100% of events — so each
+is keyed `(SessionId, EventId)` rather than the tool-call/turn/agent pattern of keying off an id
+Copilot issued. All four are `IOwned` and mapped through `MapEventScopedEntities`, which — like
+every other derived mapping — ends each entity's block with `MapOwnership`, since that call is what
+names the table. `WriteUnit` is published but never populated in v1: FR-36 is Phase E, gated out by
+PRD §3.4.3; the shape exists so later stories have something to compile against.
 
 ## Playbook — changing the RAW schema
 

@@ -14,6 +14,8 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `LocalStore.cs` | the store as a file: path, creation, size, purge |
 | `StoreLocation.cs` | FR-11's documented per-user path |
 | `OwnerOnlyAccess.cs` | owner-only permissions, per platform |
+| `Execution/IDerivedEntity.cs` | empty marker interface for the NORMALIZED/FINDINGS layers |
+| `Execution/Session.cs` | the first derived entity: one Copilot session, keyed by `SessionId` |
 | `Migrations/` | generated; do not read unless the task is about migrations (Repo Rule 1) |
 
 ## References
@@ -57,6 +59,21 @@ inside a JSON string.
 `RawPayload.FromUtf8` throws on bytes it cannot decode rather than substituting U+FFFD. TEXT is
 stored as UTF-8, so a lossy decode would make the round trip silently non-verbatim; failing instead
 routes the line to FR-6's per-line tolerance, where it is counted and retried.
+
+### The derived layer is excluded from migrations by a loop, not by memory
+
+Any entity implementing `AecoPostMortem.Data.Execution.IDerivedEntity` is swept by
+`PostMortemContext.ExcludeDerivedTypesFromMigrations` at the end of `OnModelCreating` and marked
+`ToTable(table => table.ExcludeFromMigrations())`. A new derived entity that forgets the marker
+fails `DerivedModelTests.Every_derived_entity_type_is_excluded_from_migrations` instead of quietly
+entering the next `migrations add` — Repo Rule 4 as a loop rather than a call each entity's mapping
+code has to remember.
+
+`DbContext.Model` (the property tests normally read) returns EF Core 10's read-optimized runtime
+model, which strips migrations-only annotations — calling `IsTableExcludedFromMigrations()` on it
+throws rather than answering. Tests that assert on that annotation must read
+`context.GetService<IDesignTimeModel>().Model` instead (`Microsoft.EntityFrameworkCore.Metadata`
+namespace).
 
 ### `Pooling=False` on the connection
 

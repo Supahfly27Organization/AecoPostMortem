@@ -10,6 +10,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `RawEventSchema.cs` | the physical table, column and index names, stated once |
 | `RawPayload.cs` | strict UTF-8 decode, and FR-2's content hash |
 | `PostMortemContext.cs` | the model, its column mapping and its indexes |
+| `StoreMetadata.cs` | the store's own key/value state — migrated, not derived; holds `DerivedSchemaVersionKey` |
 | `RawEventBatch.cs` | the batched raw-SQL append |
 | `LocalStore.cs` | the store as a file: path, creation, size, purge |
 | `StoreLocation.cs` | FR-11's documented per-user path |
@@ -64,6 +65,17 @@ inside a JSON string.
 `RawPayload.FromUtf8` throws on bytes it cannot decode rather than substituting U+FFFD. TEXT is
 stored as UTF-8, so a lossy decode would make the round trip silently non-verbatim; failing instead
 routes the line to FR-6's per-line tolerance, where it is counted and retried.
+
+### `store_metadata` is migrated deliberately, not by oversight
+
+`StoreMetadata` does not implement `IDerivedEntity` and lives outside `Execution/` and its
+namespace, so `ExcludeDerivedTypesFromMigrations` never touches it — it is the one non-RAW table
+the migrations create (`SchemaTests.The_migrations_create_only_RAW_and_the_stores_own_metadata`
+names both tables literally). It records facts about the store itself, including
+`DerivedSchemaVersionKey`, the derived schema's version: a value dropped alongside the tables it
+describes could not be compared against them, so it cannot be re-derived the way NORMALIZED and
+FINDINGS are. `MapStoreMetadata` runs first in `OnModelCreating`, immediately after the `rawEvent`
+block and before `MapSession`, so its placement can't drift as later mappings are added.
 
 ### The derived layer is excluded from migrations by a loop, not by memory
 

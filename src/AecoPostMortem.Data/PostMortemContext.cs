@@ -33,6 +33,8 @@ public sealed class PostMortemContext : DbContext
 
     public DbSet<RawEvent> RawEvents => Set<RawEvent>();
 
+    public DbSet<StoreMetadata> StoreMetadata => Set<StoreMetadata>();
+
     public DbSet<Session> Sessions => Set<Session>();
 
     public DbSet<Turn> Turns => Set<Turn>();
@@ -82,12 +84,24 @@ public sealed class PostMortemContext : DbContext
             .HasIndex(row => row.EventType)
             .HasDatabaseName(RawEventSchema.EventTypeIndex);
 
+        MapStoreMetadata(modelBuilder);
         MapSession(modelBuilder);
         MapTurn(modelBuilder);
         MapToolCall(modelBuilder);
         MapAgent(modelBuilder);
         MapEventScopedEntities(modelBuilder);
         ExcludeDerivedTypesFromMigrations(modelBuilder);
+    }
+
+    static void MapStoreMetadata(ModelBuilder modelBuilder)
+    {
+        var metadata = modelBuilder.Entity<StoreMetadata>();
+
+        metadata.ToTable("store_metadata");
+        metadata.HasKey(row => row.Key);
+
+        metadata.Property(row => row.Key).HasColumnName("key");
+        metadata.Property(row => row.Value).HasColumnName("value");
     }
 
     static void MapSession(ModelBuilder modelBuilder)

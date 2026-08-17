@@ -90,7 +90,7 @@ there is no database command to run.
 
 | DB | Connection String |
 |---|---|
-| Store (SQLite) | `Data Source=<per-user store path>` — set by the product; `purge` deletes it |
+| Store (SQLite) | `Data Source=<StoreLocation.Default>;Pooling=False` — `%LOCALAPPDATA%\AecoPostMortem\store.db` on Windows, `~/.local/share/AecoPostMortem/store.db` elsewhere; `purge` deletes it |
 
 <!-- Add one row per database this project connects to locally, and note any env var
      used to override each connection string (e.g. `<NAME>_DB_CONNECTION`). -->

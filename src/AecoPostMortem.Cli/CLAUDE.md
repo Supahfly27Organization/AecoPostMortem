@@ -4,22 +4,30 @@ The command surface FR-58 enumerates: `ingest`, `rebuild`, `purge`, `serve`.
 
 ## References
 
-`Api`, `Findings`, `Ingestion` — the CLI is the entry point that dispatches into whichever layer a
-command needs; it holds no logic of its own beyond parsing and dispatch.
+`Api`, `Findings`, `Ingestion`, `Data` — the CLI is the entry point that dispatches into whichever
+layer a command needs; it holds no logic of its own beyond parsing and dispatch. `Data` is on that
+list because `purge` is a store operation and there is no layer between the two worth inventing for
+it.
 
 ## Non-obvious decisions
 
-`CommandSurface.Commands` is the single source of truth for what commands exist — the listing
-(`CommandListing`) is rendered from it and dispatch (`CommandRunner`) reads from it, so nothing else
-enumerates commands. `CommandSpec.ArrivesWith` names what implements each command's behaviour; the
-surface exists, the behaviour does not yet, and `serve` reports that rather than failing when
-invoked.
+### `CommandSurface.Commands` is the single source of truth for what commands exist
+
+The listing (`CommandListing`) is rendered from it and dispatch (`CommandRunner`) reads from it, so
+nothing else enumerates commands. `CommandSpec.ArrivesWith` names what implements each command's
+behaviour, and a command whose behaviour has not landed reports that and exits zero rather than
+failing — FR-58 requires the surface to enumerate itself before what sits behind it exists.
+
+### `CommandRunner.Run` takes the store as an optional argument
+
+It defaults to `LocalStore.AtDefaultLocation()`, which is the operator's real store. Tests pass a
+throwaway one; without that argument the only way to test `purge` would be to delete it.
 
 ## Status
 
 The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `CommandListing`,
-`CommandRunner`, `Program`). Behaviour behind each command arrives next, in the order its
-`CommandSpec.ArrivesWith` names.
+`CommandRunner`, `Program`), and `purge` is wired to the store. Behaviour behind the other commands
+arrives in the order each `CommandSpec.ArrivesWith` names.
 
 ## Playbook — adding a command
 

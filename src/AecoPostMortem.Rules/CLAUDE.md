@@ -12,6 +12,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
+| `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
 
 ## The invariant
 
@@ -94,9 +95,38 @@ validated at run time.
 `HookFailureCheckTests.The_denominator_fields_are_required_members` proves the properties still
 carry `RequiredMemberAttribute`.
 
+### A check's plain input never carries the entity that produced it
+
+`ToolCallOutcome` (session id, tool identity, success) exists only because this project cannot see
+`AecoPostMortem.Data.Execution.ToolCall` — it has no reference to `Data` at all. Every check-shape
+input is a small record shaped like this one: the fields a check needs, resolved by the caller, and
+nothing else. `AecoPostMortem.Findings` is the project that reads the real entity and narrows it to
+the plain shape.
+
+### A rate is structurally required, never a bare number
+
+`FailureRate.Failures` and `FailureRate.Calls` are both `required`; `Percentage` is a computed,
+setter-less property derived from the two. There is no constructor path that produces a percentage
+without its counts — `FailedToolCallsCheckTests.The_percentage_is_computed_never_a_settable_member`
+proves it by reflection, mirroring the reasoning `AecoPostMortem.Findings/CLAUDE.md` gives for
+`Finding.Provenance` being `required`. `ToolFailureRate.SessionCount` is `required` alongside
+`FailureRate` for the same reason: a tool called a handful of times must carry that context with
+its rate, not as an optional afterthought (issue #26, Scenario 2).
+
+### The check groups by whatever tool identity the operand carries
+
+`FailedToolCallsCheck.Run` groups `ToolCallOutcome` by `ToolIdentity` with no case that names a
+specific tool — Repo Rule 6 holds because there is nothing here for a name to hide in, and
+`FailedToolCallsCheckTests.The_check_groups_by_whatever_tool_identity_the_operand_carries` exercises
+deliberately unusual identities to prove the grouping is generic. The check returns a rate for
+every tool observed, including ones with zero failures; deciding which rates are worth surfacing as
+a finding is `AecoPostMortem.Findings`'s call, not this one's.
+
 ## Status
 
-Tool vocabulary and role derivation (S-21, issue #34) has landed. `HookFailureCheck` (issue #27,
-FR-17) is the first entry in the check-shape catalogue — the shape it establishes (plain per-session
-inputs in, a structurally-paired result out) is the pattern later checks in this project should
-follow.
+Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has two
+entries: `HookFailureCheck` (issue #27, FR-17) and `FailedToolCallsCheck` (issue #26, FR-16). The
+shape they establish — plain per-call/per-session inputs in, a structurally-required or
+structurally-paired result out, no branch on any specific tool name — is the pattern later checks in
+this project should follow. A sibling Waste-class check (repeated file reads, issue #25) is landing
+concurrently in its own file.

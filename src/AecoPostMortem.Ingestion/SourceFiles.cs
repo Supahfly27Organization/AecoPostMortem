@@ -15,12 +15,25 @@ public static class SourceFiles
     /// exclusive share would make the source fail to write. Read-only means the product neither
     /// writes to the source nor stops it being written to.
     /// </remarks>
-    public static FileStream OpenRead(string path) =>
-        new(path, new FileStreamOptions
+    /// <exception cref="InvalidOperationException"><paramref name="path"/> is
+    /// <see cref="ExcludedSources.IsExcluded">excluded by design</see> (FR-10) — refused before any
+    /// OS-level open is attempted, which is what makes "never opened" a property of this door rather
+    /// than of every caller remembering the exclusion.</exception>
+    public static FileStream OpenRead(string path)
+    {
+        if (ExcludedSources.IsExcluded(path))
+        {
+            throw new InvalidOperationException(
+                $"'{path}' is excluded from ingestion by design and will not be opened. "
+                + ExcludedSources.SkipReason);
+        }
+
+        return new(path, new FileStreamOptions
         {
             Mode = FileMode.Open,
             Access = FileAccess.Read,
             Share = FileShare.ReadWrite | FileShare.Delete,
             Options = FileOptions.SequentialScan,
         });
+    }
 }

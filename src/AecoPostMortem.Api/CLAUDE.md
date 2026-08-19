@@ -8,6 +8,7 @@ Endpoints for the three surfaces.
 |---|---|
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General` and `FindingEnvelope.Adherence`, and the `From`/`FromAdherence` factories that assemble them from a `Finding` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
+| `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
 
 ## References
 
@@ -48,7 +49,25 @@ build real endpoints against it (S-08, S-22, S-24, S-36, S-37, S-42, S-48) have 
 to target. Nothing here reads through `Data` or calls into `Rules` yet — the factory methods take a
 `Finding` (and, for `FromAdherence`, a `Resolution` and rule version) as plain inputs.
 
+### `DigestEnvelope.From` takes a mapper, not a fixed factory
+
+`DigestEnvelope.From(ProcessDigest, Func<Finding, FindingEnvelope>)` cannot assume every ranked
+finding maps through `FindingEnvelope.From` — an adherence finding needs `FromAdherence` with its
+resolution and rule version instead (FR-33), and only the caller (which already has the resolution)
+knows which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
+the ranking already happened in `Findings`, this only converts each entry to its wire shape.
+
+### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
+
+Both enums are declared in `Findings` with no serialisation attributes of their own — domain types
+stay serialisation-agnostic, the same separation `FindingEnvelope`/`SuggestionEnvelope` already draw.
+`MastheadEnvelope.RuleCoverage` and `DigestEnvelope.State` each carry their own
+`[JsonConverter(typeof(JsonStringEnumConverter))]` here instead, so a client reads `"NotYetAnalyzed"`
+rather than an opaque integer for a state whose entire point (S-36's Gherkin) is to be stated in
+words.
+
 ## Status
 
-The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`). No HTTP endpoints exist
-yet — those arrive with the stories this contract unblocks.
+The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `DigestEnvelope`,
+`MastheadEnvelope`). No HTTP endpoints exist yet — those arrive with the stories this contract
+unblocks.

@@ -15,6 +15,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
+| `Digest.cs` | FR-41 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking |
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
@@ -121,6 +122,39 @@ the counts that produced it, or the rate without the session count that contextu
 #26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
 without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
 
+### `ProcessDigest.Build` takes plain, already-resolved inputs — the same reason it can prove it never scans
+
+S-36's own edge case says the masthead's totals are the one place this surface could scan the corpus,
+and it must not (counting a million rows measured 126 ms on SQLite and 118 ms on Postgres —
+`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`). `MastheadCounters`
+is therefore a plain input record — "the stored counters maintained at ingest", not a live count —
+the same reasoning `HookFailureFinding.Build` and `FailedToolCallsFinding` give for taking plain
+inputs instead of reading through `Data` directly: no code in this repository yet writes those
+counters at ingest time, so the caller (a later story) supplies them. `ProcessDigestStructureTests`
+proves the "no scan" guarantee structurally, the same way `SuggestionRendererStructureTests` proves
+"no model call": an allowlist of every type `ProcessDigest`'s public surface may mention has no room
+for an `IQueryable` or a `DbContext`, so a method that cannot accept a live data source cannot issue
+a query when it runs.
+
+### Two designed "nothing to show" states, and they do not collapse into each other
+
+`DigestState.NotYetAnalyzed` (no check has ever run — reusing `CheckRegistryEntry`'s own
+`Ran`/`Refused` distinction, issue #23 Scenario 5, at the digest level) and `DigestState.Incomplete`
+(`MastheadCounters.IngestInProgress`) answer different questions — "has analysis ever happened" versus
+"is analysis still running right now." `ProcessDigest.Build` checks `IngestInProgress` first, so a
+corpus that is both mid-ingest and has no check registered yet still reads `Incomplete`: the more
+urgent, more specific claim wins rather than the two states being merged or left to declare in
+whichever order a caller happens to check them.
+
+### `RuleCoverageStatus` has exactly one member today, on purpose
+
+FR-26 and FR-40 (rule extraction, the coverage bar's population) are Release 2. Rather than a
+nullable or boolean stand-in for "not yet analysed" that a Release-2 figure would later have to
+un-collide from a real zero, the enum simply has no other case yet — the same reasoning
+`FindingEnvelope`'s closed shapes give for making an unrepresentable state a compile-time fact
+instead of a runtime one. A Release-2 value is added here when FR-26/FR-40 land; nothing about
+`Masthead` needs to change to admit it.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -173,3 +207,11 @@ mechanism against a synthetic tool-choice check result standing in for the story
 real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.
+
+`ProcessDigest.Build` (issue #44, S-36, FR-41 part 1 of 2) ranks whatever findings are handed to it
+by distinct sessions affected and states the masthead's designed states
+(`NotYetAnalyzed`/`Incomplete`/`Analyzed`, `RuleCoverageStatus.NotYetAnalyzed`). It takes
+`MastheadCounters` as a plain input — nothing in this repository yet writes those counters at ingest
+time, the same not-yet-wired gap `HookFailureFinding` and `FailedToolCallsFinding` document for their
+own `Data` reads. Row expansion, the recurrence strip and the repository selector (FR-41 part 2 of 2)
+are S-54, not built here.

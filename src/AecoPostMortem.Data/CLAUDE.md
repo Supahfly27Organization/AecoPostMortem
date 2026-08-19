@@ -22,7 +22,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `Execution/ToolCall.cs` | one tool invocation, bounded by `tool.execution_start`/`execution_complete`, keyed by `(SessionId, ToolCallId)`; carries its five measured indexes |
 | `Execution/Agent.cs` | one subagent, keyed by `(SessionId, AgentId)`; carries `AgentOutcome`'s four completion states instead of `IOwned` — it is the owner |
 | `Execution/EventScopedEntities.cs` | `Skill`, `Hook`, `Permission`, `WriteUnit` — the four shapes Copilot writes no natural id for, each keyed `(SessionId, EventId)` off the envelope's own `id`; completes the contract's eight shapes |
-| `Execution/DerivedSchema.cs` | hand-generated DDL for the eight derived tables, a SHA-256 version over that DDL, and `EnsureCurrent` — create/drop/version, called by `LocalStore.Open` |
+| `Execution/DerivedSchema.cs` | hand-generated DDL for the eight derived tables, a SHA-256 version over that DDL, `EnsureCurrent` (create/drop/version on open) and `Rebuild` (unconditional drop-and-recreate, what `aecopostmortem rebuild` calls — S-46, issue #24) |
 | `Migrations/` | generated; do not read unless the task is about migrations (Repo Rule 1) |
 
 ## References
@@ -78,6 +78,34 @@ describes could not be compared against them, so it cannot be re-derived the way
 FINDINGS are. `MapStoreMetadata` runs first in `OnModelCreating`, immediately after the `rawEvent`
 block and before `MapSession`, so its placement can't drift as later mappings are added.
 
+### `Rebuild` is unconditional; `EnsureCurrent` is conditional
+
+Both drop and recreate the derived tables, but they answer different questions.
+`EnsureCurrent` asks "has the model's version moved since this store was last opened" and only acts
+when it has — that is what makes opening a current store cheap. `Rebuild` is the operator asking for
+a rebuild regardless of version (PRD §3.2, §3.8, S-46): the CLI's `rebuild` command calls it
+directly, never `EnsureCurrent`, because "nothing changed" is not a reason to refuse the operator's
+own request. Neither method populates the recreated tables from RAW — that derivation logic
+(session discovery, execution record reconstruction) lands with the E1 ingestion stories; today both
+leave the tables empty, which is the honest answer for "re-derived from a RAW that has no reader
+yet." `DerivedSchemaTests` covers `Rebuild`'s determinism: two rebuilds against the same model
+produce the same tables, in the same order, with the same version hash, and RAW rows are untouched
+by either method — see `Rebuild_leaves_RAW_unchanged` and
+`Rebuilding_twice_produces_identical_schema_content_and_order`.
+
+### The determinism contract is enforced by a source scan, not by a reference check
+
+PRD §3.8 forbids a check that reads the clock, samples randomly, or calls a model. The surface that
+would let one do any of those three is entirely inside the base class library —
+`DateTime.Now`, `Random` and `HttpClient` need no `PackageReference` — so `AecoPostMortem.Rules`'
+"references nothing" guarantee does not by itself rule any of them out.
+`test/AecoPostMortem.Containment.Tests/DeterminismInvariantTests.cs` scans every `.cs` file under
+`AecoPostMortem.Rules` and `AecoPostMortem.Findings` for a fixed list of forbidden substrings
+(`DateTime.Now`, `new Random(`, `HttpClient`, and similar) and fails the moment one appears; a
+second test proves the scanner itself is not vacuous. Both projects are still close to empty, so
+this is the enforcement mechanism built ahead of what it enforces — extend the pattern list there,
+not a new one elsewhere, when a check lands that could plausibly read time or chance.
+
 ### `Pooling=False` on the connection
 
 A pooled handle outlives the context that opened it, and `purge` has to be able to delete the file
@@ -110,3 +138,22 @@ per-column coverage. Read it before mapping or querying anything under `Executio
    (`docs/DERIVED_LAYER.md`).
 
 A derived layer never reaches step 2: it is dropped and re-derived by `rebuild`.
+
+## Playbook — keeping a derived entity rebuild-safe
+
+1. Never give it anything `DerivedSchema.CreateStatements` cannot emit deterministically: no default
+   value, computed column, collation or foreign key (`DerivedSchemaTests.The_generator_covers_every_
+   mapping_feature_the_derived_model_uses` catches these), and no server-assigned or time-of-write
+   value — a rebuilt row must be identical in content to the row it replaced, ids aside (issue #24's
+   edge case).
+2. Derive it from RAW alone. Nothing under `Execution/` may read the wall clock, sample randomly, or
+   reach a model to decide a value — `DeterminismInvariantTests` in `Containment.Tests` scans for
+   exactly that, and a derived entity's mapping or any future population logic for it is squarely
+   "the analysis code path" that scan covers.
+3. Sort before you emit. `DerivedSchema.CreateStatements` orders tables, columns and indexes by name
+   (`StringComparer.Ordinal`) precisely so two rebuilds against the same model produce the same DDL
+   in the same order — carry that discipline into any derivation logic that populates rows, since a
+   tie broken by insertion order would reorder the operator's priorities between runs.
+4. Test it under `Rebuild`, not only under `EnsureCurrent`: add a case to `DerivedSchemaTests` (or
+   the entity's own test file) proving `DerivedSchema.Rebuild` drops the entity's rows and that two
+   consecutive rebuilds against unchanged RAW agree, content and order both.

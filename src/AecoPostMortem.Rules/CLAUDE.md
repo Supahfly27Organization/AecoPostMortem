@@ -22,6 +22,30 @@ It takes plain inputs — rule statements as text, the discovered tool vocabular
 counts as numbers — and returns results. `AecoPostMortem.Findings` does the orchestration, reading
 through `AecoPostMortem.Data` and writing findings back.
 
+## Structure
+
+| File | What it holds |
+|---|---|
+| `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
+
+## Non-obvious decisions
+
+### `HookFailureCounts` pairs both denominators structurally, not by convention
+
+FR-17 requires a hook-failure figure to state the count over all sessions and the count over
+sessions that made a tool call together, never one alone — the edge case that makes this matter is
+a measured 34 of 35 sessions overall against 32 of the 33 that made a tool call: two sessions
+failed the hook while making no tool call at all, so either figure printed by itself reads as a
+contradiction. `HookFailureCounts.OverAllSessions` and `.OverSessionsWithToolCall` are both
+`required SessionCount`, and `SessionCount.Count`/`.Population` are themselves both `required` —
+an object initializer that omits any of the four is a compile error (CS9035), the same reasoning
+`AecoPostMortem.Findings/CLAUDE.md` gives for `Finding.Provenance` being `required` rather than
+validated at run time.
+`HookFailureCheckTests.The_denominator_fields_are_required_members` proves the properties still
+carry `RequiredMemberAttribute`.
+
 ## Status
 
-Empty. The check-shape catalogue is the first thing that lands here.
+`HookFailureCheck` (issue #27, FR-17) is the first check to land — the shape it establishes (plain
+per-session inputs in, a structurally-paired result out) is the pattern later checks in this
+project should follow.

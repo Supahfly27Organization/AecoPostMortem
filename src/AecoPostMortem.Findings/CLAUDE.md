@@ -13,6 +13,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Resolution.cs` | FR-33's layer-used-per-operand and call count, carried where an adherence figure has one |
 | `Suggestion.cs` | FR-56's deterministic template text |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
+| `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 
 ## References
 
@@ -22,9 +23,14 @@ is the project that reads through `Data`, feeds `Rules` its operands, and writes
 That split is why the non-negotiable invariant in `AecoPostMortem.Rules/CLAUDE.md` holds: the
 orchestrator can name tools and repositories, the checker never sees them.
 
-Neither reference is used yet: the shapes in this project are pure C# types with no persistence
-and no dependency on a concrete check. This contract publishes the shape; the work it unblocks is
-what reads through `Data` and calls into `Rules`.
+The `Rules` reference is used starting with `HookFailureFinding` (issue #27): it calls
+`HookFailureCheck.Evaluate` for the paired denominators and builds `Finding`s from the result. The
+`Data` reference is still not used — `HookFailureFinding.Build` takes plain inputs
+(`allSessionIds`, `sessionsWithToolCall`, `HookFailureEvent`s) rather than querying
+`PostMortemContext` directly, because no code in this repository yet turns `raw_event` into the
+`Hook`/`ToolCall` rows a real query would read; that ETL is a separate, not-yet-built story. The
+caller that eventually does read through `Data` supplies this function's plain inputs from the
+derived tables once that pipeline exists.
 
 ## Non-obvious decisions
 
@@ -44,6 +50,33 @@ compile an object initializer that omits a `required` member.
 `AecoPostMortem.Rules/CLAUDE.md` gives for its own invariant: structural beats conventional
 because there is no commit at which it can be skipped by accident.
 
+### `HookFailureEvent` is a plain input, not `AecoPostMortem.Data.Execution.Hook`
+
+`Evidence.cs` says evidence is "quoted from the event that produced a finding" — the RAW event, not
+the NORMALIZED projection that already dropped fields it didn't index. `Data.Execution.Hook` has no
+error-text column, so `HookFailureFinding` takes its own `HookFailureEvent` (`SessionId`,
+`HookName`, `Success`, `Error`) instead of widening the shared derived entity for one check's
+evidence. `EvidenceItem.Field` values (`data.success`, `data.error`) name the JSON path a future RAW
+reader would quote them from.
+
+### The suggestion text is the only path to FR-17's paired denominators
+
+`HookFailureFinding.BuildSuggestion` takes `HookFailureCounts` as a whole and is the only producer
+of `Finding.Suggestion.Text` for this check — there is no overload or code path that renders
+`OverAllSessions` or `OverSessionsWithToolCall` alone. That is what makes "neither figure appears
+alone" (issue #27, Scenario 1) hold structurally rather than by the caller remembering to print
+both.
+
+### The finding is one per hook identity, and disappears once the hook is fixed
+
+`FindingClassRegistry`'s recurrence key for a hook failure is "the hook identity", so
+`HookFailureFinding.Build` groups failures by `HookName` and emits one `Finding` per group, each
+carrying the same corpus-wide `HookFailureCounts`. When there are no failures, `Build` returns no
+findings and a `CheckRegistryEntry` with `Status = Ran` and `FindingCount = 0` — a clean check, not
+a refused one. That is what makes the finding disappear from the digest on its own the moment the
+operator fixes the hook, per issue #27's edge case: intended behaviour, not a regression to guard
+against.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -53,5 +86,8 @@ considered and rejected as unmotivated by anything in FR-37 or FR-42.
 
 ## Status
 
-The finding record and check-registry shapes. No finding class has detection logic yet, and no
-check exists to register a real id — those arrive with the stories this contract unblocks.
+The finding record and check-registry shapes, plus one real check: `HookFailureFinding` (issue
+#27, FR-17, `CheckId = "hook-failure"`). It is `FindingClass.Waste`'s first detection logic. Other
+`Waste`-class checks (repeated file reads, issue #25; failed tool calls, issue #26) are landing
+concurrently in sibling branches as their own self-contained files — nothing here depends on them,
+and nothing they add should require touching `HookFailureFinding.cs`.

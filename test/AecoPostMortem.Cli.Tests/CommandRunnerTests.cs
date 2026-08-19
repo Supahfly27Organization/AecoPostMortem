@@ -1,5 +1,6 @@
 using System.Globalization;
 using AecoPostMortem.Data;
+using AecoPostMortem.Data.Execution;
 
 namespace AecoPostMortem.Cli.Tests;
 
@@ -40,12 +41,10 @@ public sealed class CommandRunnerTests
         Assert.Equal(string.Empty, stderr);
     }
 
-    [Theory]
-    [InlineData("ingest")]
-    [InlineData("rebuild")]
-    public void The_other_commands_report_the_same_way(string name)
+    [Fact]
+    public void Ingest_reports_the_same_way()
     {
-        var (exitCode, stdout, _) = Run(name);
+        var (exitCode, stdout, _) = Run("ingest");
 
         Assert.Equal(CommandRunner.Success, exitCode);
         Assert.Contains("not implemented yet", stdout);
@@ -78,6 +77,54 @@ public sealed class CommandRunnerTests
         Assert.Equal(CommandRunner.Success, exitCode);
         Assert.Contains("Nothing to purge", stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr);
+    }
+
+    /// <summary>Scenario "The operator can invoke the rebuild" (issue #24): the derived layer is
+    /// dropped and re-derived, and RAW — what it is re-derived from — is unchanged.</summary>
+    [Fact]
+    public void Rebuild_drops_the_derived_layer_and_leaves_RAW_unchanged_and_reports_it()
+    {
+        using var temporary = new TemporaryStore();
+
+        using (var context = temporary.Store.Open())
+        {
+            context.RawEvents.Add(new RawEvent(
+                "session-1", 0, "session.start", "2026-08-09T20:14:36.758Z", "0.0.339",
+                @"~/.copilot/session-state/session-1/events.jsonl", 0,
+                RawPayload.ContentHashOfText("{}"), "{}"));
+
+            context.Sessions.Add(new Session
+            {
+                SessionId = "session-1",
+                StartedAt = "2026-08-09T20:14:36.758Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/session-1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+
+            context.SaveChanges();
+        }
+
+        var (exitCode, stdout, stderr) = Run(temporary.Store, "rebuild");
+
+        Assert.Equal(CommandRunner.Success, exitCode);
+        Assert.Contains("Rebuilt", stdout, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr);
+
+        using var reopened = temporary.Store.Open();
+        Assert.Single(reopened.RawEvents);
+        Assert.Empty(reopened.Sessions);
+    }
+
+    /// <summary>Rebuild's <see cref="CommandSpec"/> takes no arguments (see
+    /// <c>CommandSurfaceTests.Ingest_takes_an_optional_path_and_serve_an_optional_port</c> for the
+    /// commands that do) — there is structurally nowhere for a source directory to be passed, so
+    /// "the source directory is not read" holds without a runtime check.</summary>
+    [Fact]
+    public void Rebuild_takes_no_arguments_so_there_is_no_source_directory_to_read()
+    {
+        Assert.Equal(string.Empty, CommandSurface.Find("rebuild")!.Arguments);
     }
 
     /// <summary>A store in a throwaway directory: the CLI's default is the operator's real store,

@@ -18,6 +18,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
+| `InterruptionLoadFinding.cs` | FR-20 (issue #30): reads `Permission` and `ToolCall` through `Data`, decides which tool calls are questions (`ToolName == "ask_user"`), calls `Rules.InterruptionLoadCheck`, and folds the result into one `FindingClass.Waste` finding plus a `CheckRegistryEntry` |
 
 ## References
 
@@ -30,9 +31,11 @@ orchestrator can name tools and repositories, the checker never sees them.
 The `Rules` reference is used by `HookFailureFinding` (issue #27), which calls
 `HookFailureCheck.Evaluate` for the paired denominators and builds `Finding`s from the result; by
 `RepeatedFileReadFindingCheck` (issue #25), which reads `AecoPostMortem.Data.Execution.ToolCall` and
-calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; and by
+calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; by
 `FailedToolCallsFinding` (issue #26), which calls `FailedToolCallsCheck` and shapes its
-`ToolFailureRate` results into `Finding`s. The `Data` reference is still not used by
+`ToolFailureRate` results into `Finding`s; and by `InterruptionLoadFinding` (issue #30), which reads
+`AecoPostMortem.Data.Execution.Permission` and `ToolCall` and calls
+`AecoPostMortem.Rules.InterruptionLoadCheck`. The `Data` reference is still not used by
 `HookFailureFinding` or `FailedToolCallsFinding`: `HookFailureFinding.Build` takes plain inputs
 (`allSessionIds`, `sessionsWithToolCall`, `HookFailureEvent`s) rather than querying
 `PostMortemContext` directly, because no code in this repository yet turns `raw_event` into the
@@ -159,17 +162,40 @@ so there is structurally nowhere to inject a model client or a clock — proved 
 static field, every public method signature drawn from an explicit allowlist of already-resolved
 data types) rather than merely asserting the behaviour.
 
+### A question is a completed `ask_user` tool call; a permission prompt is its own entity
+
+`InterruptionLoadFinding` (issue #30, FR-20) is the first check to draw its two operand kinds from
+different `Data` entities: permission prompts come straight off `Permission` (already a distinct
+row per prompt, no tool name involved), while questions have to be filtered out of `ToolCall` by
+name the same way `RepeatedFileReadFindingCheck` filters `view` — `QuestionToolName = "ask_user"`
+is the one place in this project allowed to name it (Repo Rule 6 binds `AecoPostMortem.Rules`
+only). One `Finding` covers a whole analysis run rather than one per hook/path/tool identity,
+because there is no natural per-entity grouping for "how many times was the operator interrupted" —
+its `Recurrence.Key` is the fixed string `"interruption-load"`.
+
+### The result-kind breakdown groups by whatever the field says, never by a hardcoded denial string
+
+`InterruptionLoadFinding.PermissionOutcomeBreakdown` groups permission prompts by their literal
+`ResultKind` value (`ResultKind ?? "no outcome recorded"`) and quotes each group's count as
+`EvidenceItem { Field = "result_kind:<value>" }`. It never compares `ResultKind` against a literal
+like `"denied"`: this project does not know Copilot's exact enum values, and matching against a
+guessed string would turn FR-20's "Observed, not string-matched" claim into exactly the string
+match it is contrasted against. This is also what makes the edge case hold without special-casing
+it — an unresolved prompt (`ResultKind` is `null`) renders as its own literal group,
+`"no outcome recorded"`, and can never be merged into a resolved outcome's count by construction.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-three real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
-`RepeatedFileReadFindingCheck` (issue #25, FR-15) and `FailedToolCallsFinding`
-(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. A
-fourth check registers a real id — `malformed-line`, built by
+four real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+`RepeatedFileReadFindingCheck` (issue #25, FR-15), `FailedToolCallsFinding`
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26) and `InterruptionLoadFinding`
+(`CheckId = "interruption-load"`, FR-20, issue #30) — all `FindingClass.Waste` detection logic. A
+fifth check registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
 but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
 real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
 mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
+real one. Each of the four Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.

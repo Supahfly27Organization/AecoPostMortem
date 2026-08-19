@@ -11,6 +11,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolVocabulary.cs` | `ToolVocabulary.Build` — the distinct tool names in whatever corpus is passed in (FR-29) |
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
+| `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
 
 ## The invariant
@@ -80,6 +81,20 @@ the reference corpus is a fact about that corpus, not a constant this project co
 next machine's log has a different vocabulary, and role derivation has to run again for it to mean
 anything.
 
+### `ReadEvent` names no tool, and never will
+
+`ReadEvent` carries only `SessionId` and `Path`. Deciding which raw tool calls count as reads —
+today a hardcoded `view` match, eventually S-21's role/vocabulary derivation — is
+`AecoPostMortem.Findings`' job (`RepeatedFileReadFindingCheck.ReadEventsFrom`), by the invariant
+above. When the role layer lands, only that mapping changes; `ReadEvent` and `RepeatedReadCheck`
+do not, because they were never told what a "read" is in the first place.
+
+### One threshold constant, not two conditions
+
+Issue #25's acceptance criteria state the repeat threshold two ways — "four or more times" and
+"more than three times". `RepeatedReadCheck.Threshold` is the one place that number lives, so the
+two phrasings cannot drift apart by editing only one of them.
+
 ### A check's plain input never carries the entity that produced it
 
 `ToolCallOutcome` (session id, tool identity, success) exists only because this project cannot see
@@ -109,7 +124,8 @@ a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
 ## Status
 
-Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has one
-entry: `FailedToolCallsCheck` (FR-16, issue #26). The pattern it establishes — a plain input record,
-a structurally-required rate, a check with no branch on any specific tool name — is the template for
-the checks that land here next.
+Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has two
+entries: `RepeatedReadCheck` (FR-15, issue #25) and `FailedToolCallsCheck` (FR-16, issue #26). The
+pattern they establish — a plain input record, structurally-required results, a check with no
+branch on any specific tool name — is the template for the checks that land here next. A sibling
+Waste-class check (hook failures, issue #27) is landing concurrently in its own file.

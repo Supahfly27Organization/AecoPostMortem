@@ -140,6 +140,31 @@ public static class DerivedSchema
             expected);
     }
 
+    /// <summary>
+    /// The mechanism the operator's <c>rebuild</c> command invokes (PRD §3.2, §3.8, S-46):
+    /// unconditionally drop and recreate the derived tables from RAW, discarding whatever rows are
+    /// in them — they are re-derivable, so the drop loses nothing. Distinct from
+    /// <see cref="EnsureCurrent"/>, which only rebuilds when the model's version has moved; this
+    /// rebuilds on demand regardless of version, which is what "the operator asked for a rebuild"
+    /// means.
+    /// </summary>
+    /// <remarks>
+    /// No derivation logic populates the recreated tables from RAW yet — the ingestion pipeline that
+    /// reads <c>raw_event</c> rows into the eight NORMALIZED shapes (session discovery, execution
+    /// record reconstruction) has not landed (tracked by the E1 ingestion stories). This method is
+    /// the seam that pipeline plugs into: once it exists, it runs after <see cref="Create"/> and
+    /// before this method returns, reading only RAW and never a source directory. Today the method
+    /// is honest about that gap rather than simulating it: the tables come back empty, exactly what
+    /// "re-derived from a RAW that itself has no rows populated by that pipeline yet" produces.
+    /// </remarks>
+    public static void Rebuild(PostMortemContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        Drop(context);
+        Create(context);
+    }
+
     static IEnumerable<IEntityType> DerivedEntityTypes(PostMortemContext context) =>
         context.GetService<IDesignTimeModel>().Model.GetEntityTypes()
             .Where(type => typeof(IDerivedEntity).IsAssignableFrom(type.ClrType))

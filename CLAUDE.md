@@ -50,6 +50,7 @@ corpus, `scripts/` the checkers.
 | Product intent, requirements, stories | `docs/product-superpowers/prds/2026-08-16-copilot-session-postmortem.md`, then the stories doc |
 | Add new project / module | Create/update its `CLAUDE.md` (architecture + playbook, keep in sync — see Working Rules) |
 | Add a CLI command | `Cli` router → `CommandSurface.Commands` |
+| Parse `tool.execution_start.data.arguments` | `AecoPostMortem.Ingestion` CLAUDE.md → `ToolArguments.cs` (FR-4; object/string/unparsed, never coerced) |
 | Change the solution's shape | `Containment.Tests` enforces it |
 | Security / quality review | `docs/claude/SCANNING_TOOLS.md` |
 | _(add project-specific rows here as modules are built out)_ | |

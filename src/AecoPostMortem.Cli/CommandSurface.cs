@@ -19,7 +19,8 @@ public static class CommandSurface
             "",
             "stdout — the re-derivation summary",
             "Re-derive the normalized and findings layers from RAW.",
-            "the ingestion stories in E1"),
+            "S-46 (issue #24) for the drop/re-derive mechanism; the ingestion stories in E1 for "
+            + "the derivation logic that populates the recreated tables"),
         new(
             "purge",
             "",

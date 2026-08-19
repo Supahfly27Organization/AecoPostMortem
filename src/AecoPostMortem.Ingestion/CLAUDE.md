@@ -12,6 +12,7 @@ Path discovery, event-line reader, RAW store, session/turn/agent reconstruction,
 | `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`ts`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
 | `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append` |
 | `MalformedLineCheck.cs` | turns one or more `SessionReadResult`s into the malformed-line `CheckRegistryEntry` (issue #23) |
+| `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced |
 
 ## References
 
@@ -71,10 +72,36 @@ from. `events.jsonl` is written live, so a trailing partial line is normal, not 
 Classifying without reading keeps discovery itself allocation-light and keeps the "never write to,
 never require opening the source's SQLite file" property easy to see from the code.
 
+### `arguments` is parsed polymorphically, and a third shape is never coerced (FR-4)
+
+`ToolArguments.Parse` classifies the value's own JSON text as `Object` (every tool but
+`apply_patch`), `String` (`apply_patch`'s whole patch envelope — a projection that assumes an object
+here silently drops the patch, PRD §3.9's first listed failure mode), or `Unparsed` for anything
+else. `Unparsed` exists so a future tool arriving with a third argument shape is recorded rather than
+guessed at — `Raw` still preserves its text either way. `TryGetProperty` and `AsText` each throw if
+called against the wrong `Kind`, rather than returning a default that would look like a real absence.
+
+`ToolArguments` is a standalone, self-contained parsing unit — it does not yet plug into the
+`RawEvent`-to-`ToolCall` pipeline; a later story wires `ToolArguments.Parse` in where
+`tool.execution_start.data.arguments` is read.
+
+### The corpus round-trip is a build gate, not a unit test
+
+`test/AecoPostMortem.Ingestion.Tests/ApplyPatchCorpusRoundTripTests.cs` parses and re-serialises
+every `apply_patch` call in the *live* reference corpus (a measured 381 calls) through
+`ToolArguments`, because `ToolArgumentsTests`'s hand-picked strings prove the algorithm but not that
+the real corpus never trips it. The corpus bytes are not checked in (`fixtures/README.md`), so the
+test reads the live source directory recorded in `fixtures/corpus-manifest.json`'s own `source`
+field (overridable by `AECOPOSTMORTEM_CORPUS_SOURCE`) and **skips**, not fails, on a machine that
+doesn't have it — the gate only bites where the corpus actually is.
+`scripts/check-apply-patch-roundtrip.py` is the CI entry point: it runs that one test in isolation
+and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check`.
+
 ## Status
 
 Path discovery (`SessionDiscovery`), the event-line reader (`SessionEventReader`,
-`EventEnvelopeParsers`), RAW persistence (`SessionIngestor`) and the malformed-line check
-(`MalformedLineCheck`) exist (FR-1, FR-3, FR-6 — issue #3 / S-02). Polymorphic tool-argument parsing
-(FR-4), the coverage report and self-exclusion (FR-7/FR-14), and execution-record reconstruction
-(FR-8/FR-9) land with the stories that follow.
+`EventEnvelopeParsers`), RAW persistence (`SessionIngestor`), the malformed-line check
+(`MalformedLineCheck`) and the polymorphic `arguments` parser (`ToolArguments`) exist as composable
+building blocks (FR-1, FR-3, FR-4, FR-6). `ToolArguments` is not yet wired into the event-line
+reader's `RawEvent`-to-`ToolCall` reconstruction. The coverage report and self-exclusion (FR-7/FR-14)
+and execution-record reconstruction (FR-8/FR-9) land with the stories that follow.

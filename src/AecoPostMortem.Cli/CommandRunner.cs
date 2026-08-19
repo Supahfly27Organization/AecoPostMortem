@@ -1,5 +1,6 @@
 using System.Globalization;
 using AecoPostMortem.Data;
+using AecoPostMortem.Data.Execution;
 
 namespace AecoPostMortem.Cli;
 
@@ -44,6 +45,11 @@ public static class CommandRunner
             return Purge(store ?? LocalStore.AtDefaultLocation(), stdout);
         }
 
+        if (string.Equals(command.Name, "rebuild", StringComparison.Ordinal))
+        {
+            return Rebuild(store ?? LocalStore.AtDefaultLocation(), stdout);
+        }
+
         // The surface enumerates itself before everything behind it exists (FR-58). Reporting and
         // exiting zero is the specified behaviour for a command whose story has not landed, not a
         // placeholder.
@@ -74,6 +80,27 @@ public static class CommandRunner
         stdout.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
             $"Purged {outcome.Deleted.Count} file(s), {outcome.BytesReclaimed:N0} bytes."));
+
+        return Success;
+    }
+
+    /// <summary>
+    /// S-46's rebuild: drop and re-derive the NORMALIZED and FINDINGS layers from RAW
+    /// (<see cref="DerivedSchema.Rebuild"/>). <paramref name="store"/> is opened and RAW is only
+    /// read to report the count the derivation ran against — nothing here accepts or reads a source
+    /// directory, so that requirement holds by construction rather than by a check.
+    /// </summary>
+    static int Rebuild(LocalStore store, TextWriter stdout)
+    {
+        using var context = store.Open();
+
+        var rawEventCount = context.RawEvents.Count();
+
+        DerivedSchema.Rebuild(context);
+
+        stdout.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"Rebuilt the derived layer from {rawEventCount:N0} RAW event(s); RAW is unchanged."));
 
         return Success;
     }

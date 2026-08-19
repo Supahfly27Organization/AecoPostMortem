@@ -23,11 +23,22 @@ failing — FR-58 requires the surface to enumerate itself before what sits behi
 It defaults to `LocalStore.AtDefaultLocation()`, which is the operator's real store. Tests pass a
 throwaway one; without that argument the only way to test `purge` would be to delete it.
 
+### `rebuild` drops and recreates the derived layer, and takes no arguments
+
+`rebuild` calls `DerivedSchema.Rebuild` (unconditional drop-and-recreate, distinct from the
+version-gated rebuild `LocalStore.Open` already runs via `EnsureCurrent`) and reports the RAW event
+count it ran against. It opens the store and nothing else — there is no path argument on its
+`CommandSpec` (`Arguments` is `""`, unlike `ingest [path]`), so "the source directory is not read"
+holds structurally rather than by a runtime check (S-46, issue #24). The actual re-derivation of
+NORMALIZED/FINDINGS rows from RAW is not implemented yet — that logic lands with the E1 ingestion
+stories; today `rebuild` empties the derived tables rather than repopulating them, which is the
+honest behaviour for a RAW that has no reader yet.
+
 ## Status
 
 The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `CommandListing`,
-`CommandRunner`, `Program`), and `purge` is wired to the store. Behaviour behind the other commands
-arrives in the order each `CommandSpec.ArrivesWith` names.
+`CommandRunner`, `Program`), and `purge` and `rebuild` are wired to the store. Behaviour behind
+`ingest` and `serve` arrives in the order each `CommandSpec.ArrivesWith` names.
 
 ## Playbook — adding a command
 

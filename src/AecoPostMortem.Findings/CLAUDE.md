@@ -12,6 +12,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Recurrence.cs` | `Recurrence`, `RecurrenceOccurrence` — FR-57's version-independent identity |
 | `Resolution.cs` | FR-33's layer-used-per-operand and call count, carried where an adherence figure has one |
 | `Suggestion.cs` | FR-56's deterministic template text |
+| `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
+| `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 
@@ -70,10 +72,44 @@ parser-defect edge case in issue #25) still counts as considered, it just contri
 events. This matches `CheckRegistryEntry`'s own doc comment: population is "the candidate set the
 check considered", defined whether or not the check goes on to find anything.
 
+### Suggestions are template substitution, not generation — and the template lives here, not in `Rules`
+
+FR-56 forbids a model call (§3.8), so `SuggestionRenderer.Render` is pure substitution:
+`SuggestionTemplate.Format` names its operands as `{PlaceholderName}` tokens, and each token
+resolves against the same two things a `Finding` already carries — its `Evidence` (matched by
+`EvidenceItem.Field`) and its `Resolution` (two reserved placeholders, `{OperandLayer}` and
+`{CallCount}`). Rendering the same template against the same evidence and resolution is
+deterministic because those are its only inputs; there is nothing else a template could read.
+
+Several `EvidenceItem`s sharing one `Field` render as one joined list — `FormatOperandList`
+generalises FR-35's worked example, *"name `rg`, `glob` and `view`"* — one value alone, two joined
+with "and", three or more with an Oxford comma before the final "and".
+
+A placeholder that cannot be bound to a concrete operand makes `Render` return `null` for the whole
+suggestion, never a partially-filled one: FR-56's edge case says a vague suggestion poisons the
+§5.4 rejection-rate signal, so this is a fail-closed substitution, not fail-open. The same
+`null`-means-absent shape as `Finding.Suggestion` itself: no template ships no suggestion, and no
+resolvable operand does the same.
+
+`SuggestionTemplate` is bound to a check the same abstract way `CheckRegistryEntry.CheckId` is — a
+plain string, because the check-shape catalogue in `AecoPostMortem.Rules` is still empty and
+open-ended. This project (`Findings`), not `Rules`, is where a template may say `rg`, `glob` or any
+other tool name: Repo Rule 6 restricts `src/AecoPostMortem.Rules/` only, and `SuggestionTemplate` /
+`SuggestionRenderer` live in the orchestration layer that is allowed to name tools.
+
+`SuggestionRenderer` is a `static class` on purpose: a `static class` cannot hold an instance field,
+so there is structurally nowhere to inject a model client or a clock — proved by
+`SuggestionRendererStructureTests` reflecting over the type's shape (no instance state, no mutable
+static field, every public method signature drawn from an explicit allowlist of already-resolved
+data types) rather than merely asserting the behaviour.
+
 ## Status
 
-The finding record, check-registry shapes, and one real check: `RepeatedFileReadFindingCheck`
-(FR-15, issue #25). Two sibling Waste-class checks (failed tool calls, issue #26; hook failures,
-issue #27) are landing concurrently in their own files — each is self-contained, so no shared
-scaffolding here should need to change to accommodate them beyond `CheckRegistry` gaining more
-entries at wire-up time.
+The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
+one real check: `RepeatedFileReadFindingCheck` (FR-15, issue #25). No other finding class has
+detection logic yet, and no check exists in `AecoPostMortem.Rules` to bind a real
+`SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion mechanism
+against a synthetic tool-choice check result standing in for the story that will supply a real one.
+Two sibling Waste-class checks (failed tool calls, issue #26; hook failures, issue #27) are landing
+concurrently in their own files — each is self-contained, so no shared scaffolding here should need
+to change to accommodate them beyond `CheckRegistry` gaining more entries at wire-up time.

@@ -152,6 +152,82 @@ public sealed class DerivedSchemaTests
         }
     }
 
+    /// <summary>S-46's rebuild mechanism: rows in the derived layer do not survive it, because they
+    /// are re-derivable from RAW rather than something the rebuild is required to preserve.</summary>
+    [Fact]
+    public void Rebuild_drops_the_derived_rows_and_recreates_the_tables()
+    {
+        using var temporary = new TemporaryStore();
+
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "session-1",
+                StartedAt = "2026-08-09T20:14:36.758Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/session-1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.SaveChanges();
+
+            DerivedSchema.Rebuild(context);
+
+            Assert.Empty(context.Sessions);
+            Assert.Equal(8, DerivedTables(context).Length);
+        }
+    }
+
+    /// <summary>Scenario "The operator can invoke the rebuild" (issue #24): RAW is what the rebuild
+    /// re-derives from, so it is not itself a target of the drop.</summary>
+    [Fact]
+    public void Rebuild_leaves_RAW_unchanged()
+    {
+        using var temporary = new TemporaryStore();
+        using var context = temporary.Store.Open();
+
+        context.RawEvents.Add(new RawEvent(
+            "session-1", 0, "session.start", "2026-08-09T20:14:36.758Z", "0.0.339",
+            @"~/.copilot/session-state/session-1/events.jsonl", 0,
+            RawPayload.ContentHashOfText("{}"), "{}"));
+        context.SaveChanges();
+
+        var before = context.RawEvents.AsNoTracking().ToArray();
+
+        DerivedSchema.Rebuild(context);
+
+        var after = context.RawEvents.AsNoTracking().ToArray();
+
+        Assert.Equal(before.Select(row => row.Id), after.Select(row => row.Id));
+        Assert.Equal(before.Select(row => row.ContentHash), after.Select(row => row.ContentHash));
+        Assert.Equal(before.Select(row => row.Payload), after.Select(row => row.Payload));
+    }
+
+    /// <summary>The determinism contract's edge case (issue #24): order matters as much as content.
+    /// Two rebuilds against the same model must produce the same tables, in the same order, with the
+    /// same version — a tie broken arbitrarily between runs is exactly what §3.8 forbids.</summary>
+    [Fact]
+    public void Rebuilding_twice_produces_identical_schema_content_and_order()
+    {
+        using var temporary = new TemporaryStore();
+        using var context = temporary.Store.Open();
+
+        DerivedSchema.Rebuild(context);
+        var firstStatements = DerivedSchema.CreateStatements(context);
+        var firstTables = DerivedTables(context);
+        var firstVersion = DerivedSchema.Version(context);
+
+        DerivedSchema.Rebuild(context);
+        var secondStatements = DerivedSchema.CreateStatements(context);
+        var secondTables = DerivedTables(context);
+        var secondVersion = DerivedSchema.Version(context);
+
+        Assert.Equal(firstStatements, secondStatements);
+        Assert.Equal(firstTables, secondTables);
+        Assert.Equal(firstVersion, secondVersion);
+    }
+
     [Fact]
     public void The_version_is_recorded_in_the_store_when_it_is_opened()
     {

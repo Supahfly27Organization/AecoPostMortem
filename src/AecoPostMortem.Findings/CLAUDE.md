@@ -16,6 +16,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
+| `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
 
 ## References
 
@@ -27,6 +28,10 @@ orchestrator can name tools and repositories, the checker never sees them.
 
 `RepeatedFileReadFindingCheck` is the first real use of both references: it reads
 `AecoPostMortem.Data.Execution.ToolCall` and calls `AecoPostMortem.Rules.RepeatedReadCheck`.
+`FailedToolCallsFinding` also uses `Rules`: it calls `FailedToolCallsCheck` and shapes its
+`ToolFailureRate` results into `Finding`s — but its own tests build `ToolCallOutcome` operands
+directly rather than reading through `PostMortemContext`; the query that resolves `ToolCall` rows
+into that plain shape for this check is later work (S-40).
 
 ## Non-obvious decisions
 
@@ -45,6 +50,17 @@ compile an object initializer that omits a `required` member.
 `RequiredMemberAttribute` rather than re-deriving the guarantee at run time, the same reasoning
 `AecoPostMortem.Rules/CLAUDE.md` gives for its own invariant: structural beats conventional
 because there is no commit at which it can be skipped by accident.
+
+### A Waste finding carries its rate in Evidence, never in Resolution
+
+`Resolution` is FR-33's layer-used-per-operand figure, scoped to adherence findings
+(`RuleAdherenceToolChoice` / `RuleAdherenceWrittenContent`) — `FailedToolCallsFinding` leaves it
+null. The failure rate's counts (`failures`, `calls`, `percentage`, `sessionCount`) are quoted as
+`EvidenceItem`s instead, all four built together in one place
+(`FailedToolCallsFinding.ToFinding`) so a rendered finding can never show the percentage without
+the counts that produced it, or the rate without the session count that contextualizes it (issue
+#26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
+without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
 
 ### A refused check and a clean check are distinguished by null, not by a third status
 
@@ -106,10 +122,11 @@ data types) rather than merely asserting the behaviour.
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-one real check: `RepeatedFileReadFindingCheck` (FR-15, issue #25). No other finding class has
-detection logic yet, and no check exists in `AecoPostMortem.Rules` to bind a real
-`SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion mechanism
-against a synthetic tool-choice check result standing in for the story that will supply a real one.
-Two sibling Waste-class checks (failed tool calls, issue #26; hook failures, issue #27) are landing
-concurrently in their own files — each is self-contained, so no shared scaffolding here should need
-to change to accommodate them beyond `CheckRegistry` gaining more entries at wire-up time.
+two real checks: `RepeatedFileReadFindingCheck` (FR-15, issue #25) and `FailedToolCallsFinding`
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26). No check exists in `AecoPostMortem.Rules` yet
+to bind a real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the
+suggestion mechanism against a synthetic tool-choice check result standing in for the story that
+will supply a real one. A third sibling Waste-class check (hook failures, issue #27) is landing
+concurrently in its own file — each of the three is self-contained, but `FindingClassRegistry`'s
+Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
+merging by hand.

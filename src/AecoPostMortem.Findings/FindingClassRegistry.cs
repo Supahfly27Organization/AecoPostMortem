@@ -26,7 +26,8 @@ public static class FindingClassRegistry
         {
             Class = FindingClass.Waste,
             RecurrenceKeyDescription =
-                "the file path for a repeated read, or the hook identity for a hook failure",
+                "the file path for a repeated read, the hook identity for a hook failure, or the "
+                + "tool identity for a failed-tool-call rate",
         },
         new()
         {

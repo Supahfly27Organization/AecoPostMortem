@@ -42,6 +42,10 @@ reading through `PostMortemContext`; the query that resolves `ToolCall` rows int
 for this check is later work (S-40). The caller that eventually does read through `Data` for these
 two supplies their plain inputs from the derived tables once that pipeline exists.
 
+`AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
+so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
+ingestion. See `AecoPostMortem.Ingestion/CLAUDE.md`.
+
 ## Non-obvious decisions
 
 ### The finding record has no `Id` and no `SessionId`
@@ -160,9 +164,12 @@ data types) rather than merely asserting the behaviour.
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
 three real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
 `RepeatedFileReadFindingCheck` (issue #25, FR-15) and `FailedToolCallsFinding`
-(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. No
-check exists in `AecoPostMortem.Rules` yet to bind a real `SuggestionTemplate.CheckId` to —
-`SuggestionWorkedExampleTests` exercises the suggestion mechanism against a synthetic tool-choice
-check result standing in for the story that will supply a real one. Each of the three Waste-class
-checks is self-contained, but `FindingClassRegistry`'s Waste `RecurrenceKeyDescription` is shared
-prose more than one touches, so expect it to need merging by hand.
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. A
+fourth check registers a real id — `malformed-line`, built by
+`AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
+but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
+real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
+mechanism against a synthetic tool-choice check result standing in for the story that will supply a
+real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
+Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
+merging by hand.

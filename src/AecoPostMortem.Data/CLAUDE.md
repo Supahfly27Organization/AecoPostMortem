@@ -12,6 +12,9 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `PostMortemContext.cs` | the model, its column mapping and its indexes |
 | `StoreMetadata.cs` | the store's own key/value state — migrated, not derived; holds `DerivedSchemaVersionKey` |
 | `RawEventBatch.cs` | the batched raw-SQL append |
+| `SystemPromptText.cs` | FR-12's dedup row: system-prompt text keyed by its own content hash — migrated, not derived, for the same reason as `StoreMetadata` |
+| `SystemPromptTextSchema.cs` | the physical table and column names for the dedup table, stated once |
+| `SystemPromptTextBatch.cs` | the batched raw-SQL append for dedup rows (Repo Rule 5) |
 | `LocalStore.cs` | the store as a file: path, creation, size, purge |
 | `StoreLocation.cs` | FR-11's documented per-user path |
 | `OwnerOnlyAccess.cs` | owner-only permissions, per platform |
@@ -66,6 +69,26 @@ inside a JSON string.
 `RawPayload.FromUtf8` throws on bytes it cannot decode rather than substituting U+FFFD. TEXT is
 stored as UTF-8, so a lossy decode would make the round trip silently non-verbatim; failing instead
 routes the line to FR-6's per-line tolerance, where it is counted and retried.
+
+### `system_prompt_text` is migrated deliberately, not by oversight
+
+FR-12 dedupes system-prompt text by content hash — a measured 337 system messages at a measured
+median 54,335 characters (data map Part 6) are mostly near-duplicates, so this is a design decision,
+not a later optimisation. `SystemPromptText` does not implement `IDerivedEntity`: it is written
+directly at ingest time from source bytes, the same act that writes RAW, not re-derived from
+anything else already in the store the way NORMALIZED and FINDINGS are — Repo Rule 4's "never
+migrated" governs those two layers, not this table. Its key is `content_hash`, not a session, which
+is also why it sits outside the derived layer's "every key contains the session" invariant
+(`DerivedModelTests.Every_derived_key_contains_the_session`) rather than being shoehorned into it.
+`SchemaTests.The_migrations_create_only_RAW_and_the_stores_own_metadata` names it literally
+alongside `raw_event` and `store_metadata`.
+
+Extraction and resolution — pulling `data.content` out of a `system.message` RAW event, hashing it,
+and deduplicating a batch of events down to their distinct texts — live in
+`AecoPostMortem.Ingestion.SystemPromptExtractor`, not here: this project stores rows, it does not
+parse envelopes. A session resolves its own full prompt text by re-running the same extraction over
+its own RAW event and joining the resulting hash against this table — deterministic, so no separate
+session-to-hash link table is needed.
 
 ### `store_metadata` is migrated deliberately, not by oversight
 

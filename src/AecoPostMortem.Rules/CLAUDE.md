@@ -12,6 +12,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
+| `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
 
 ## The invariant
@@ -95,6 +96,20 @@ validated at run time.
 `HookFailureCheckTests.The_denominator_fields_are_required_members` proves the properties still
 carry `RequiredMemberAttribute`.
 
+### `ReadEvent` names no tool, and never will
+
+`ReadEvent` carries only `SessionId` and `Path`. Deciding which raw tool calls count as reads —
+today a hardcoded `view` match, eventually S-21's role/vocabulary derivation — is
+`AecoPostMortem.Findings`' job (`RepeatedFileReadFindingCheck.ReadEventsFrom`), by the invariant
+above. When the role layer lands, only that mapping changes; `ReadEvent` and `RepeatedReadCheck`
+do not, because they were never told what a "read" is in the first place.
+
+### One threshold constant, not two conditions
+
+Issue #25's acceptance criteria state the repeat threshold two ways — "four or more times" and
+"more than three times". `RepeatedReadCheck.Threshold` is the one place that number lives, so the
+two phrasings cannot drift apart by editing only one of them.
+
 ### A check's plain input never carries the entity that produced it
 
 `ToolCallOutcome` (session id, tool identity, success) exists only because this project cannot see
@@ -124,9 +139,8 @@ a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
 ## Status
 
-Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has two
-entries: `HookFailureCheck` (issue #27, FR-17) and `FailedToolCallsCheck` (issue #26, FR-16). The
-shape they establish — plain per-call/per-session inputs in, a structurally-required or
-structurally-paired result out, no branch on any specific tool name — is the pattern later checks in
-this project should follow. A sibling Waste-class check (repeated file reads, issue #25) is landing
-concurrently in its own file.
+Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
+three entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15) and
+`FailedToolCallsCheck` (issue #26, FR-16). The shape they establish — plain per-call/per-session
+input records in, structurally-required or structurally-paired results out, no branch on any
+specific tool name — is the pattern later checks in this project should follow.

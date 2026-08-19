@@ -43,11 +43,17 @@ public sealed class SchemaTests
     public void The_migrations_create_only_RAW_and_the_stores_own_metadata()
     {
         // Repo Rule 4 / PRD §3.8: NORMALIZED and FINDINGS are re-derived from RAW, never migrated.
-        // A third table appearing here means a migration was authored against a derived layer.
+        // A table appearing here that is not named below means a migration was authored against a
+        // derived layer.
         //
         // store_metadata is migrated deliberately and is not a derived layer: it records the
         // store's own state, including the derived schema's version, and a value dropped alongside
         // the tables it describes could not be compared against them.
+        //
+        // system_prompt_text is migrated deliberately for the same reason (FR-12): it is written
+        // directly at ingest time from source bytes, not re-derived from what the store already
+        // holds the way NORMALIZED and FINDINGS are, and its key is a content hash rather than a
+        // session — Repo Rule 4's "never migrated" does not reach it.
         using var temporary = new TemporaryStore();
         using var context = temporary.Store.Open();
 
@@ -65,7 +71,7 @@ public sealed class SchemaTests
             .Where(name => !derived.Contains(name))
             .ToArray();
 
-        Assert.Equal(["raw_event", "store_metadata"], tables);
+        Assert.Equal(["raw_event", "store_metadata", "system_prompt_text"], tables);
     }
 
     [Fact]

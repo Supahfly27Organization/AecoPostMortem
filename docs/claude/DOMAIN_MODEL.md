@@ -7,7 +7,9 @@
 
 The three layers are RAW, NORMALIZED and FINDINGS (PRD §3.2). Only RAW exists today. Only RAW ever
 carries a migration — the other two are re-derived from it, and a migration against them is a defect
-(Repo Rule 4, PRD §3.8).
+(Repo Rule 4, PRD §3.8). `system_prompt_text` (below) is a fourth, RAW-adjacent table: it is
+migrated like RAW because it is written at ingest time from source bytes, not re-derived from the
+store, but it is not part of any of the three layers PRD §3.2 names.
 
 ## RawEvent — table `raw_event`
 
@@ -50,6 +52,28 @@ missing index fails `SchemaTests` rather than degrading a surface quietly.
   stays authoritative. Those four exist because the measured read path indexes them, and an index
   cannot be built over a value that exists only inside a JSON string.
 - **RAW rows are never rewritten.** The append is the only writer.
+
+## SystemPromptText — table `system_prompt_text`
+
+PK: `ContentHash` (`string`, `content_hash TEXT`). FR-12's dedup row: system-prompt text stored once
+and referenced by content hash, migrated deliberately alongside RAW (not derived — see
+`src/AecoPostMortem.Data/CLAUDE.md`).
+
+| Property | Type | DB | Notes |
+|---|---|---|---|
+| `ContentHash` | `string` | `content_hash TEXT PRIMARY KEY` | SHA-256 of the extracted prompt text itself (`RawPayload.ContentHashOfText`), not of the enclosing envelope — different from `RawEvent.ContentHash` |
+| `Text` | `string` | `text TEXT NOT NULL` | the prompt text verbatim, at a measured median 54,335 characters and a measured longest 59,982 (data map Part 6) |
+
+### Invariants
+
+- **Written at ingest, not derived.** Populated directly from source bytes by
+  `AecoPostMortem.Ingestion.SystemPromptExtractor` and appended via `SystemPromptTextBatch`
+  (`ON CONFLICT (content_hash) DO NOTHING`), the same append discipline RAW uses (Repo Rule 5).
+- **Not session-scoped.** The whole point is that many sessions carrying identical text collapse to
+  one row; a session resolves its own full text by re-extracting its own `system.message` RAW event
+  and hashing it the same way, not through a stored link.
+- **RAW still keeps every event's own verbatim copy** (FR-2) — this table is an additional,
+  content-addressed representation, not a replacement for RAW's byte-exact payload.
 
 ## NORMALIZED
 

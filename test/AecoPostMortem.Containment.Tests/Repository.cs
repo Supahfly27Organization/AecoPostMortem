@@ -130,6 +130,32 @@ public static class Repository
         }
     }
 
+    /// <summary>Every <c>.cs</c> file under a repository-relative directory, <c>obj/</c> and
+    /// <c>bin/</c> excluded — those hold generated and copied output, not source a determinism scan
+    /// is asking about.</summary>
+    public static IEnumerable<FileInfo> CSharpFiles(string relativeDirectory)
+    {
+        var directory = new DirectoryInfo(
+            Path.Combine(Root.FullName, relativeDirectory.Replace('/', Path.DirectorySeparatorChar)));
+
+        if (!directory.Exists)
+        {
+            yield break;
+        }
+
+        foreach (var file in directory.EnumerateFiles("*.cs", SearchOption.AllDirectories))
+        {
+            var relative = RelativePath(file);
+            if (relative.Contains("/obj/", StringComparison.Ordinal)
+                || relative.Contains("/bin/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            yield return file;
+        }
+    }
+
     static DirectoryInfo FindRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

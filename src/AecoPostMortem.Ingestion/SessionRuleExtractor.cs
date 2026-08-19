@@ -20,6 +20,9 @@ public static class SessionRuleExtractor
     /// <see cref="SessionInstructionBlocks.HasInstructionBlocks"/> <see langword="false"/>, recorded
     /// distinctly from a session whose block(s) matched no list item (Scenario 4).
     /// </summary>
+    /// <param name="sessionEvents">Not required to already be scoped to <paramref name="sessionId"/>
+    /// — any event whose own <see cref="RawEvent.SessionId"/> differs is ignored, so a caller that
+    /// hands in a mixed-session batch cannot mislabel another session's blocks as this one's.</param>
     public static SessionInstructionBlocks Extract(string sessionId, IEnumerable<RawEvent> sessionEvents)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
@@ -29,6 +32,11 @@ public static class SessionRuleExtractor
 
         foreach (var raw in sessionEvents)
         {
+            if (!string.Equals(raw.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             if (SystemPromptExtractor.Extract(raw) is not { } prompt)
             {
                 continue;

@@ -38,6 +38,10 @@ public static partial class RuleStatementExtractor
             var sourceFile = lines[headerIndex].TrimStart('#', ' ', '\t').Trim();
             if (sourceFile.Length == 0)
             {
+                // A heading that strips to nothing (e.g. a bare "###") names no source file, so the
+                // whole block is dropped — any list items after it go with it. Not observed in the
+                // measured corpus; a deliberate trade-off, not an oversight (see
+                // A_block_whose_heading_strips_to_nothing_is_dropped_entirely).
                 continue;
             }
 

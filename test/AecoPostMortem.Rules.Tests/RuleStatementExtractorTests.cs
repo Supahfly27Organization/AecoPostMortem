@@ -136,4 +136,70 @@ public sealed class RuleStatementExtractorTests
         Assert.Equal("Copilot instructions", block.SourceFile);
         Assert.Empty(block.Statements);
     }
+
+    /// <summary>Code-review follow-up, locking in the documented trade-off: a block whose only
+    /// non-blank line strips down to nothing (e.g. a bare heading-marker run) names no source file,
+    /// so the whole block — any list items it might otherwise have carried — is dropped rather than
+    /// reported with an empty <c>SourceFile</c>. Not observed in the measured corpus; this is a
+    /// deliberate, narrow trade-off rather than an oversight, and this test is what keeps it a
+    /// decision instead of an accident.</summary>
+    [Fact]
+    public void A_block_whose_heading_strips_to_nothing_is_dropped_entirely()
+    {
+        const string prompt = """
+            <custom_instruction>
+            ###
+            - This list item is lost along with the unusable heading.
+            </custom_instruction>
+            """;
+
+        var blocks = RuleStatementExtractor.ExtractBlocks(prompt);
+
+        Assert.Empty(blocks);
+    }
+
+    /// <summary>Code-review follow-up: the block-matching regex is non-greedy, so an opening tag
+    /// with no matching close is simply never matched — best-effort parsing of an undocumented wire
+    /// format, not a thrown exception. Locking in the current behaviour rather than leaving it
+    /// implicit.</summary>
+    [Fact]
+    public void An_unclosed_custom_instruction_tag_yields_no_block()
+    {
+        const string prompt = """
+            <custom_instruction>
+            CLAUDE.md
+            - This never closes.
+            """;
+
+        var blocks = RuleStatementExtractor.ExtractBlocks(prompt);
+
+        Assert.Empty(blocks);
+    }
+
+    /// <summary>Code-review follow-up: two <c>&lt;custom_instruction&gt;</c> tags with no close in
+    /// between pair the first open with the first close, so the second open is read as ordinary
+    /// block content rather than as the start of a nested block — non-greedy matching, not
+    /// nesting-aware parsing. Copilot is not measured to nest these blocks; this test states the
+    /// current best-effort behaviour explicitly rather than leaving it to the regex alone.</summary>
+    [Fact]
+    public void Two_open_tags_with_one_close_pair_the_first_open_to_that_close()
+    {
+        const string prompt = """
+            <custom_instruction>
+            CLAUDE.md
+            - Rule one.
+            <custom_instruction>
+            AGENTS.md
+            - Rule two.
+            </custom_instruction>
+            """;
+
+        var blocks = RuleStatementExtractor.ExtractBlocks(prompt);
+
+        var block = Assert.Single(blocks);
+        Assert.Equal("CLAUDE.md", block.SourceFile);
+        Assert.Equal(2, block.Statements.Count);
+        Assert.Equal("Rule one.", block.Statements[0].Text);
+        Assert.Equal("Rule two.", block.Statements[1].Text);
+    }
 }

@@ -80,6 +80,37 @@ public sealed class SessionRuleExtractorTests
         Assert.Contains(result.Blocks, block => block.SourceFile == "AGENTS.md");
     }
 
+    /// <summary>Code-review follow-up: a batch that mixes another session's events in must not
+    /// contaminate this session's blocks — <c>Extract</c> filters by <c>raw.SessionId</c> rather than
+    /// trusting every event handed to it already belongs to <paramref name="sessionId"/>.</summary>
+    [Fact]
+    public void Events_belonging_to_a_different_session_are_ignored()
+    {
+        const string ownPrompt = """
+            <custom_instruction>
+            CLAUDE.md
+            - This session's own rule.
+            </custom_instruction>
+            """;
+        const string otherPrompt = """
+            <custom_instruction>
+            AGENTS.md
+            - A different session's rule.
+            </custom_instruction>
+            """;
+
+        var events = new[]
+        {
+            SystemMessage("session-1", ownPrompt),
+            SystemMessage("session-2", otherPrompt),
+        };
+
+        var result = SessionRuleExtractor.Extract("session-1", events);
+
+        var block = Assert.Single(result.Blocks);
+        Assert.Equal("CLAUDE.md", block.SourceFile);
+    }
+
     static RawEvent SystemMessage(string sessionId, string content, long sequence = 0) => new(
         sessionId,
         sequence,

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AecoPostMortem.Data\AecoPostMortem.Data.csproj" />
+    <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
   </ItemGroup>
 
 </Project>

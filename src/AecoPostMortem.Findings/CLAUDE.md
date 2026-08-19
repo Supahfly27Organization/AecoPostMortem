@@ -22,9 +22,13 @@ is the project that reads through `Data`, feeds `Rules` its operands, and writes
 That split is why the non-negotiable invariant in `AecoPostMortem.Rules/CLAUDE.md` holds: the
 orchestrator can name tools and repositories, the checker never sees them.
 
-Neither reference is used yet: the shapes in this project are pure C# types with no persistence
-and no dependency on a concrete check. This contract publishes the shape; the work it unblocks is
-what reads through `Data` and calls into `Rules`.
+Neither reference is used yet within this project itself: the shapes here are pure C# types with no
+persistence and no dependency on a concrete check. The work that reads through `Data` and calls into
+`Rules` still arrives with later stories.
+
+`AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
+so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
+ingestion. See `AecoPostMortem.Ingestion/CLAUDE.md`.
 
 ## Non-obvious decisions
 
@@ -53,5 +57,7 @@ considered and rejected as unmotivated by anything in FR-37 or FR-42.
 
 ## Status
 
-The finding record and check-registry shapes. No finding class has detection logic yet, and no
-check exists to register a real id — those arrive with the stories this contract unblocks.
+The finding record and check-registry shapes. No finding class has detection logic yet. One check
+registers a real id today — `malformed-line`, built by `AecoPostMortem.Ingestion.MalformedLineCheck`
+from FR-6's per-file read stats (issue #3 / S-02) — but nothing in this project constructs it; the
+rest of the registry arrives with the stories this contract unblocks.

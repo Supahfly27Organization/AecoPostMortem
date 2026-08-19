@@ -22,6 +22,30 @@ It takes plain inputs — rule statements as text, the discovered tool vocabular
 counts as numbers — and returns results. `AecoPostMortem.Findings` does the orchestration, reading
 through `AecoPostMortem.Data` and writing findings back.
 
+## Structure
+
+| File | What it holds |
+|---|---|
+| `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
+
+## Non-obvious decisions
+
+### `ReadEvent` names no tool, and never will
+
+`ReadEvent` carries only `SessionId` and `Path`. Deciding which raw tool calls count as reads —
+today a hardcoded `view` match, eventually S-21's role/vocabulary derivation — is
+`AecoPostMortem.Findings`' job (`RepeatedFileReadFindingCheck.ReadEventsFrom`), by the invariant
+above. When the role layer lands, only that mapping changes; `ReadEvent` and `RepeatedReadCheck`
+do not, because they were never told what a "read" is in the first place.
+
+### One threshold constant, not two conditions
+
+Issue #25's acceptance criteria state the repeat threshold two ways — "four or more times" and
+"more than three times". `RepeatedReadCheck.Threshold` is the one place that number lives, so the
+two phrasings cannot drift apart by editing only one of them.
+
 ## Status
 
-Empty. The check-shape catalogue is the first thing that lands here.
+`RepeatedReadCheck` is the first check shape here. Two sibling Waste-class checks (failed tool
+calls, issue #26; hook failures, issue #27) are landing concurrently in separate files — expect
+this section to grow, not this file's shape to change.

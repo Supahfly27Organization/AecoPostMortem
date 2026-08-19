@@ -13,6 +13,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Resolution.cs` | FR-33's layer-used-per-operand and call count, carried where an adherence figure has one |
 | `Suggestion.cs` | FR-56's deterministic template text |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
+| `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 
 ## References
 
@@ -22,9 +23,8 @@ is the project that reads through `Data`, feeds `Rules` its operands, and writes
 That split is why the non-negotiable invariant in `AecoPostMortem.Rules/CLAUDE.md` holds: the
 orchestrator can name tools and repositories, the checker never sees them.
 
-Neither reference is used yet: the shapes in this project are pure C# types with no persistence
-and no dependency on a concrete check. This contract publishes the shape; the work it unblocks is
-what reads through `Data` and calls into `Rules`.
+`RepeatedFileReadFindingCheck` is the first real use of both references: it reads
+`AecoPostMortem.Data.Execution.ToolCall` and calls `AecoPostMortem.Rules.RepeatedReadCheck`.
 
 ## Non-obvious decisions
 
@@ -51,7 +51,29 @@ including `0` — when `Status` is `Ran`. `CheckRunStatus` has exactly two value
 acceptance criteria name exactly two states to distinguish; a third "never attempted" status was
 considered and rejected as unmotivated by anything in FR-37 or FR-42.
 
+### `RepeatedFileReadFindingCheck`'s recurrence key is the path, not `(session, path)`
+
+FR-57 names the path as this Waste finding's recurrence key. The same path read 4+ times in two
+different sessions is therefore **one** `Finding`, with `Recurrence.Occurrences` carrying one
+`RecurrenceOccurrence` per session — matching Scenario 2 of issue #25 ("it states how many
+sessions it touched"). Per-session counts don't fit any existing typed field, so they ride in
+`Evidence` as `EvidenceItem { Field = $"read_count:{sessionId}", Value = "<count>" }`, one per
+occurrence, alongside a single `data.path` item. This is a deliberate, documented use of
+`Evidence`'s free-form shape rather than a new typed field on `Finding` or `RecurrenceOccurrence` —
+revisit if a second check needs a per-occurrence number and the pattern should become a real field.
+
+### `RepeatedFileReadFindingCheck.Population` counts every session considered, not just the ones with a valid read
+
+`CheckRegistryEntry.Population` is the distinct session count across **all** `ToolCall`s passed
+in, before the read-event filter runs — so a session whose only tool call is missing a path (the
+parser-defect edge case in issue #25) still counts as considered, it just contributes no read
+events. This matches `CheckRegistryEntry`'s own doc comment: population is "the candidate set the
+check considered", defined whether or not the check goes on to find anything.
+
 ## Status
 
-The finding record and check-registry shapes. No finding class has detection logic yet, and no
-check exists to register a real id — those arrive with the stories this contract unblocks.
+The finding record, check-registry shapes, and one real check: `RepeatedFileReadFindingCheck`
+(FR-15, issue #25). Two sibling Waste-class checks (failed tool calls, issue #26; hook failures,
+issue #27) are landing concurrently in their own files — each is self-contained, so no shared
+scaffolding here should need to change to accommodate them beyond `CheckRegistry` gaining more
+entries at wire-up time.

@@ -98,6 +98,7 @@ there is no database command to run.
 ## Deeper Context (read as needed)
 
 - `docs/claude/DOMAIN_MODEL.md` — all entity schemas and DB columns
+- `docs/claude/NORMALIZED_MODEL.md` — the eight NORMALIZED entities and their invariants
 - `docs/claude/PATTERNS.md` — coding conventions and architectural rules
 - `docs/claude/SCANNING_TOOLS.md` — when to use SonarQube, Semgrep, and Trivy
 - `docs/claude/KNOWLEDGE_TOOLS.md` — when and how to use Codebase Memory MCP, CASS Memory, and serena

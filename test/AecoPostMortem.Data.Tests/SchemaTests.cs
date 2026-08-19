@@ -40,21 +40,32 @@ public sealed class SchemaTests
     }
 
     [Fact]
-    public void RAW_is_the_only_table_the_migrations_create()
+    public void The_migrations_create_only_RAW_and_the_stores_own_metadata()
     {
         // Repo Rule 4 / PRD §3.8: NORMALIZED and FINDINGS are re-derived from RAW, never migrated.
-        // A second table appearing here means a migration was authored against a derived layer.
+        // A third table appearing here means a migration was authored against a derived layer.
+        //
+        // store_metadata is migrated deliberately and is not a derived layer: it records the
+        // store's own state, including the derived schema's version, and a value dropped alongside
+        // the tables it describes could not be compared against them.
         using var temporary = new TemporaryStore();
         using var context = temporary.Store.Open();
+
+        var derived = context.Model.GetEntityTypes()
+            .Where(type => typeof(AecoPostMortem.Data.Execution.IDerivedEntity).IsAssignableFrom(type.ClrType))
+            .Select(type => type.GetTableName()!)
+            .ToHashSet(StringComparer.Ordinal);
 
         // sqlite_% and __EF% are the engine's and EF Core's own bookkeeping, not the product's model.
         var tables = Query(
                 context,
                 "SELECT name FROM sqlite_master WHERE type = 'table' "
-                + "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_\\_EF%' ESCAPE '\\'")
+                + "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_\\_EF%' ESCAPE '\\' "
+                + "ORDER BY name")
+            .Where(name => !derived.Contains(name))
             .ToArray();
 
-        Assert.Equal(["raw_event"], tables);
+        Assert.Equal(["raw_event", "store_metadata"], tables);
     }
 
     [Fact]

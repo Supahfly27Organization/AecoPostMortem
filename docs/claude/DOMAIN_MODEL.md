@@ -50,3 +50,11 @@ missing index fails `SchemaTests` rather than degrading a surface quietly.
   stays authoritative. Those four exist because the measured read path indexes them, and an index
   cannot be built over a value that exists only inside a JSON string.
 - **RAW rows are never rewritten.** The append is the only writer.
+
+## NORMALIZED
+
+Eight entities, re-derived from RAW and never migrated, with tables created from the model and
+versioned by a hash of their own DDL — `docs/claude/NORMALIZED_MODEL.md` documents each one: table
+name, key, columns and the measured coverage behind every nullable one, plus the invariants that
+bind them (session-scoped natural keys, ownership as a database constraint, and the agent completion
+states gated by `ck_agent_cost`).

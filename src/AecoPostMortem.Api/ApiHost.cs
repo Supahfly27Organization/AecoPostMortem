@@ -91,6 +91,13 @@ public static class ApiHost
         return AppStateReport.Diagnose(copilotSourceFound, storeHasBeenIngested);
     }
 
+    /// <summary>
+    /// Opens a fresh context per call rather than caching one for the host's lifetime. This runs on
+    /// every <see cref="AppStateRoute"/> request, so it re-applies <c>Database.Migrate()</c> and
+    /// <c>DerivedSchema.EnsureCurrent</c> each time — cheap against one local SQLite file fetched
+    /// once per page load (today's only caller, `web/src/api/useAppState.ts`), but worth revisiting
+    /// if this endpoint is ever polled repeatedly rather than fetched once.
+    /// </summary>
     static bool StoreHasBeenIngested(LocalStore store)
     {
         if (!store.Exists)

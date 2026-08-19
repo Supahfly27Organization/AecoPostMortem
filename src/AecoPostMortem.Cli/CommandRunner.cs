@@ -151,6 +151,9 @@ public static class CommandRunner
             return InvalidArguments;
         }
 
+        // Synchronous `using`, not `await using`: CommandRunner.Run's whole call chain is
+        // synchronous by design (Program.Main has no async signature to await through), and
+        // WebApplication.Dispose() on an already-stopped host is safe.
         using var app = ApiHost.Build(store, copilotSessionStateRoot, port, ServeWebRoot.Resolve());
 
         stdout.WriteLine($"http://127.0.0.1:{port}");

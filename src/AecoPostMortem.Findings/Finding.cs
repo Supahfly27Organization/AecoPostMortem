@@ -15,7 +15,7 @@ public enum FindingClass
 /// <summary>PRD §3.8: the three levels the UI must render distinguishably.</summary>
 public enum Provenance
 {
-    Observed,
+    Observed = 1,
     Derived,
     Inferred,
 }

@@ -11,10 +11,14 @@ namespace AecoPostMortem.Findings.Tests;
 /// </summary>
 public sealed class FindingTests
 {
-    [Fact]
-    public void Provenance_is_a_required_member()
+    [Theory]
+    [InlineData(nameof(Finding.Class))]
+    [InlineData(nameof(Finding.Provenance))]
+    [InlineData(nameof(Finding.Evidence))]
+    [InlineData(nameof(Finding.Recurrence))]
+    public void The_structural_fields_are_required_members(string propertyName)
     {
-        var property = typeof(Finding).GetProperty(nameof(Finding.Provenance));
+        var property = typeof(Finding).GetProperty(propertyName);
 
         Assert.NotNull(property);
         Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
@@ -100,7 +104,9 @@ public sealed class FindingTests
     [Fact]
     public void The_three_provenance_levels_are_distinct()
     {
-        Assert.Equal(3, Enum.GetValues<Provenance>().Length);
+        var values = Enum.GetValues<Provenance>();
+        Assert.Equal(3, values.Length);
+        Assert.Equal(3, values.Distinct().Count());
     }
 
     [Fact]

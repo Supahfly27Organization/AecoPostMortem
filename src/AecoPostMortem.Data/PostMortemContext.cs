@@ -35,6 +35,8 @@ public sealed class PostMortemContext : DbContext
 
     public DbSet<StoreMetadata> StoreMetadata => Set<StoreMetadata>();
 
+    public DbSet<SystemPromptText> SystemPromptTexts => Set<SystemPromptText>();
+
     public DbSet<Session> Sessions => Set<Session>();
 
     public DbSet<Turn> Turns => Set<Turn>();
@@ -85,6 +87,7 @@ public sealed class PostMortemContext : DbContext
             .HasDatabaseName(RawEventSchema.EventTypeIndex);
 
         MapStoreMetadata(modelBuilder);
+        MapSystemPromptText(modelBuilder);
         MapSession(modelBuilder);
         MapTurn(modelBuilder);
         MapToolCall(modelBuilder);
@@ -102,6 +105,22 @@ public sealed class PostMortemContext : DbContext
 
         metadata.Property(row => row.Key).HasColumnName("key");
         metadata.Property(row => row.Value).HasColumnName("value");
+    }
+
+    /// <summary>
+    /// FR-12's dedup table. Migrated deliberately, like <c>store_metadata</c>: it is written at
+    /// ingest time from source bytes, not re-derived from what the store already holds, so Repo
+    /// Rule 4's "never migrated" applies to NORMALIZED and FINDINGS, not to this.
+    /// </summary>
+    static void MapSystemPromptText(ModelBuilder modelBuilder)
+    {
+        var text = modelBuilder.Entity<SystemPromptText>();
+
+        text.ToTable(SystemPromptTextSchema.Table);
+        text.HasKey(row => row.ContentHash);
+
+        text.Property(row => row.ContentHash).HasColumnName(SystemPromptTextSchema.ContentHash).IsRequired();
+        text.Property(row => row.Text).HasColumnName(SystemPromptTextSchema.Text).IsRequired();
     }
 
     static void MapSession(ModelBuilder modelBuilder)

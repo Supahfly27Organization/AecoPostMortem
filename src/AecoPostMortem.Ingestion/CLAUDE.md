@@ -11,6 +11,7 @@ volume control (FR-10, FR-12, FR-13).
 | `ExcludedSources.cs` | FR-10: recognises Copilot's global `session-store.db` by name, and states why it is skipped |
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
 | `RewindSnapshotSource.cs` | FR-13: reads `rewind-snapshots/index.json` as one whole-file RAW event at byte offset zero |
+| `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced |
 
 ## References
 
@@ -70,10 +71,37 @@ overwriting the other (FR-13). This method takes `sessionId`, `sequence`, `times
 envelope of its own to lift them from — a future ingest pipeline supplies them from the session
 context it already has.
 
+### `arguments` is parsed polymorphically, and a third shape is never coerced (FR-4)
+
+`ToolArguments.Parse` classifies the value's own JSON text as `Object` (every tool but
+`apply_patch`), `String` (`apply_patch`'s whole patch envelope — a projection that assumes an object
+here silently drops the patch, PRD §3.9's first listed failure mode), or `Unparsed` for anything
+else. `Unparsed` exists so a future tool arriving with a third argument shape is recorded rather than
+guessed at — `Raw` still preserves its text either way. `TryGetProperty` and `AsText` each throw if
+called against the wrong `Kind`, rather than returning a default that would look like a real absence.
+
+`ToolArguments` is a standalone, self-contained parsing unit — it does not yet plug into a
+`RawEvent`-to-`ToolCall` pipeline, because that event-line parsing loop (S-02, story `issue-3`) had
+not landed in this worktree when this story was implemented. A later merge wires
+`ToolArguments.Parse` in where `tool.execution_start.data.arguments` is read.
+
+### The corpus round-trip is a build gate, not a unit test
+
+`test/AecoPostMortem.Ingestion.Tests/ApplyPatchCorpusRoundTripTests.cs` parses and re-serialises
+every `apply_patch` call in the *live* reference corpus (a measured 381 calls) through
+`ToolArguments`, because `ToolArgumentsTests`'s hand-picked strings prove the algorithm but not that
+the real corpus never trips it. The corpus bytes are not checked in (`fixtures/README.md`), so the
+test reads the live source directory recorded in `fixtures/corpus-manifest.json`'s own `source`
+field (overridable by `AECOPOSTMORTEM_CORPUS_SOURCE`) and **skips**, not fails, on a machine that
+doesn't have it — the gate only bites where the corpus actually is.
+`scripts/check-apply-patch-roundtrip.py` is the CI entry point: it runs that one test in isolation
+and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check`.
+
 ## Status
 
-`SourceFiles`, `ExcludedSources`, `SystemPromptExtractor` and `RewindSnapshotSource` exist as
-composable building blocks with no orchestrating pipeline yet — the `ingest` CLI command still
-reports "not implemented" (`AecoPostMortem.Cli`); wiring these into an actual directory walk is a
-later story (S-02's discovery, or whichever story lands the `ingest` command's body). Path
-discovery, the event-line reader and session reconstruction land next.
+`SourceFiles`, `ExcludedSources`, `SystemPromptExtractor`, `RewindSnapshotSource` and
+`ToolArguments` exist as composable building blocks with no orchestrating pipeline yet — the
+`ingest` CLI command still reports "not implemented" (`AecoPostMortem.Cli`); wiring these into an
+actual directory walk and a `RawEvent`-to-`ToolCall` pipeline is a later story (S-02's discovery, or
+whichever story lands the `ingest` command's body). Path discovery, the event-line reader and
+session reconstruction land next.

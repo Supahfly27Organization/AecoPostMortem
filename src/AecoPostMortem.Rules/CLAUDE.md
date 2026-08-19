@@ -14,6 +14,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
+| `AbortedTurnCheck.cs` | FR-18 (S-16, issue #28): `TurnRecord` (the plain per-turn input, aborted or not), `AbortedTurnOccurrence` (reason paired with its 1-based position and the session's own turn count), and `AbortedTurnCheck.Run`, which orders each session's turns and reports only the ones that aborted |
 
 ## The invariant
 
@@ -137,10 +138,29 @@ deliberately unusual identities to prove the grouping is generic. The check retu
 every tool observed, including ones with zero failures; deciding which rates are worth surfacing as
 a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
+### Position is derived by ordering, not read off a field
+
+`AbortedTurnCheck.Run` groups `TurnRecord`s by `SessionId`, orders each session's turns by
+`StartedAt` (ties broken by `TurnId`, ordinal string comparison, for a deterministic result
+regardless of input order — PRD §3.8), and reports each aborted turn's 1-based index in that
+ordering alongside the session's total turn count. Copilot's own event log carries no ordinal turn
+number, so "position in the session" (issue #28, Scenario 1) only exists once every turn in the
+session — not only the aborted ones — has been placed in order; that is why `TurnRecord` covers
+every turn, `Aborted` and all, rather than taking a list of already-known aborts.
+
+### One occurrence per abort, never grouped by reason
+
+Unlike `HookFailureCheck` (grouped by hook identity) or `FailedToolCallsCheck` (grouped by tool
+identity), `AbortedTurnCheck` groups only by session — the reason text plays no role in identity.
+A measured 9 aborts across 8 sessions is low volume (issue #28's edge case): two aborts sharing the
+same reason string in different sessions are still two independent abandonments, and merging them
+by reason would make the finding look more recurring than the corpus measures.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
-three entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15) and
-`FailedToolCallsCheck` (issue #26, FR-16). The shape they establish — plain per-call/per-session
-input records in, structurally-required or structurally-paired results out, no branch on any
-specific tool name — is the pattern later checks in this project should follow.
+four entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+`FailedToolCallsCheck` (issue #26, FR-16) and `AbortedTurnCheck` (issue #28, FR-18). The shape they
+establish — plain per-call/per-session/per-turn input records in, structurally-required or
+structurally-paired results out, no branch on any specific tool name — is the pattern later checks
+in this project should follow.

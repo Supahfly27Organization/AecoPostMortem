@@ -18,6 +18,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
+| `AbortedTurnFinding.cs` | FR-18 (S-16, issue #28): reads `AecoPostMortem.Data.Execution.Turn` rows, calls `AecoPostMortem.Rules.AbortedTurnCheck`, and writes one `Finding` per aborted turn — never grouped — plus a `CheckRegistryEntry` |
 
 ## References
 
@@ -30,17 +31,21 @@ orchestrator can name tools and repositories, the checker never sees them.
 The `Rules` reference is used by `HookFailureFinding` (issue #27), which calls
 `HookFailureCheck.Evaluate` for the paired denominators and builds `Finding`s from the result; by
 `RepeatedFileReadFindingCheck` (issue #25), which reads `AecoPostMortem.Data.Execution.ToolCall` and
-calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; and by
+calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; by
 `FailedToolCallsFinding` (issue #26), which calls `FailedToolCallsCheck` and shapes its
-`ToolFailureRate` results into `Finding`s. The `Data` reference is still not used by
-`HookFailureFinding` or `FailedToolCallsFinding`: `HookFailureFinding.Build` takes plain inputs
-(`allSessionIds`, `sessionsWithToolCall`, `HookFailureEvent`s) rather than querying
-`PostMortemContext` directly, because no code in this repository yet turns `raw_event` into the
-`Hook`/`ToolCall` rows a real query would read — that ETL is a separate, not-yet-built story.
-`FailedToolCallsFinding`'s tests likewise build `ToolCallOutcome` operands directly rather than
-reading through `PostMortemContext`; the query that resolves `ToolCall` rows into that plain shape
-for this check is later work (S-40). The caller that eventually does read through `Data` for these
-two supplies their plain inputs from the derived tables once that pipeline exists.
+`ToolFailureRate` results into `Finding`s; and by `AbortedTurnFinding` (issue #28), which reads
+`AecoPostMortem.Data.Execution.Turn` and calls `AecoPostMortem.Rules.AbortedTurnCheck` — the second
+check, after `RepeatedFileReadFindingCheck`, to read a real derived entity rather than take plain
+inputs, because `Turn.AbortReason` and `Turn.Outcome` already carry everything FR-18 needs. The
+`Data` reference is still not used by `HookFailureFinding` or `FailedToolCallsFinding`:
+`HookFailureFinding.Build` takes plain inputs (`allSessionIds`, `sessionsWithToolCall`,
+`HookFailureEvent`s) rather than querying `PostMortemContext` directly, because no code in this
+repository yet turns `raw_event` into the `Hook` rows a real query would read — that ETL is a
+separate, not-yet-built story. `FailedToolCallsFinding`'s tests likewise build `ToolCallOutcome`
+operands directly rather than reading through `PostMortemContext`; the query that resolves
+`ToolCall` rows into that plain shape for this check is later work (S-40). The caller that
+eventually does read through `Data` for these two supplies their plain inputs from the derived
+tables once that pipeline exists.
 
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
@@ -121,6 +126,23 @@ the counts that produced it, or the rate without the session count that contextu
 #26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
 without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
 
+### `AbortedTurnFinding`'s recurrence key is the turn itself, not the abort reason
+
+FR-57 names a class-specific key, but an abort has no recurring *cause* the way a hook or a tool
+does — `AbortedTurnFinding.ToFinding` keys `Recurrence` on `$"{SessionId}:{TurnId}"`, not
+`AbortedTurnOccurrence.TurnId` alone: `Turn`'s own natural key is the composite
+`(SessionId, TurnId)` (`PostMortemContext.MapTurn`), and a bare `TurnId` is not guaranteed unique
+across sessions — two unrelated aborts that happened to share one would otherwise collide into the
+same `Recurrence.Key`, which `Recurrence.cs` documents as impossible ("no constructor that could
+produce a second `Finding` for the same key"). Two aborts that happen to share reason text
+(`"user_interrupt"`, say) in two different sessions still stay two distinct findings, each with
+exactly one `RecurrenceOccurrence` — grouping by reason instead would let a measured 9-across-8
+volume collapse into fewer, more heavily "recurring" findings than the corpus actually shows, the
+inflation issue #28's edge case warns against. `Provenance.Derived` rather than `Observed` for the
+same reason `RepeatedFileReadFindingCheck` gives: "position in the session" comes from ordering
+every turn in the session (`AbortedTurnCheck.Run`), not from a single event's own field, even
+though the abort reason itself is a bare observed value.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -162,14 +184,15 @@ data types) rather than merely asserting the behaviour.
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-three real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
-`RepeatedFileReadFindingCheck` (issue #25, FR-15) and `FailedToolCallsFinding`
-(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. A
-fourth check registers a real id — `malformed-line`, built by
+four real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+`RepeatedFileReadFindingCheck` (issue #25, FR-15), `FailedToolCallsFinding`
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26) and `AbortedTurnFinding`
+(`CheckId = "aborted-turn"`, FR-18, issue #28) — all `FindingClass.Waste` detection logic. A
+fifth check registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
 but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
 real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
 mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
+real one. Each of the four Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.

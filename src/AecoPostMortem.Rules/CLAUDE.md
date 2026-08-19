@@ -11,6 +11,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolVocabulary.cs` | `ToolVocabulary.Build` — the distinct tool names in whatever corpus is passed in (FR-29) |
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
+| `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
 
@@ -81,6 +82,20 @@ the reference corpus is a fact about that corpus, not a constant this project co
 next machine's log has a different vocabulary, and role derivation has to run again for it to mean
 anything.
 
+### `HookFailureCounts` pairs both denominators structurally, not by convention
+
+FR-17 requires a hook-failure figure to state the count over all sessions and the count over
+sessions that made a tool call together, never one alone — the edge case that makes this matter is
+a measured 34 of 35 sessions overall against 32 of the 33 that made a tool call: two sessions
+failed the hook while making no tool call at all, so either figure printed by itself reads as a
+contradiction. `HookFailureCounts.OverAllSessions` and `.OverSessionsWithToolCall` are both
+`required SessionCount`, and `SessionCount.Count`/`.Population` are themselves both `required` —
+an object initializer that omits any of the four is a compile error (CS9035), the same reasoning
+`AecoPostMortem.Findings/CLAUDE.md` gives for `Finding.Provenance` being `required` rather than
+validated at run time.
+`HookFailureCheckTests.The_denominator_fields_are_required_members` proves the properties still
+carry `RequiredMemberAttribute`.
+
 ### `ReadEvent` names no tool, and never will
 
 `ReadEvent` carries only `SessionId` and `Path`. Deciding which raw tool calls count as reads —
@@ -124,8 +139,8 @@ a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
 ## Status
 
-Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has two
-entries: `RepeatedReadCheck` (FR-15, issue #25) and `FailedToolCallsCheck` (FR-16, issue #26). The
-pattern they establish — a plain input record, structurally-required results, a check with no
-branch on any specific tool name — is the template for the checks that land here next. A sibling
-Waste-class check (hook failures, issue #27) is landing concurrently in its own file.
+Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
+three entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15) and
+`FailedToolCallsCheck` (issue #26, FR-16). The shape they establish — plain per-call/per-session
+input records in, structurally-required or structurally-paired results out, no branch on any
+specific tool name — is the pattern later checks in this project should follow.

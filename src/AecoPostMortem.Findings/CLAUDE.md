@@ -15,6 +15,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
+| `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
 
@@ -26,12 +27,20 @@ is the project that reads through `Data`, feeds `Rules` its operands, and writes
 That split is why the non-negotiable invariant in `AecoPostMortem.Rules/CLAUDE.md` holds: the
 orchestrator can name tools and repositories, the checker never sees them.
 
-`RepeatedFileReadFindingCheck` is the first real use of both references: it reads
-`AecoPostMortem.Data.Execution.ToolCall` and calls `AecoPostMortem.Rules.RepeatedReadCheck`.
-`FailedToolCallsFinding` also uses `Rules`: it calls `FailedToolCallsCheck` and shapes its
-`ToolFailureRate` results into `Finding`s — but its own tests build `ToolCallOutcome` operands
-directly rather than reading through `PostMortemContext`; the query that resolves `ToolCall` rows
-into that plain shape for this check is later work (S-40).
+The `Rules` reference is used by `HookFailureFinding` (issue #27), which calls
+`HookFailureCheck.Evaluate` for the paired denominators and builds `Finding`s from the result; by
+`RepeatedFileReadFindingCheck` (issue #25), which reads `AecoPostMortem.Data.Execution.ToolCall` and
+calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; and by
+`FailedToolCallsFinding` (issue #26), which calls `FailedToolCallsCheck` and shapes its
+`ToolFailureRate` results into `Finding`s. The `Data` reference is still not used by
+`HookFailureFinding` or `FailedToolCallsFinding`: `HookFailureFinding.Build` takes plain inputs
+(`allSessionIds`, `sessionsWithToolCall`, `HookFailureEvent`s) rather than querying
+`PostMortemContext` directly, because no code in this repository yet turns `raw_event` into the
+`Hook`/`ToolCall` rows a real query would read — that ETL is a separate, not-yet-built story.
+`FailedToolCallsFinding`'s tests likewise build `ToolCallOutcome` operands directly rather than
+reading through `PostMortemContext`; the query that resolves `ToolCall` rows into that plain shape
+for this check is later work (S-40). The caller that eventually does read through `Data` for these
+two supplies their plain inputs from the derived tables once that pipeline exists.
 
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
@@ -55,23 +64,32 @@ compile an object initializer that omits a `required` member.
 `AecoPostMortem.Rules/CLAUDE.md` gives for its own invariant: structural beats conventional
 because there is no commit at which it can be skipped by accident.
 
-### A Waste finding carries its rate in Evidence, never in Resolution
+### `HookFailureEvent` is a plain input, not `AecoPostMortem.Data.Execution.Hook`
 
-`Resolution` is FR-33's layer-used-per-operand figure, scoped to adherence findings
-(`RuleAdherenceToolChoice` / `RuleAdherenceWrittenContent`) — `FailedToolCallsFinding` leaves it
-null. The failure rate's counts (`failures`, `calls`, `percentage`, `sessionCount`) are quoted as
-`EvidenceItem`s instead, all four built together in one place
-(`FailedToolCallsFinding.ToFinding`) so a rendered finding can never show the percentage without
-the counts that produced it, or the rate without the session count that contextualizes it (issue
-#26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
-without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
+`Evidence.cs` says evidence is "quoted from the event that produced a finding" — the RAW event, not
+the NORMALIZED projection that already dropped fields it didn't index. `Data.Execution.Hook` has no
+error-text column, so `HookFailureFinding` takes its own `HookFailureEvent` (`SessionId`,
+`HookName`, `Success`, `Error`) instead of widening the shared derived entity for one check's
+evidence. `EvidenceItem.Field` values (`data.success`, `data.error`) name the JSON path a future RAW
+reader would quote them from.
 
-### A refused check and a clean check are distinguished by null, not by a third status
+### The suggestion text is the only path to FR-17's paired denominators
 
-`CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
-including `0` — when `Status` is `Ran`. `CheckRunStatus` has exactly two values because the
-acceptance criteria name exactly two states to distinguish; a third "never attempted" status was
-considered and rejected as unmotivated by anything in FR-37 or FR-42.
+`HookFailureFinding.BuildSuggestion` takes `HookFailureCounts` as a whole and is the only producer
+of `Finding.Suggestion.Text` for this check — there is no overload or code path that renders
+`OverAllSessions` or `OverSessionsWithToolCall` alone. That is what makes "neither figure appears
+alone" (issue #27, Scenario 1) hold structurally rather than by the caller remembering to print
+both.
+
+### The finding is one per hook identity, and disappears once the hook is fixed
+
+`FindingClassRegistry`'s recurrence key for a hook failure is "the hook identity", so
+`HookFailureFinding.Build` groups failures by `HookName` and emits one `Finding` per group, each
+carrying the same corpus-wide `HookFailureCounts`. When there are no failures, `Build` returns no
+findings and a `CheckRegistryEntry` with `Status = Ran` and `FindingCount = 0` — a clean check, not
+a refused one. That is what makes the finding disappear from the digest on its own the moment the
+operator fixes the hook, per issue #27's edge case: intended behaviour, not a regression to guard
+against.
 
 ### `RepeatedFileReadFindingCheck`'s recurrence key is the path, not `(session, path)`
 
@@ -91,6 +109,24 @@ in, before the read-event filter runs — so a session whose only tool call is m
 parser-defect edge case in issue #25) still counts as considered, it just contributes no read
 events. This matches `CheckRegistryEntry`'s own doc comment: population is "the candidate set the
 check considered", defined whether or not the check goes on to find anything.
+
+### A Waste finding carries its rate in Evidence, never in Resolution
+
+`Resolution` is FR-33's layer-used-per-operand figure, scoped to adherence findings
+(`RuleAdherenceToolChoice` / `RuleAdherenceWrittenContent`) — `FailedToolCallsFinding` leaves it
+null. The failure rate's counts (`failures`, `calls`, `percentage`, `sessionCount`) are quoted as
+`EvidenceItem`s instead, all four built together in one place
+(`FailedToolCallsFinding.ToFinding`) so a rendered finding can never show the percentage without
+the counts that produced it, or the rate without the session count that contextualizes it (issue
+#26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
+without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
+
+### A refused check and a clean check are distinguished by null, not by a third status
+
+`CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
+including `0` — when `Status` is `Ran`. `CheckRunStatus` has exactly two values because the
+acceptance criteria name exactly two states to distinguish; a third "never attempted" status was
+considered and rejected as unmotivated by anything in FR-37 or FR-42.
 
 ### Suggestions are template substitution, not generation — and the template lives here, not in `Rules`
 
@@ -126,13 +162,14 @@ data types) rather than merely asserting the behaviour.
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-two real checks: `RepeatedFileReadFindingCheck` (FR-15, issue #25) and `FailedToolCallsFinding`
-(`CheckId = "failed-tool-calls"`, FR-16, issue #26). A third check registers a real id —
-`malformed-line`, built by `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read
-stats (issue #3 / S-02) — but nothing in this project constructs it. No check exists in
-`AecoPostMortem.Rules` yet to bind a real `SuggestionTemplate.CheckId` to —
-`SuggestionWorkedExampleTests` exercises the suggestion mechanism against a synthetic tool-choice
-check result standing in for the story that will supply a real one. A fourth sibling Waste-class
-check (hook failures, issue #27) is landing concurrently in its own file — each of the three
-Waste-class checks is self-contained, but `FindingClassRegistry`'s Waste `RecurrenceKeyDescription`
-is shared prose more than one touches, so expect it to need merging by hand.
+three real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+`RepeatedFileReadFindingCheck` (issue #25, FR-15) and `FailedToolCallsFinding`
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. A
+fourth check registers a real id — `malformed-line`, built by
+`AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
+but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
+real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
+mechanism against a synthetic tool-choice check result standing in for the story that will supply a
+real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
+Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
+merging by hand.

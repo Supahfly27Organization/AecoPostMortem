@@ -1,7 +1,7 @@
 namespace AecoPostMortem.Findings.Tests;
 
 /// <summary>
-/// The three leaf value types a <see cref="Finding"/> carries: a quoted event field (FR-59's
+/// The three leaf value types a <c>Finding</c> carries: a quoted event field (FR-59's
 /// evidence), an adherence figure's resolution (FR-33), and a deterministic suggestion template
 /// (FR-56). None depends on the others.
 /// </summary>

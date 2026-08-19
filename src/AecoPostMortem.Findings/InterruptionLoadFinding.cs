@@ -19,9 +19,11 @@ public static class InterruptionLoadFinding
     /// <summary>
     /// The tool name that stands in for "a question put to the operator" — the one place allowed
     /// to name it (Repo Rule 6 binds <c>AecoPostMortem.Rules</c> only). Per the ingestion data map,
-    /// a question is a completed <c>ask_user</c> call carrying
-    /// <c>arguments{question, choices, allow_freeform}</c> and a <c>"User selected: …"</c> result —
-    /// measured 124 asked against 124 answered.
+    /// a question is an <c>ask_user</c> call carrying
+    /// <c>arguments{question, choices, allow_freeform}</c> and, once it completes, a
+    /// <c>"User selected: …"</c> result — measured 124 asked against 124 answered. Every call by
+    /// this name counts, completed or not, the same way <c>RepeatedFileReadFindingCheck</c> counts
+    /// every <c>view</c> call regardless of its own completion state.
     /// </summary>
     const string QuestionToolName = "ask_user";
 

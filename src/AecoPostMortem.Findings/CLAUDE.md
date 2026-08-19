@@ -18,6 +18,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
+| `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
 
 ## References
 
@@ -41,6 +42,14 @@ calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both re
 reading through `PostMortemContext`; the query that resolves `ToolCall` rows into that plain shape
 for this check is later work (S-40). The caller that eventually does read through `Data` for these
 two supplies their plain inputs from the derived tables once that pipeline exists.
+
+`PhaseChurnFinding` (issue #29) takes `Rules.DeclaredIntent` operands directly, for the same reason:
+`Data.Execution.ToolCall` carries no field for `report_intent`'s `intent` argument (only `Path`,
+added for reads), and `ToolArguments` is not yet wired into the `RawEvent`-to-`ToolCall` pipeline
+(`AecoPostMortem.Ingestion/CLAUDE.md`) — so there is no real query today that could resolve a
+`report_intent` call's phase label. `DeclaredIntent` already is the plain shape a future caller would
+supply once that ETL exists, the same way `ToolCallOutcome` is reused directly by
+`FailedToolCallsFinding` rather than wrapped in a second Findings-owned type.
 
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
@@ -121,6 +130,29 @@ the counts that produced it, or the rate without the session count that contextu
 #26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
 without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
 
+### `PhaseChurnFinding`'s recurrence key is the session id, unlike every other Waste check
+
+The other three Waste checks each recur around a shared sub-object two sessions can both touch — a
+path, a hook identity, a tool identity. Phase churn has no such object: it is a whole-session
+aggregate over that session's own declared intents, so there is nothing for two different sessions'
+churn to be "the same finding" *about*. `PhaseChurnFinding.ToFinding` therefore keys `Recurrence` on
+the session id itself, so every churning session is its own `Finding` with exactly one
+`RecurrenceOccurrence` — itself. This is a deliberate reading of FR-57 for a check shape the other
+three don't fit, not an oversight of "a session is where `Recurrence` says the finding recurred, not
+where the finding lives" (this file's own words, above): that guidance is about `Finding` carrying no
+bare `SessionId` field, and still holds — `PhaseChurnFinding` never puts a session id anywhere but
+inside `Recurrence`.
+
+### Only sessions that actually churned become a finding
+
+`PhaseChurnCheck.Run` (Rules) reports every session that declared at least one intent, churned or
+not, the same way `FailedToolCallsCheck.Run` reports every tool observed including clean ones.
+`PhaseChurnFinding.Run` filters to `Returns > 0` before building a `Finding`, mirroring
+`FailedToolCallsFinding`'s `Failures > 0` filter — deciding what is worth surfacing as a finding is
+this project's call, not `Rules`'s. A session with intents but zero returns is therefore silent, the
+same as a session with no intents at all (issue #29's named edge case), even though `Rules` can tell
+the two states apart if a future caller needs to.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -162,14 +194,15 @@ data types) rather than merely asserting the behaviour.
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-three real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
-`RepeatedFileReadFindingCheck` (issue #25, FR-15) and `FailedToolCallsFinding`
-(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. A
-fourth check registers a real id — `malformed-line`, built by
+four real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+`RepeatedFileReadFindingCheck` (issue #25, FR-15), `FailedToolCallsFinding`
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26) and `PhaseChurnFinding`
+(`CheckId = "phase-churn"`, FR-19, issue #29) — all `FindingClass.Waste` detection logic. A fifth
+check registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
 but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
 real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
 mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
+real one. Each of the four Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.

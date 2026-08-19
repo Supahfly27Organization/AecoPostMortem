@@ -14,6 +14,9 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
+| `DeclaredIntent.cs` | FR-19's plain input (issue #29): one self-declared phase — `SessionId`, `Phase` (an opaque label) and `Sequence` (the corpus-wide chronological order, the only ordering input this project trusts) |
+| `PhaseOrdering.cs` | `PhaseOrdering.Derive` — the distinct phases in the corpus, ordered by each phase's earliest `Sequence` across every session (FR-19; the S-21 vocabulary pattern applied to phase labels) |
+| `PhaseChurnCheck.cs` | FR-19's check shape (issue #29): `PhaseChurnResult` (a session's returns, its own total intents, and the vocabulary/ordering that produced it), `PhaseChurnCheck.Run`, which derives the ordering once and evaluates each session independently |
 
 ## The invariant
 
@@ -137,10 +140,44 @@ deliberately unusual identities to prove the grouping is generic. The check retu
 every tool observed, including ones with zero failures; deciding which rates are worth surfacing as
 a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
+### The phase vocabulary and its ordering are corpus-wide, never per-session
+
+FR-19 requires "an earlier phase" to mean something, which needs a vocabulary and an ordering that
+neither implementation may hard-code. `PhaseOrdering.Derive` groups `DeclaredIntent` by `Phase` and
+orders by each phase's *earliest* `Sequence` across every session combined — a phase declared late
+in one session but early in another is ordered by whichever declaration came first corpus-wide, the
+same discipline `ToolVocabulary`/`ToolRoleDeriver` (S-21) apply to tool names. `PhaseChurnCheck.Run`
+derives this ordering exactly once per call and reuses it for every session, so two sessions in the
+same run are always judged against the same phase order.
+
+### A return is "below the highest phase reached so far", not "below the previous phase"
+
+`PhaseChurnCheck`'s per-session loop tracks `highestReached`, the largest ordering position seen so
+far in that session — not simply the position of the previous intent — and `highestReached` only
+advances when an intent's position is at or above it. A call to phase 2 then phase 0 then phase 1
+counts **two** returns, not one: phase 0 is below the high-water mark of 2 (a return), and phase 1 is
+*still* below that same high-water mark of 2 (a second return), because `highestReached` never
+dropped to 0 in the first place — only a new maximum moves it. `Each_return_below_the_highest_phase_
+reached_so_far_is_counted_separately` (`PhaseChurnCheckTests`) is this exact shape and asserts 2.
+Declaring the same phase again in place — whether or not it is the session's current high-water
+mark — is never a return, because "at or above" includes equal.
+
+### `PhaseChurnResult` carries its own denominator and the derivation that produced it
+
+Issue #29's edge case is a measured 104 returns across 352 intents in the worst session: an
+un-normalised return count always makes the longest session look worst. `PhaseChurnResult.Returns`
+never appears without `TotalIntents` — that session's own count, not the corpus's — and every
+result also carries `Vocabulary`, the same ordered list `PhaseOrdering.Derive` produced, so a
+rendered result is never separated from the derivation that could make two implementations disagree
+(Scenario 2). A session that declares no intents contributes no `PhaseChurnResult` at all, because
+grouping is over the intents themselves — there is no session-enumeration side channel that could
+produce a zero for it.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
-three entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15) and
-`FailedToolCallsCheck` (issue #26, FR-16). The shape they establish — plain per-call/per-session
-input records in, structurally-required or structurally-paired results out, no branch on any
-specific tool name — is the pattern later checks in this project should follow.
+four entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+`FailedToolCallsCheck` (issue #26, FR-16) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
+establish — plain per-call/per-session input records in, structurally-required or
+structurally-paired results out, no branch on any specific tool name — is the pattern later checks
+in this project should follow.

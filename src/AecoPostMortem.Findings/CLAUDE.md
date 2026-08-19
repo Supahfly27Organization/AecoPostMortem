@@ -18,6 +18,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
+| `SessionTokenFigures.cs` | FR-24 (S-11, issue #20): reads `Session`'s own token fields into the masthead's token-totals contract — not a `Finding`, no rule adherence involved — closed to `Observed` and `SessionTotalsNotRecorded` |
 
 ## References
 
@@ -41,6 +42,11 @@ calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both re
 reading through `PostMortemContext`; the query that resolves `ToolCall` rows into that plain shape
 for this check is later work (S-40). The caller that eventually does read through `Data` for these
 two supplies their plain inputs from the derived tables once that pipeline exists.
+
+`SessionTokenFigures` (issue #20) also uses the `Data` reference directly — `From` takes a
+`Session` and reads its own nullable token fields, no `Rules` call involved: there is no rate or
+threshold to check here, only a value already computed by whatever populates `Session` (S-49) and a
+presence test.
 
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
@@ -121,6 +127,27 @@ the counts that produced it, or the rate without the session count that contextu
 #26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
 without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
 
+### `SessionTokenFigures` is not a `Finding`, deliberately
+
+FR-24's token totals are a masthead display fact, not evidence of rule adherence or waste, so they
+carry no `FindingClass`, `Provenance`, `Evidence` or `Recurrence` — the `Finding` contract's seven
+fields don't fit and aren't forced to. Instead `SessionTokenFigures` is its own closed union, built
+the same way `Api.SuggestionEnvelope` builds "no suggestion" as an explicit state rather than a
+nullable field: `NotRecorded` is the one value for "this session's shutdown event carried no token
+metrics", and `Observed` is the only shape carrying `InputTokens`/`OutputTokens`, both `required`.
+`From(Session)` treats a session carrying only one of the pair (a case reflection can't
+distinguish from a bug without a name) the same as a session carrying neither: half a pair of
+totals is a missing pair, not a partial one, because both figures come from the same shutdown
+event. No property on either shape may be named after cost, price, currency or spend —
+`SessionTokenFiguresTests.No_shape_carries_a_cost_or_currency_field` reflects over both shapes to
+prove there is nothing on this type a masthead could accidentally render as a price (Scenario 3);
+FR-24 forbids the figure entirely because Copilot prices in premium requests and nano-AIU and no
+local file states a conversion rate, so apportioning a total into a price is Inferred and this
+product does not compute one anywhere. No `AecoPostMortem.Api` envelope wraps it yet — S-08's
+masthead (FR-21) is the story that will call `From` and render its two states; this one only
+publishes the shape and the presence rule, the same contract-first pattern `FindingEnvelope` and
+`SuggestionEnvelope` used for S-50.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -173,3 +200,8 @@ mechanism against a synthetic tool-choice check result standing in for the story
 real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.
+
+`SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract published ahead of the masthead
+that will consume it — S-08 (FR-21) is Must Have, not yet built, and this story only depended on the
+`Session` contract (S-49), not on S-08. `From(Session)` is exercised directly by
+`SessionTokenFiguresTests` rather than through any UI or API surface.

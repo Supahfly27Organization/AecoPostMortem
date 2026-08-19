@@ -15,6 +15,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
+| `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
 
 ## References
 
@@ -24,9 +25,10 @@ is the project that reads through `Data`, feeds `Rules` its operands, and writes
 That split is why the non-negotiable invariant in `AecoPostMortem.Rules/CLAUDE.md` holds: the
 orchestrator can name tools and repositories, the checker never sees them.
 
-Neither reference is used yet: the shapes in this project are pure C# types with no persistence
-and no dependency on a concrete check. This contract publishes the shape; the work it unblocks is
-what reads through `Data` and calls into `Rules`.
+The `Rules` reference is now used: `FailedToolCallsFinding` calls `FailedToolCallsCheck` and shapes
+its `ToolFailureRate` results into `Finding`s. The `Data` reference is still unused — this check's
+tests build `ToolCallOutcome` operands directly rather than reading through `PostMortemContext`;
+the query that resolves `ToolCall` rows into that plain shape is later work (S-40).
 
 ## Non-obvious decisions
 
@@ -45,6 +47,17 @@ compile an object initializer that omits a `required` member.
 `RequiredMemberAttribute` rather than re-deriving the guarantee at run time, the same reasoning
 `AecoPostMortem.Rules/CLAUDE.md` gives for its own invariant: structural beats conventional
 because there is no commit at which it can be skipped by accident.
+
+### A Waste finding carries its rate in Evidence, never in Resolution
+
+`Resolution` is FR-33's layer-used-per-operand figure, scoped to adherence findings
+(`RuleAdherenceToolChoice` / `RuleAdherenceWrittenContent`) — `FailedToolCallsFinding` leaves it
+null. The failure rate's counts (`failures`, `calls`, `percentage`, `sessionCount`) are quoted as
+`EvidenceItem`s instead, all four built together in one place
+(`FailedToolCallsFinding.ToFinding`) so a rendered finding can never show the percentage without
+the counts that produced it, or the rate without the session count that contextualizes it (issue
+#26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
+without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
 
 ### A refused check and a clean check are distinguished by null, not by a third status
 
@@ -86,7 +99,12 @@ data types) rather than merely asserting the behaviour.
 
 ## Status
 
-The finding record and check-registry shapes, plus FR-56's generic suggestion-template mechanism.
-No finding class has detection logic yet and no check exists in `AecoPostMortem.Rules` to bind a
-real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the mechanism
-against a synthetic tool-choice check result standing in for the story that will supply a real one.
+The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
+one detection: `FailedToolCallsFinding` (`CheckId = "failed-tool-calls"`, FR-16). No check exists in
+`AecoPostMortem.Rules` yet to bind a real `SuggestionTemplate.CheckId` to —
+`SuggestionWorkedExampleTests` exercises the suggestion mechanism against a synthetic tool-choice
+check result standing in for the story that will supply a real one.
+`FailedToolCallsFinding` is a Waste-class check landing alongside sibling Waste checks for repeated
+file reads (issue #25) and hook failures (issue #27) in separate branches — each is a self-contained
+file, but `FindingClassRegistry`'s Waste `RecurrenceKeyDescription` is shared prose all three touch,
+so expect it to need merging by hand.

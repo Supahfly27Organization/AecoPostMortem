@@ -353,10 +353,14 @@ self-exclusion plus the coverage report (`SessionStartContext`, `SessionExclusio
 `ExclusionListSource`, `CoverageReport`, `IngestionRun`, FR-7/FR-14, S-05, issue #6) exist as
 composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-12, FR-13,
 FR-14, FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses it to pull
-`path` out of an object-shaped `arguments` value. The `ingest` CLI command still reports "not
-implemented" (`AecoPostMortem.Cli`) — wiring `IngestionRun.Run` and `ExecutionRecordBuilder` into
-the actual command (reading `CoverageReport` to stdout per FR-58, and populating the derived tables)
-is a later story; this project's job is the composable pieces the CLI will call. `SessionRuleExtractor`
+`path` out of an object-shaped `arguments` value. The `ingest` CLI command (`AecoPostMortem.Cli`,
+`CommandRunner.Ingest`) now calls `IngestionRun.Run` and writes the resulting `CoverageReport` to
+stdout per FR-58 — the RAW-persistence half of the wiring this section used to call outstanding.
+`ExecutionRecordBuilder` is still not called from the CLI: populating the derived
+`Turn`/`ToolCall`/`Agent` tables from RAW is a separate piece of work, open for both `ingest` and
+`rebuild` alike (`AecoPostMortem.Cli/CLAUDE.md`'s own non-obvious-decisions section names it);
+`ApiHost.GetSession` already reconstructs a session's execution record live from RAW for the Flight
+Recorder, so nothing downstream is blocked on that table-population step landing. `SessionRuleExtractor`
 likewise resolves one session's own `RawEvent`s, already in hand — nothing yet walks the whole store
 calling it per session and feeding the results into `Rules.RuleStatementDeduplication.Deduplicate`;
 that corpus-wide wiring, and rule-set versioning by content hash (FR-27), are S-20's job.

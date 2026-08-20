@@ -171,13 +171,119 @@ public sealed class CommandRunnerTests
         Assert.Equal(AppStateKind.NoSourceFound, report!.Kind);
     }
 
+    /// <summary>FR-1: a missing Copilot directory is reported, not thrown — the coverage report
+    /// simply states zero sessions found rather than the command failing.</summary>
     [Fact]
-    public void Ingest_reports_the_same_way()
+    public void Ingest_against_a_missing_Copilot_root_reports_zero_sessions_and_succeeds()
     {
-        var (exitCode, stdout, _) = Run("ingest");
+        using var temporary = new TemporaryStore();
+        var missingRoot = Path.Combine(Path.GetTempPath(), "AecoPostMortem.Tests", "no-such-copilot-root");
+
+        var (exitCode, stdout, stderr) = RunIngest(temporary.Store, missingRoot);
 
         Assert.Equal(CommandRunner.Success, exitCode);
-        Assert.Contains("not implemented yet", stdout);
+        Assert.Contains("Sessions found: 0", stdout, StringComparison.Ordinal);
+        Assert.Contains("Sessions ingested: 0", stdout, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr);
+    }
+
+    /// <summary>FR-58's stated output channel for `ingest` — "stdout, the coverage report" — proven
+    /// against a real session directory read through the whole path: discovery, RAW persistence
+    /// (<see cref="IngestionRun.Run"/>) and the report <c>CommandRunner.Ingest</c> writes.</summary>
+    [Fact]
+    public void Ingest_persists_a_real_session_and_reports_its_coverage()
+    {
+        using var temporary = new TemporaryStore();
+        using var sessionState = new TemporarySessionState();
+        sessionState.WriteEventsFile(
+            "session-1",
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""",
+            """{"type":"assistant.turn_start","timestamp":"2026-05-07T14:16:49.000Z"}""");
+
+        var (exitCode, stdout, stderr) = RunIngest(temporary.Store, sessionState.Root);
+
+        Assert.Equal(CommandRunner.Success, exitCode);
+        Assert.Contains("Sessions found: 1", stdout, StringComparison.Ordinal);
+        Assert.Contains("Sessions ingested: 1", stdout, StringComparison.Ordinal);
+        Assert.Contains("Lines parsed: 2", stdout, StringComparison.Ordinal);
+        Assert.Contains("session.start: 1", stdout, StringComparison.Ordinal);
+        Assert.Contains("assistant.turn_start: 1", stdout, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr);
+
+        using var reopened = temporary.Store.Open();
+        Assert.Equal(2, reopened.RawEvents.Count());
+    }
+
+    /// <summary>A positional path argument overrides the default Copilot root, the same way
+    /// <c>--port</c> overrides <c>serve</c>'s default — <c>CommandSurfaceTests.
+    /// Ingest_takes_an_optional_path_and_serve_an_optional_port</c> is the structural half of this
+    /// claim; this is the behavioural half.</summary>
+    [Fact]
+    public void Ingest_uses_a_given_path_argument_instead_of_the_default_root()
+    {
+        using var temporary = new TemporaryStore();
+        using var sessionState = new TemporarySessionState();
+        sessionState.WriteEventsFile(
+            "session-1",
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""");
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var exitCode = CommandRunner.Run(
+            ["ingest", sessionState.Root],
+            stdout,
+            stderr,
+            temporary.Store,
+            runHost: null,
+            copilotSessionStateRoot: Path.Combine(Path.GetTempPath(), "AecoPostMortem.Tests", "not-this-one"));
+
+        Assert.Equal(CommandRunner.Success, exitCode);
+        Assert.Contains("Sessions found: 1", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    static (int ExitCode, string Stdout, string Stderr) RunIngest(LocalStore store, string sessionStateRoot)
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var exitCode = CommandRunner.Run(
+            ["ingest"], stdout, stderr, store, runHost: null, copilotSessionStateRoot: sessionStateRoot);
+        return (exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    /// <summary>A throwaway Copilot session-state root: <c>ingest</c>'s default is the real
+    /// machine's own directory, and a test reading it would make the test's outcome depend on
+    /// whatever the machine running it happens to have ingested Copilot sessions for.</summary>
+    sealed class TemporarySessionState : IDisposable
+    {
+        public TemporarySessionState()
+        {
+            Root = Path.Combine(
+                Path.GetTempPath(),
+                "AecoPostMortem.Tests",
+                Guid.NewGuid().ToString("n", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(Root);
+        }
+
+        public string Root { get; }
+
+        public void WriteEventsFile(string sessionId, params string[] lines)
+        {
+            var directory = Path.Combine(Root, sessionId);
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "events.jsonl"), string.Join('\n', lines) + '\n');
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(Root, recursive: true);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // Never created, or already gone.
+            }
+        }
     }
 
     [Fact]

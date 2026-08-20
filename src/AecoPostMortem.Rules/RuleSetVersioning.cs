@@ -42,6 +42,7 @@ public static class RuleSetVersioning
         return versions
             .OrderBy(version => version.Repository, StringComparer.Ordinal)
             .ThenBy(version => version.FirstSessionStartedAt, StringComparer.Ordinal)
+            .ThenBy(version => version.FirstSessionId, StringComparer.Ordinal)
             .ToArray();
     }
 }

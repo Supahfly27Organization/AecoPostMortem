@@ -42,6 +42,26 @@ public sealed class RuleSetVersionAdjacencyTests
     }
 
     [Fact]
+    public void Adjacency_is_determined_regardless_of_the_input_lists_own_order()
+    {
+        // Handed to RequireAdjacentPair in reverse of their own chronology -- adjacency must be
+        // judged by FirstSessionStartedAt, never by the position a caller happened to list them in.
+        RuleSetVersion[] versions =
+        [
+            Version("repo-a", "hash-2", firstSessionId: "s2", sessionCount: 4, startedAt: "2026-01-05T00:00:00Z"),
+            Version("repo-a", "hash-1", firstSessionId: "s1", sessionCount: 3, startedAt: "2026-01-01T00:00:00Z"),
+        ];
+
+        var (before, after) = RuleSetVersionAdjacency.RequireAdjacentPair(
+            versions,
+            new RuleSetVersionId { Repository = "repo-a", Hash = "hash-1" },
+            new RuleSetVersionId { Repository = "repo-a", Hash = "hash-2" });
+
+        Assert.Equal("hash-1", before.Hash);
+        Assert.Equal("hash-2", after.Hash);
+    }
+
+    [Fact]
     public void Two_versions_with_one_between_them_are_refused_naming_the_intervening_version()
     {
         RuleSetVersion[] versions =

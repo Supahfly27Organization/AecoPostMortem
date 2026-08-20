@@ -363,10 +363,15 @@ public sealed record RulesInventory
     /// <summary>
     /// <see cref="RuleSetVersioning.Compute"/>'s own order is chronological by
     /// <see cref="RuleSetVersion.FirstSessionStartedAt"/>, so a version picker built from it already
-    /// puts the version <see cref="MostRecentVersion"/> names last — this is a thin, named pass-through
-    /// rather than a re-derivation, kept so a reader here does not have to look up
+    /// puts the version whose own window reaches latest in time last — this is a thin, named
+    /// pass-through rather than a re-derivation, kept so a reader here does not have to look up
     /// <see cref="RuleSetVersioning.Compute"/> to know its result is already in the order this
-    /// surface needs.
+    /// surface needs. This is not quite a guarantee that the last entry is always
+    /// <see cref="MostRecentVersion"/>'s own answer: a hash that reappears after an intervening edit
+    /// (this file's own remarks on <see cref="RuleSetVersioning.Compute"/>'s single-window-per-hash
+    /// choice) keeps its *first* appearance's position here, even though it is also the version the
+    /// repository's most recent session carries. Not observed in the measured corpus, and not a defect
+    /// this surface introduces — the same characteristic the pre-fix ordering also had.
     /// </summary>
     static IReadOnlyList<RuleSetVersion> ChronologicalVersions(
         (SessionRuleSet Session, string Hash)[] inRepository) =>

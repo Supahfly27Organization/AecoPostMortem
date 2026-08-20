@@ -11,7 +11,7 @@ volume control (FR-10, FR-12, FR-13).
 | `SessionDiscovery.cs` | FR-1: finds every session directory under the session-state root and classifies its files (`events.jsonl`, `session.db`, `rewind-snapshots/index.json`, `workspace.yaml`) without reading any of them; a missing root is reported, not thrown |
 | `SessionEventReader.cs` | FR-3/FR-6: reads one `events.jsonl` line by line into `RawEvent`s — provider version and event-schema version from line 1 only, malformed lines skipped and counted, a trailing unterminated line stops the read and reports the high-water offset |
 | `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`ts`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
-| `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append` |
+| `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append`; FR-5 (issue #5): runs `RawEventBatch.DetectRewrites` first and refuses the append — reporting the mismatch on `SessionIngestResult.RewriteMismatches`/`RewriteDetected` instead — the moment a rewrite is found |
 | `MalformedLineCheck.cs` | turns one or more `SessionReadResult`s into the malformed-line `CheckRegistryEntry` (issue #23) |
 | `ExcludedSources.cs` | FR-10: recognises Copilot's global `session-store.db` by name, and states why it is skipped |
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
@@ -71,6 +71,20 @@ than by a mechanism that has to be kept correct: a line that was malformed on on
 again on the next, and if it has since completed (the file is live-written), it parses. RAW's own
 identity index (`ux_raw_identity`) is what keeps a re-ingested line that already succeeded from being
 inserted twice — `SessionIngestor` supplies no extra idempotency of its own.
+
+### A detected rewrite refuses the whole read, not just the mismatched lines
+
+`SessionIngestor.Ingest` calls `RawEventBatch.DetectRewrites` before `RawEventBatch.Append`, over
+every event the current read produced. If even one event's byte offset disagrees with what RAW
+already stores there, `Ingest` appends nothing from that read at all and returns the mismatches on
+`SessionIngestResult.RewriteMismatches` (`RewriteDetected` is `true` and `EventsInserted` is `0`).
+It does not append the events that don't collide and skip only the mismatched ones: once a file's
+bytes at a previously-seen offset no longer match, the byte-offset identity assumption FR-5 rests
+on (growth is append-only) is broken for that file, and nothing later in the same read can be
+trusted as a genuine continuation rather than a coincidence. This is a refuse-and-report outcome,
+not an exception — the same "reported, not thrown" shape `SessionDiscovery` uses for a missing
+root — because a rewritten file is an operator-visible condition to investigate, not a defect in
+this code path.
 
 ### A trailing line with no newline is unfinished, not malformed
 
@@ -197,13 +211,14 @@ and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check
 ## Status
 
 Path discovery (`SessionDiscovery`), the event-line reader (`SessionEventReader`,
-`EventEnvelopeParsers`), RAW persistence (`SessionIngestor`), the malformed-line check
-(`MalformedLineCheck`), volume control (`ExcludedSources`, `SystemPromptExtractor`,
-`RewindSnapshotSource`), the polymorphic `arguments` parser (`ToolArguments`) and execution-record
-reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`, `SpawnResolutionCheck`) exist as composable
-building blocks (FR-1, FR-3, FR-4, FR-6, FR-8, FR-9, FR-10, FR-12, FR-13). `ExecutionRecordBuilder`
-is the first caller of `ToolArguments` — it uses it to pull `path` out of an object-shaped
-`arguments` value. The `ingest` CLI command still reports "not implemented" (`AecoPostMortem.Cli`) —
-wiring path discovery, the event reader, `SessionIngestor` and `ExecutionRecordBuilder` into an
-actual directory walk that also populates the derived tables is a later story. The coverage report
-and self-exclusion (FR-7/FR-14) land with the story that follows.
+`EventEnvelopeParsers`), RAW persistence and idempotent, rewrite-safe re-ingest (`SessionIngestor`,
+FR-5, issue #5), the malformed-line check (`MalformedLineCheck`), volume control (`ExcludedSources`,
+`SystemPromptExtractor`, `RewindSnapshotSource`), the polymorphic `arguments` parser
+(`ToolArguments`) and execution-record reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`,
+`SpawnResolutionCheck`) exist as composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-8,
+FR-9, FR-10, FR-12, FR-13). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses
+it to pull `path` out of an object-shaped `arguments` value. The `ingest` CLI command still reports
+"not implemented" (`AecoPostMortem.Cli`) — wiring path discovery, the event reader,
+`SessionIngestor` and `ExecutionRecordBuilder` into an actual directory walk that also populates the
+derived tables is a later story. The coverage report and self-exclusion (FR-7/FR-14) land with the
+story that follows.

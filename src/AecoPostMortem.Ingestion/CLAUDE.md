@@ -12,7 +12,12 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `SessionDiscovery.cs` | FR-1: finds every session directory under the session-state root and classifies its files (`events.jsonl`, `session.db`, `rewind-snapshots/index.json`, `workspace.yaml`) without reading any of them; a missing root is reported, not thrown |
 | `SessionEventReader.cs` | FR-3/FR-6: reads one `events.jsonl` line by line into `RawEvent`s — provider version and event-schema version from line 1 only, malformed lines skipped and counted, a trailing unterminated line stops the read and reports the high-water offset |
 | `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`ts`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
-| `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append`; FR-5 (issue #5): runs `RawEventBatch.DetectRewrites` first and refuses the append — reporting the mismatch on `SessionIngestResult.RewriteMismatches`/`RewriteDetected` instead — the moment a rewrite is found |
+| `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append`; FR-5 (issue #5): runs `RawEventBatch.DetectRewrites` first and refuses the append — reporting the mismatch on `SessionIngestResult.RewriteMismatches`/`RewriteDetected` instead — the moment a rewrite is found. FR-7 (issue #6): checks `SessionExclusion` ahead of both the rewrite check and the append, and retroactively purges via `RawEventBatch.DeleteBySession` when an already-ingested session is now excluded |
+| `SessionStartContext.cs` | FR-7's key: reads `session.start.data.context.cwd` off a session's first event only — the "line 1 only" rule `SessionEventReader.ReadDeclaredVersion` already applies to provider/schema version, applied again here |
+| `SessionExclusion.cs` | FR-7's pure decision: whether a cwd falls under one of an operator-configured list of excluded roots, and the reason sentence FR-14's coverage report states for it (`SessionExclusionOutcome`) |
+| `ExclusionListSource.cs` | FR-7's "operator-configured, not compiled in" half: reads the exclusion list fresh from a JSON file on every call, defaulting to this product's own repository root when no file exists |
+| `CoverageReport.cs` | FR-14's report shape: sessions found, ingested, excluded and why, lines parsed, lines skipped, events by type |
+| `IngestionRun.cs` | FR-14's builder: walks `SessionDiscovery`'s output through `SessionIngestor` and rolls the results into one `CoverageReport` |
 | `MalformedLineCheck.cs` | turns one or more `SessionReadResult`s into the malformed-line `CheckRegistryEntry` (issue #23) |
 | `ExcludedSources.cs` | FR-10: recognises Copilot's global `session-store.db` by name, and states why it is skipped |
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
@@ -98,7 +103,10 @@ on (growth is append-only) is broken for that file, and nothing later in the sam
 trusted as a genuine continuation rather than a coincidence. This is a refuse-and-report outcome,
 not an exception — the same "reported, not thrown" shape `SessionDiscovery` uses for a missing
 root — because a rewritten file is an operator-visible condition to investigate, not a defect in
-this code path.
+this code path. `IngestionRun.Run` still counts a rewrite-refused session's lines toward
+`LinesParsed`/`LinesSkipped` (they were genuinely read this run) but excludes it from
+`SessionsIngested` and `EventsByType` — nothing from it reached RAW, so counting it as ingested
+would misstate what the store actually holds after the run.
 
 ### A trailing line with no newline is unfinished, not malformed
 
@@ -233,6 +241,62 @@ statement repeated across two of a session's own events still counts as one occu
 session — that collapse is `RuleStatementDeduplication.Deduplicate`'s job (`AecoPostMortem.Rules`),
 which tracks session ids in a set, not this method's.
 
+### FR-7's exclusion is a plain cwd-prefix match, deliberately, and it compensates with visibility rather than precision
+
+A path match alone cannot distinguish an analysis session run from a repository from ordinary
+feature work also run from it — both share the same `session.start.data.context.cwd` (FR-7's own
+stated risk). `SessionExclusion.Evaluate` does not try to solve that with anything cleverer; it
+matches cwd against an operator-configured list of excluded roots, boundary-checked so a sibling
+directory sharing a name prefix (`/repo` vs `/repository`) never matches, and separator-normalised
+(`\` and `/` compare the same) so a cwd recorded on one platform still compares correctly against a
+root configured on another. The list is configurable (`ExclusionListSource`, Scenario 2) and every
+excluded session is named with its reason (`ExcludedSession.Reason`, FR-14) precisely because the
+match itself cannot be made more precise — the operator corrects over- or under-exclusion by editing
+the list, not by this code guessing better. An unknown cwd (no `session.start` first event, or one
+missing `context.cwd`) is never excluded, against any list: this product cannot exclude a session it
+cannot place.
+
+### `ExclusionListSource` re-reads the config file every call; there is no cache
+
+Scenario 2 ("a path added to the list is honoured without rebuilding the product") is true
+structurally rather than by a mechanism that has to stay correct, because `Load` never caches what
+it read. The file sits beside the store (`StoreLocation.DefaultFolder`, `exclusions.json`) rather
+than under the Copilot source tree, since it is this product's own operator configuration, not
+something Copilot writes. When no file exists, the default is this product's own repository root
+(FR-7: "defaulting to this product's own repository root"), found by walking upward from
+`AppContext.BaseDirectory` for `AecoPostMortem.sln` — the same bounded, `null`-on-miss walk
+`AecoPostMortem.Cli.ServeWebRoot.Resolve` already uses to find `web/dist`. On a machine with no
+checkout to find (an installed build), the default is an empty list, not a guess. Malformed JSON in
+an existing file reads as no exclusions rather than throwing or falling back to the default — an
+ingest run should not fail outright, or silently reassert a root the operator may be mid-edit to
+remove, over a config file that does not parse.
+
+### Exclusion is checked before the rewrite check and the append, and it purges retroactively
+
+`SessionIngestor.Ingest` evaluates `SessionExclusion` immediately after reading the file — ahead of
+`RawEventBatch.DetectRewrites` and `RawEventBatch.Append` both — so "at ingest, not as a later
+filter" (FR-7's own phrasing) is true because no code path appends an excluded session's events and
+filters them out afterwards; `SessionIngestResult.EventsInserted` is always `0` when
+`Exclusion.Excluded` is `true`. Issue #6's edge case is retroactive, not only prospective: a session
+that was already ingested before its cwd was added to the exclusion list is not merely refused on
+the next read — `RawEventBatch.DeleteBySession` removes what RAW already holds for it, and
+`SessionIngestResult.PurgedEventCount` reports how much. The excluded-vs-rewrite-refused distinction
+matters for `IngestionRun`'s coverage counts: a rewrite-refused session is not FR-7's concern (it is
+FR-5's), so it is not added to `CoverageReport.SessionsExcluded` — only a genuine exclusion is.
+
+### `IngestionRun` is a thin walk over `SessionDiscovery` and `SessionIngestor`; it owns no store access of its own
+
+`IngestionRun.Run` never opens a connection or issues SQL directly — every row it causes to be
+written or removed goes through `SessionIngestor.Ingest`, the same per-session door a single-session
+caller uses, so the `CoverageReport` it returns can never disagree with what was actually persisted.
+"Sessions found" is `SessionDiscovery`'s full classified count, including a directory with no
+`events.jsonl` (FR-1's "classified and skipped" case) — that session is neither ingested nor
+excluded, the same way `SessionDiscovery` already reports it as seen but not read.
+`CoverageReport.EventsByType` counts only what a non-excluded session's read produced, including a
+duplicate re-ingest's already-stored events (consistent with `LinesParsed` also counting those) —
+an excluded session's events are never counted, because they were never persisted (Scenario 3: no
+query-time filter is needed precisely because there is nothing in the store to filter).
+
 ### The corpus round-trip is a build gate, not a unit test
 
 `test/AecoPostMortem.Ingestion.Tests/ApplyPatchCorpusRoundTripTests.cs` parses and re-serialises
@@ -251,14 +315,15 @@ and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check
 FR-5, issue #5), the malformed-line check (`MalformedLineCheck`), volume control (`ExcludedSources`,
 `SystemPromptExtractor`, `RewindSnapshotSource`), the polymorphic `arguments` parser
 (`ToolArguments`), execution-record reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`,
-`SpawnResolutionCheck`) and rule-statement resolution (`SessionRuleExtractor`, S-19, issue #32)
-exist as composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-8, FR-9, FR-10, FR-12, FR-13,
-FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses it to pull `path`
-out of an object-shaped `arguments` value. The `ingest` CLI command still reports "not implemented"
-(`AecoPostMortem.Cli`) — wiring path discovery, the event reader, `SessionIngestor` and
-`ExecutionRecordBuilder` into an actual directory walk that also populates the derived tables is a
-later story. `SessionRuleExtractor` likewise resolves one session's own `RawEvent`s, already in
-hand — nothing yet walks the whole store calling it per session and feeding the results into
-`Rules.RuleStatementDeduplication.Deduplicate`; that corpus-wide wiring, and rule-set versioning by
-content hash (FR-27), are S-20's job. The coverage report and self-exclusion (FR-7/FR-14) land with
-the story that follows.
+`SpawnResolutionCheck`), rule-statement resolution (`SessionRuleExtractor`, S-19, issue #32) and
+self-exclusion plus the coverage report (`SessionStartContext`, `SessionExclusion`,
+`ExclusionListSource`, `CoverageReport`, `IngestionRun`, FR-7/FR-14, S-05, issue #6) exist as
+composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-12, FR-13,
+FR-14, FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses it to pull
+`path` out of an object-shaped `arguments` value. The `ingest` CLI command still reports "not
+implemented" (`AecoPostMortem.Cli`) — wiring `IngestionRun.Run` and `ExecutionRecordBuilder` into
+the actual command (reading `CoverageReport` to stdout per FR-58, and populating the derived tables)
+is a later story; this project's job is the composable pieces the CLI will call. `SessionRuleExtractor`
+likewise resolves one session's own `RawEvent`s, already in hand — nothing yet walks the whole store
+calling it per session and feeding the results into `Rules.RuleStatementDeduplication.Deduplicate`;
+that corpus-wide wiring, and rule-set versioning by content hash (FR-27), are S-20's job.

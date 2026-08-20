@@ -6,7 +6,7 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-41 (issue #44, S-36) added `SessionsAffected`, the served ranking key |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
@@ -202,6 +202,32 @@ the ranking already happened in `Findings`, this only converts each entry to its
 same mapper is reused for `ProcessDigest.InferredFindings` (FR-48, issue #52, S-42) — there is no
 second, Inferred-only mapping function, because an Inferred finding needs exactly the same
 `General`/`Adherence` shape decision any other finding does.
+
+### `SessionsAffected` is served, not left for each client to re-derive
+
+FR-41 (issue #44, S-36) ranks `RankedFindings` by distinct sessions affected, and S-36's edge case
+makes that count the most prominent thing on a rendered row — a finding touching one session has to
+read as an anecdote beside one touching thirty. `FindingEnvelope.SessionsAffected` carries that
+number on the wire even though `Recurrence.Occurrences` technically already contains it: a client
+counting its own distinct session ids would be re-implementing `ProcessDigest.SessionsAffected`, and
+any drift between the two would show up as a row whose displayed count disagrees with the order it
+is being displayed in. It is always computed by `ProcessDigest.SessionsAffected(finding)` inside the
+three factories, never accepted as a parameter, so the served figure and the ranking cannot come
+from two different rules.
+
+### The "no aggregate scan" guarantee is enforced here, not only in `Findings`
+
+`AecoPostMortem.Findings`' own `ProcessDigestStructureTests` proves `ProcessDigest.Build` cannot be
+handed a live data source — but that project has no `Data` reference at all, so the guarantee costs
+it nothing. **This** project does reference `Data` (`DiagnoseAppState`, `GetSession`), which makes
+`MastheadEnvelope` the first point on the masthead's path where a live `COUNT` could plausibly be
+introduced by a later story wiring `/api/digest`. `MastheadEnvelopeStructureTests` reflects over
+`MastheadEnvelope`'s public surface (properties, method parameters and return types, following
+generic arguments down) and fails if any of it mentions an `IQueryable`, an `Expression`, or any type
+out of `AecoPostMortem.Data` / `Microsoft.EntityFrameworkCore`. Counting a million rows measured
+126 ms on SQLite and 118 ms on Postgres (`docs/product-superpowers/research/2026-08-16-sqlite-vs-
+postgres-query-latency.md`), so this is not an engine problem to tune away later — the masthead reads
+counters maintained at ingest, and the alternative is made unrepresentable rather than discouraged.
 
 ### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
 

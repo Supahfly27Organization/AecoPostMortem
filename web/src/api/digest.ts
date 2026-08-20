@@ -63,6 +63,10 @@ interface FindingEnvelopeBase {
   provenance: Provenance
   evidence: EvidenceItem[]
   recurrence: Recurrence
+  /** FR-41 (S-36): the distinct-session count `ProcessDigest.Build` ranked `rankedFindings` by.
+   * Served rather than re-derived from `recurrence.occurrences` here — a client counting its own
+   * copy could silently disagree with the order it is rendering. */
+  sessionsAffected: number
   suggestion: SuggestionEnvelope
   operatorResponse: OperatorResponse
 }

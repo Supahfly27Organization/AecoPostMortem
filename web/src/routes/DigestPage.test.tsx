@@ -47,6 +47,7 @@ function digestWith(overrides: Partial<DigestEnvelope> = {}): DigestEnvelope {
             { sessionId: 'session-2', ruleSetVersion: null },
           ],
         },
+        sessionsAffected: 2,
         suggestion: { state: 'present', text: 'Name `rg` instead of repeated `view` calls.' },
         operatorResponse: 'ignored',
       },
@@ -65,6 +66,30 @@ describe('DigestPage', () => {
     render(<DigestPage />)
 
     expect(await screen.findByText('src/hot.cs')).toBeInTheDocument()
+  })
+
+  // Scenario 2 (issue #44): the digest states the scope it is ranking within, not only the ranking.
+  it('states the corpus scope, so the ranking below it is read against a stated denominator', async () => {
+    respondWith(digestWith())
+    render(<DigestPage />)
+
+    const scope = await screen.findByRole('group', { name: /corpus scope/i })
+
+    expect(scope).toHaveTextContent('35')
+    expect(scope).toHaveTextContent('56,138')
+    expect(scope).toHaveTextContent(/rules not yet analysed/i)
+  })
+
+  // Scenario 4: mid-ingest is a designed state, distinct from both empty states above.
+  it('states that analysis is incomplete mid-ingest, rather than showing partial counts as final', async () => {
+    respondWith(digestWith({ state: 'Incomplete' }))
+    render(<DigestPage />)
+
+    expect(await screen.findByText(/analysis is incomplete/i)).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: /corpus scope/i })).toHaveAttribute(
+      'data-provisional',
+      'true',
+    )
   })
 
   // Scenario 3: defaults to one repository, selectable.

@@ -125,6 +125,31 @@ public sealed class DigestEnvelopeTests
         Assert.Equal("web_fetch", envelope.InferredFindings[0].Recurrence.Key);
     }
 
+    /// <summary>S-36's edge case says a finding touching one session must read as an anecdote beside
+    /// one touching thirty, which makes "how many sessions this touched" the most prominent figure on
+    /// a rendered row. That number is served rather than left for each client to re-derive from
+    /// <c>Recurrence.Occurrences</c>: it is the key <see cref="ProcessDigest.Build"/> ordered the list
+    /// by, so a client deriving its own copy could silently disagree with the very order it is
+    /// rendering. Distinct sessions, not raw occurrences — <c>session-2</c> appears twice below and
+    /// counts once, the same rule <see cref="ProcessDigest.SessionsAffected"/> applies when ranking.
+    /// </summary>
+    [Fact]
+    public void Every_served_finding_carries_the_sessions_affected_count_it_was_ranked_by()
+    {
+        var digest = ProcessDigest.Build(
+            Counters(),
+            RanCleanRegistry(),
+            [
+                WasteFinding("src/hot.cs", "session-1", "session-2", "session-2"),
+                WasteFinding("src/rare.cs", "session-9"),
+            ],
+            SingleRepoScope());
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        Assert.Equal([2, 1], envelope.RankedFindings.Select(finding => finding.SessionsAffected));
+    }
+
     [Fact]
     public void From_carries_the_digest_state_and_maps_every_ranked_finding_in_order()
     {

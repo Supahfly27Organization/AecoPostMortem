@@ -12,6 +12,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` and `GetSession` are the same two without a listener |
+| `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording` |
 
 ## References
@@ -25,6 +26,13 @@ session-state root exists (`Ingestion.SessionDiscovery`, reusing FR-1's own disc
 second `Directory.Exists` check). This is a genuine widening of the "thin host" description below,
 not an oversight — S-48 is one of the stories `FindingEnvelope.cs`'s own doc comment named as
 building "real endpoints," and the app-state endpoint is not a finding endpoint at all.
+
+`Rules` — added by S-22 (issue #35, FR-40), and the first direct reference this project has to it.
+`RulesInventoryEnvelope` maps `Rules`' own `RulesInventory`/`RuleStatementStatus`/`RuleRetirement`
+shapes onto the wire, so the reference is stated explicitly in `AecoPostMortem.Api.csproj` rather
+than leaned on transitively through `Findings` — this project's own dependency list should say what
+its source actually names. It does not weaken Repo Rule 6, which binds what `Rules` may *contain*,
+not who may read it.
 
 `ApiHost.GetSession` (S-08) widens the same `Data` reference further: it opens a `PostMortemContext`
 and reads `Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks` directly by session id, then hands
@@ -162,6 +170,19 @@ every other masthead field. It does not re-derive or re-filter anything — `Dig
 `ProcessDigest.Build` (`AecoPostMortem.Findings/CLAUDE.md`) already scoped `findings` to one
 repository before this envelope is ever assembled.
 
+### `RulesInventoryEnvelope` serves the status counts rather than letting a client recount them
+
+FR-40's four-status breakdown (a measured 4 / 9 / 9 / 21) is the figure PRD §2 says every coverage
+number derives from, so it is served as `RulesInventoryStatusCountsEnvelope` even though a client
+could count `Rows` itself. Two surfaces recounting independently is exactly how the three
+conflicting coverage figures the PRD had to reconcile came about; one served figure is one answer.
+It is projected from `RulesInventory.StatusCounts`, itself a computed property over the rows, so
+the served counts cannot disagree with the served rows.
+
+`RuleStatementStatusEnvelope.Of` and `RuleRetirementEnvelope.Of` switch over the domain's own closed
+unions with no catch-all arm that could serialise an unrecognised shape as something plausible — a
+fifth domain status would fail to compile here rather than reach a client mislabelled.
+
 ### `ApiHost.Build` returns an unstarted `WebApplication`
 
 The caller (`AecoPostMortem.Cli`'s `serve` command) decides when to start it and how long to run
@@ -274,6 +295,13 @@ FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on eve
 either through a live store — but `web/src/digest/ProvenanceBadge.tsx` (S-54, issue #45) is a real
 consumer of the shape once `DigestPage` does have data to render, closing the gap that was still
 open when S-42 alone had landed.
+
+`RulesInventoryEnvelope.cs` (S-22, issue #35, FR-40) is contract-only in the same sense the digest
+contract was before S-54: `web/src/routes/RulesInventoryPage.tsx` is a real consumer of the shape,
+but `ApiHost.Build` does not `MapGet` `/api/rules-inventory` — resolving a whole store's `RawEvent`s
+into `SessionRuleSet`s at scale (FR-26's extraction run over every session, then FR-27's versioning
+over the result) is wiring no story has done yet, the same gap `ProcessDigest`'s masthead counters
+document. The web page targets the route ahead of it.
 
 `GET /api/sessions/{sessionId}` (`SessionEnvelope.cs`, `ApiHost.GetSession`, S-08, issue #15) is the
 second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by

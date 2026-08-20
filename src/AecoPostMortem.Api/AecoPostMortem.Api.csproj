@@ -8,6 +8,10 @@
     <ProjectReference Include="..\AecoPostMortem.Data\AecoPostMortem.Data.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Ingestion\AecoPostMortem.Ingestion.csproj" />
+    <!-- S-22 (FR-40): RulesInventoryEnvelope maps AecoPostMortem.Rules' own inventory shapes.
+         Stated explicitly rather than leaned on transitively through Findings, so this project's
+         own dependency list says what its source actually names. -->
+    <ProjectReference Include="..\AecoPostMortem.Rules\AecoPostMortem.Rules.csproj" />
   </ItemGroup>
 
 </Project>

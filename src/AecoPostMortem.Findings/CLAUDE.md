@@ -29,6 +29,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
 | `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
+| `ContradictionCheck.cs` | FR-43 (S-38, issue #47): orchestrates `Rules.ContradictionCheck` — groups sessions by rule-set version before calling in (never comparing statements from two versions), wraps the result in `ContradictionCheck.Result` (`Candidates`, a required `Provenance` always `Inferred`, and the `CheckRegistryEntry`), `CheckId = "contradiction-check"`. Not a `Finding`-producing check — see below |
+| `SubagentAttribution.cs` | FR-49 (S-43, issue #53): `SubagentRuleDisplay` — closed to `Nothing` (the default) or an explicit, caller-stated `AssumedInherited` (always `Provenance.Inferred`, computed not settable) — and `SubagentObservedContext.From(Agent, taskPrompt, sessionSkills)`, the subagent's own spawn description, task prompt and skill invocations, always `Provenance.Observed`. Neither type infers or guesses a rule set; not a `Finding` |
 
 ## References
 
@@ -75,6 +77,13 @@ supply once that ETL exists, the same way `ToolCallOutcome` is reused directly b
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
 ingestion. See `AecoPostMortem.Ingestion/CLAUDE.md`.
+
+`ContradictionCheck` (issue #47, S-38) is the fourth caller of `Rules`, and the first whose `Rules`
+call takes `Rules.SessionRuleSet`s rather than a plain per-call/per-session operand: FR-43's second
+scenario needs the rule-set-version grouping `Rules.RuleSetVersioning`/`RuleSetVersionScope` already
+established the identity for (repository + `RuleSetVersionHasher.ComputeHash`), and
+`Rules.RuleStatementDeduplication.Deduplicate` for each version's own in-force statement set, before
+`Rules.ContradictionCheck.Run` ever sees them.
 
 `ToolFailureClusterFinding` (issue #51, S-40) is the second caller of `FailedToolCallsCheck`,
 alongside `FailedToolCallsFinding` — both read the identical `ToolFailureRate` result and diverge
@@ -474,6 +483,42 @@ ignore" action and the guardrail's rendering will build against; nothing in this
 writes an `OperatorResponseRecord` from a real operator action or persists `OperatorResponseLog`
 across runs.
 
+### A subagent's rules are `Nothing` or an explicit `Inferred` assumption — never derived
+
+FR-49 (S-43, issue #53) exists because Copilot's own system prompt carries no agent id: there is no
+event anywhere in RAW this product could quote as "the rules this subagent ran under," unlike a
+session's own rule set (`RuleStatementExtractor`, S-19, which reads real `<custom_instruction>`
+blocks). `SubagentRuleDisplay` is closed to exactly two shapes through a private constructor, the
+same closed-union reasoning `SessionTokenFigures` uses for its own absent state:
+`SubagentRuleDisplay.Nothing` (the default, and the story's own preferred outcome — the edge case
+says showing nothing "is an acceptable, preferred outcome over a labelled guess appearing in the
+digest's ranked list") or `SubagentRuleDisplay.AssumedInherited`, built only from rule statements a
+caller supplies on purpose. Nothing in this type walks `Data.Execution.Agent.ParentAgentId` or any
+other structural link to *derive* an inheritance assumption — that would be exactly the guess the
+edge case forbids ("do not try to infer or guess a subagent's rule set from context"). A future
+caller that wants to assume a subagent inherited its spawning session's own rule set resolves that
+rule set itself (S-19/S-20) and passes it to `AssumedInherited` explicitly; this type only enforces
+that whatever comes out the other side is labelled `Provenance.Inferred` — a computed property, not
+a settable field, so `InheritedRuleSetAssumption` cannot be constructed carrying any other
+provenance (Scenario 1).
+
+### `SubagentObservedContext` is a second, wholly separate contract from the rule-display question
+
+Scenario 2 needs three facts genuinely on record for a subagent — its spawn description, its task
+prompt, its own skill invocations — reported as Observed, never mixed into the same type as the
+rule-display question above (a caller could otherwise be tempted to read "we have Observed context"
+as license to also assert a rule set). `SpawnDescription` reads `Agent.Description` verbatim
+(`subagent.started.data.agentDescription`, S-49) and `SkillInvocations` filters the session's own
+`Skill` rows to `OwnerKind.Agent` with a matching `AgentId` — never a parent's or a sibling's
+invocations, the same "never a parent's" discipline `ExecutionRecordBuilder` documents for
+`ToolCall.TurnId` being `null` on a subagent's own calls. `TaskPrompt` is a plain, caller-supplied
+input rather than read off `Data` directly: no derived entity yet carries the spawning `task` call's
+own prompt argument — `ToolCall` has no `Arguments` column, only `Path` is extracted today
+(`AecoPostMortem.Ingestion/CLAUDE.md`, "arguments is parsed polymorphically") — the same
+not-yet-wired gap `PhaseChurnFinding` documents for its own `DeclaredIntent` input. `Provenance` is
+again a computed property fixed to `Observed`, never settable, so this shape cannot accidentally
+carry any other provenance value.
+
 ### `ToolFailureClusterFinding`'s cross-reference is an already-resolved plain input, not a substring match
 
 Scenario 2 of issue #51 needs to know which tool identity a rule mandates — the same "which real
@@ -523,6 +568,36 @@ Waste` — arithmetic over observed data, no judgment). `ToolFailureClusterFindi
 Inferred`, `FindingClass.MissingCapability` — Epic E8, "the highest-value findings with the weakest
 provenance," PRD Phase D). Two `CheckId`s (`"failed-tool-calls"` vs. `"tool-failure-clusters"`) over
 one shared computation, not one check registered twice.
+
+### `ContradictionCheck` produces no `Finding` — it is a special-purpose check, like `MalformedLineCheck` and `SpawnResolutionCheck`
+
+`CheckRegistryEntry`'s own remarks name three "PRD §3.9 special-purpose checks" that use the
+abstract `CheckId` string rather than one of `FindingClassRegistry`'s four closed classes:
+contradiction, unresolvable-spawn, malformed-line. The other two (`Ingestion.MalformedLineCheck`,
+`Ingestion.SpawnResolutionCheck`) already register a `CheckRegistryEntry` directly with no `Finding`
+in between — a contradiction is not rule adherence, waste, or a missing capability (PRD §3.3's own
+four-item table), so forcing one onto an existing `FindingClass` would either misrepresent what it
+is or require widening the closed set for one check. `ContradictionCheck.Result.Provenance` carries
+FR-43's "never Observed" requirement directly instead, as a `required` member on this project's own
+result type set unconditionally to `Provenance.Inferred` — the same "fails construction by being
+required, not by validating" reasoning `Finding.Provenance` already documents above — because this
+check can only ever confirm that two statements' surface keyword polarity conflicts, never that
+their meaning genuinely does.
+
+### `ContradictionCheck.Run` groups by rule-set version, never comparing across one
+
+FR-43 Scenario 2 ("it compares only statements in force together") is a stronger requirement than
+`RuleSetVersionScope.RequireSingleVersion`'s refusal: a corpus spans many rule-set versions over
+time by design, and the check has to find contradictions *within* each one, not refuse the moment
+more than one version is present in its input. `ContradictionCheck.Run` therefore groups the
+sessions it is handed by `RuleSetVersionId` (`Repository` + `RuleSetVersionHasher.ComputeHash`,
+the identical identity `RuleSetVersioning.Compute` already uses) and calls
+`Rules.ContradictionCheck.Run` once per group — a statement from one version's block set is
+therefore never even placed in the same list as a statement from another, structurally, not by a
+version-equality check inside the pairwise loop. `Population` on the resulting
+`CheckRegistryEntry` is the total session count across every version in the input (matching PRD
+§3.9's own worked phrasing, "a measured 0 contradictions found across 35 sessions checked" — sessions,
+not statements), while `FindingCount` sums candidates found across all versions combined.
 
 ## Status
 
@@ -591,3 +666,19 @@ step by wall-clock time with its offset from session start, and states plainly w
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
 `web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
 path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+
+`ContradictionCheck` (issue #47, S-38, FR-43) publishes the third of PRD §3.9's special-purpose
+checks, alongside `Ingestion.MalformedLineCheck` and `Ingestion.SpawnResolutionCheck`: pairwise,
+self-match-excluding, keyword-polarity detection (`Rules.ContradictionCheck`) scoped to one
+rule-set version at a time and registered on the "checks that found nothing" surface FR-42 (S-37,
+issue #46) already published a `"contradiction-check"`-shaped test for ahead of this story landing.
+No corpus-wide caller wires a real store's sessions into it yet — like every other check-shape
+story in this project, it publishes the contract the eventual analysis-run orchestrator (the `run`
+CLI command, not yet built) will call.
+
+`SubagentRuleDisplay` and `SubagentObservedContext` (issue #53, S-43, FR-49) publish the same
+contract-first pattern for a subagent's rules and its own context: no CLI command or
+`AecoPostMortem.Api` envelope serves either yet — that wiring, and whatever caller eventually
+decides to construct an `AssumedInherited` display, are later work (plausibly S-52/S-53's own
+inspector tabs, which already own the session-page rendering this would slot into) this story only
+makes possible.

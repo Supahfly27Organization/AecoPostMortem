@@ -25,6 +25,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SessionTokenFigures.cs` | FR-24 (S-11, issue #20): reads `Session`'s own token fields into the masthead's token-totals contract — not a `Finding`, no rule adherence involved — closed to `Observed` and `SessionTotalsNotRecorded` |
 | `AbortedTurnFinding.cs` | FR-18 (S-16, issue #28): reads `AecoPostMortem.Data.Execution.Turn` rows, calls `AecoPostMortem.Rules.AbortedTurnCheck`, and writes one `Finding` per aborted turn — never grouped — plus a `CheckRegistryEntry` |
 | `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
+| `BannedToolFinding.cs` | Piece 3's second slice: orchestrates `Rules.BannedToolCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — every `BannedToolUsage` the check returns is already a violation, so no further filtering; reads `Data.Execution.ToolCall` directly for session attribution, the same split `RepeatedFileReadFindingCheck` draws between its generic operand and its own entity read; `BannedToolFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
@@ -107,6 +108,14 @@ S-19) as the shape a "mandated tool" names the rule that mandates it — no new 
 `RuleSetVersionScope.RequireSingleVersion` this file's own remarks anticipated ("the reusable
 primitive any future figure scopes itself with"), except here the scoping is a two-version
 adjacency check rather than a single-version refusal.
+
+`BannedToolFinding` (piece 3's second slice) is the fourth caller of `Rules.OperandResolver`,
+indirectly through `Rules.BannedToolCheck` — the first `FindingClass.RuleAdherenceToolChoice` finding
+this project actually builds. It reads `Data.Execution.ToolCall` directly for session attribution,
+the same `Data` reference `RepeatedFileReadFindingCheck`/`FailedToolCallsFinding`/`AbortedTurnFinding`
+already use, and `AecoPostMortem.Api.ApiHost.GetDigest` is its real caller today, reusing the same two
+corpora (`SessionRuleSetLookup`, `ToolInvocationShapeLookup`) `GetRulesInventory` already builds,
+scoped to the selected repository instead of corpus-wide (`Api/CLAUDE.md`'s own remarks).
 
 ## Non-obvious decisions
 
@@ -217,6 +226,20 @@ null. The failure rate's counts (`failures`, `calls`, `percentage`, `sessionCoun
 the counts that produced it, or the rate without the session count that contextualizes it (issue
 #26, both scenarios). The structural guarantee itself — that a percentage cannot be constructed
 without its counts — lives one level down, on `AecoPostMortem.Rules.FailureRate`.
+
+### `BannedToolFinding` also carries its count in Evidence, never in Resolution — despite being `RuleAdherenceToolChoice`
+
+`Resolution`'s doc comment names it scoped to adherence findings, but `BannedToolFinding.ToFinding`
+leaves it null anyway: FR-33's `AdherenceFigure` (`FromTwoOperands`) is built for a two-operand
+percentage — an adherent side and a divergent side, subtracted per FR-32 — and a banned tool's own
+adherence question ("was it called at all") is genuinely single-operand, with no second operand to
+subtract against. Forcing one operand into `AdherenceFigure`'s two-operand shape would mean inventing
+a second operand this check has no basis for, the same "do not guess a mapping nothing has decided"
+discipline `Rules/CLAUDE.md` documents for why this check exists in the first place rather than
+reusing `ToolVocabularyMismatchCheck`. `named_tool`, `call_count` and one `resolved_tool` entry per
+tool the operand resolved to ride in `Evidence` instead — the same "a percentage never appears
+without the count that produced it" discipline this note already documents for `FailedToolCallsFinding`,
+applied here to a plain count with no percentage at all.
 
 ### `SessionTokenFigures` is not a `Finding`, deliberately
 
@@ -709,12 +732,15 @@ seven real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-fail
 (`CheckId = "phase-churn"`, FR-19, issue #29) — all `FindingClass.Waste` detection logic — plus
 `ToolFailureClusterFinding` (`CheckId = "tool-failure-clusters"`, FR-46, issue #51), the first
 `FindingClass.MissingCapability` detection logic, reusing `FailedToolCallsCheck` rather than
-recomputing its rate. An eighth check registers a real id — `malformed-line`, built by
+recomputing its rate. An eighth registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
-but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
-real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
-mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the seven checks is self-contained, but `FindingClassRegistry`'s Waste
+but nothing in this project constructs it. `BannedToolFinding` (piece 3's second slice,
+`CheckId = "banned-tool-used"`) is the ninth, and the first `FindingClass.RuleAdherenceToolChoice`
+detection logic this project actually builds, reusing `Rules.BannedToolCheck`. No check exists in
+`AecoPostMortem.Rules` yet to bind a real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests`
+exercises the suggestion mechanism against a synthetic tool-choice check result standing in for the
+story that will supply a real one, and `BannedToolFinding` builds no `Suggestion` either (unlike
+`AbortedTurnFinding`'s). Each of these checks is self-contained, but `FindingClassRegistry`'s Waste
 `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need merging by
 hand.
 
@@ -742,10 +768,12 @@ story left it as.
 `AdherenceFigure` (issue #38, S-24, FR-33) publishes the shape every adherence percentage is served
 through: the percentage computed from its per-operand call counts, each operand's S-23 resolution
 layer, and the `RuleSetVersionId` it was scoped to. `Api.FindingEnvelope.Adherence` carries it as its
-one `required` member, and `web/src/digest/AdherenceFigureBlock.tsx` renders it. No check in this
-project produces one yet — no `RuleAdherenceToolChoice` check exists (S-25/S-26 build the operand
-extraction it would need), so `FromTwoOperands` is exercised against `Rules.OperandResolver` directly
-by `AdherenceFigureTests` rather than by a real check. This is the same contract-first pattern
+one `required` member, and `web/src/digest/AdherenceFigureBlock.tsx` renders it. A real
+`RuleAdherenceToolChoice` check exists now (`BannedToolFinding`, piece 3's second slice), but it still
+produces no `AdherenceFigure` — `FromTwoOperands` needs a genuine two-operand comparison, and a
+banned tool's own adherence question has only one operand (`BannedToolFinding`'s own non-obvious
+decision, above) — so `FromTwoOperands` remains exercised against `Rules.OperandResolver` directly by
+`AdherenceFigureTests` rather than by a real check. This is the same contract-first pattern
 `SessionTokenFigures` and `ProcessDigest.Build` used: the type makes the bare figure unrepresentable
 now, so every later producer inherits the guarantee instead of re-earning it.
 

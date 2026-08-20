@@ -4,18 +4,19 @@ namespace AecoPostMortem.Api;
 
 /// <summary>
 /// FR-40's caller-supplied classify function (<see cref="RulesInventory.Build"/>'s own contract).
-/// <see cref="RuleShapeKind.PreferAOverB"/> is the one shape this classifier actually watches: its
-/// operand pair is resolved against a real <see cref="ToolInvocationShape"/> corpus via
-/// <see cref="OperandResolver.ResolveTwoOperands"/>, and a match whose both operands resolve to at
-/// least one real tool is <see cref="RuleStatementStatus.Watched"/>. Every other matched shape is
-/// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/> — <see cref="RuleShapeKind.ToolIsBanned"/>
-/// deliberately included: turning a ban into a real verdict needs deciding which <see cref="ToolRole"/>
-/// a banned tool "targets" for <c>ToolVocabularyMismatchCheck</c>, which nothing in this codebase has
-/// ever decided (a separate design question, not wired here), and <see cref="RuleShapeKind.NeverReadPath"/>/
-/// <see cref="RuleShapeKind.UseAAfterB"/>/<see cref="RuleShapeKind.AlwaysPassParam"/> have no built
-/// check at all. FR-34's own two unmatched dispositions map onto the two remaining statuses this
-/// piece can answer honestly: <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> (an
-/// obligation, no shape fits) is also <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, and
+/// <see cref="RuleShapeKind.PreferAOverB"/> and <see cref="RuleShapeKind.ToolIsBanned"/> are the two
+/// shapes this classifier actually watches: a <c>PreferAOverB</c> match's operand pair is resolved
+/// via <see cref="OperandResolver.ResolveTwoOperands"/> and watched when both operands resolve; a
+/// <c>ToolIsBanned</c> match's single operand is resolved via <see cref="OperandResolver.Resolve"/>
+/// and watched when that one operand resolves — no <see cref="ToolRole"/> involved, since
+/// <c>BannedToolCheck</c> (<c>Rules/CLAUDE.md</c>) answers "was the named tool called at all" rather
+/// than a role comparison, the question <c>ToolVocabularyMismatchCheck</c>'s own <c>TargetRole</c>
+/// exists for. Every other matched shape is <see cref="RuleStatementStatus.CheckableNotYetBuilt"/> —
+/// <see cref="RuleShapeKind.NeverReadPath"/>/<see cref="RuleShapeKind.UseAAfterB"/>/
+/// <see cref="RuleShapeKind.AlwaysPassParam"/> have no built check at all. FR-34's own two unmatched
+/// dispositions map onto the two remaining statuses this piece can answer honestly:
+/// <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> (an obligation, no shape fits) is
+/// also <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, and
 /// <see cref="UnmatchedStatementDisposition.NotCheckable"/> (no obligation at all) is
 /// <see cref="RuleStatementStatus.NotARule"/>. The caller-supplied <c>NotCheckable(reason)</c> stays
 /// unreachable from this classifier — no shape's absence is attributed to what the logs cannot
@@ -56,6 +57,14 @@ public static class RulesInventoryClassifier
 
     static RuleStatementStatus ClassifyMatch(RuleShapeMatch match, IReadOnlyList<ToolInvocationShape> invocations)
     {
+        if (match.Kind == RuleShapeKind.ToolIsBanned)
+        {
+            var resolved = OperandResolver.Resolve(match.OperandAText, invocations);
+            return resolved.Layer != OperandResolutionLayer.Unresolved
+                ? RuleStatementStatus.Watched
+                : RuleStatementStatus.CheckableNotYetBuilt;
+        }
+
         // RuleShapeMatch's own contract guarantees OperandBText is non-null exactly for two-operand
         // shapes, PreferAOverB among them, so this also narrows the nullable type for the call below.
         if (match.Kind != RuleShapeKind.PreferAOverB || match.OperandBText is null)

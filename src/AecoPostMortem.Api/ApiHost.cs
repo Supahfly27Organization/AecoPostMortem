@@ -150,6 +150,15 @@ public static class ApiHost
     /// <see cref="ToolFailureClusterFinding"/> is not run here — it needs a mandating rule
     /// (<c>Findings/CLAUDE.md</c>), which real rule extraction at scale (S-20) does not populate yet.
     ///
+    /// Piece 3's second slice adds a seventh: <see cref="Findings.BannedToolFinding"/>, the first
+    /// real adherence-class (<see cref="Findings.FindingClass.RuleAdherenceToolChoice"/>) check this
+    /// surface runs. It needs the same two corpora <see cref="GetRulesInventory"/> already builds —
+    /// <see cref="RuleShapeCatalogue.MatchAll"/> over this repository's own rule statements
+    /// (<see cref="SessionRuleSetLookup"/>) and a real <see cref="ToolInvocationShape"/> corpus
+    /// (<see cref="ToolInvocationShapeLookup"/>) — scoped to the selected repository's own sessions
+    /// here, unlike <see cref="GetRulesInventory"/>'s corpus-wide scope, matching every other check
+    /// this method already runs.
+    ///
     /// Every table this reads is queried once, corpus-wide, and held in memory rather than filtered by
     /// repository in SQL — a measured 126 ms per million rows (S-36's own edge case,
     /// `docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`) is well
@@ -176,6 +185,7 @@ public static class ApiHost
         var toolCalls = context.ToolCalls.ToList();
         var turns = context.Turns.ToList();
         var permissions = context.Permissions.ToList();
+        var agents = context.Agents.ToList();
 
         var repositoryScope = BuildRepositoryScope(sessions);
         var scopedSessionIds = (repositoryScope.SelectedRepository is null
@@ -183,11 +193,13 @@ public static class ApiHost
                 : sessions.Where(session => session.Repository == repositoryScope.SelectedRepository))
             .Select(session => session.SessionId)
             .ToHashSet(StringComparer.Ordinal);
+        var scopedSessions = sessions.Where(session => scopedSessionIds.Contains(session.SessionId)).ToList();
 
         var scopedToolCalls = toolCalls.Where(call => scopedSessionIds.Contains(call.SessionId)).ToList();
         var scopedTurns = turns.Where(turn => scopedSessionIds.Contains(turn.SessionId)).ToList();
         var scopedPermissions = permissions.Where(p => scopedSessionIds.Contains(p.SessionId)).ToList();
         var scopedRawEvents = rawEvents.Where(e => scopedSessionIds.Contains(e.SessionId)).ToList();
+        var scopedAgents = agents.Where(a => scopedSessionIds.Contains(a.SessionId)).ToList();
 
         var sessionsWithToolCall = scopedToolCalls.Select(call => call.SessionId).ToHashSet(StringComparer.Ordinal);
 
@@ -208,12 +220,22 @@ public static class ApiHost
         var interruption = InterruptionLoadFinding.Run(scopedPermissions, scopedToolCalls);
         var phaseChurn = PhaseChurnFinding.Run(declaredIntents);
 
+        var bannedToolMatches = RuleShapeCatalogue.MatchAll(
+            SessionRuleSetLookup.BuildAll(scopedSessions, scopedRawEvents)
+                .SelectMany(set => set.Blocks)
+                .SelectMany(block => block.Statements)
+                .Distinct()
+                .ToList()).Matches;
+        var invocations = ToolInvocationShapeLookup.BuildAll(scopedToolCalls, scopedAgents, scopedRawEvents);
+        var bannedTool = BannedToolFinding.Run(bannedToolMatches, invocations, scopedToolCalls);
+
         var findings = repeatedReads.Findings
             .Concat(failedCalls.Findings)
             .Concat(aborted.Findings)
             .Concat(hookFailureResult.Findings)
             .Concat(interruption.Findings)
             .Concat(phaseChurn.Findings)
+            .Concat(bannedTool.Findings)
             .ToList();
 
         var checkRegistry = new CheckRegistry
@@ -226,6 +248,7 @@ public static class ApiHost
                 hookFailureResult.Registry,
                 interruption.RegistryEntry,
                 phaseChurn.RegistryEntry,
+                bannedTool.RegistryEntry,
             ],
         };
 

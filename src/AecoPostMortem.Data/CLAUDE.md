@@ -11,7 +11,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `RawPayload.cs` | strict UTF-8 decode, and FR-2's content hash |
 | `PostMortemContext.cs` | the model, its column mapping and its indexes |
 | `StoreMetadata.cs` | the store's own key/value state — migrated, not derived; holds `DerivedSchemaVersionKey` |
-| `RawEventBatch.cs` | the batched raw-SQL append |
+| `RawEventBatch.cs` | the batched raw-SQL append, plus `DetectRewrites` (FR-5, issue #5): read-only rewrite detection — a different content hash at an already-stored `(source_file, byte_offset)` — and `RawRewriteMismatch`, its result row |
 | `SystemPromptText.cs` | FR-12's dedup row: system-prompt text keyed by its own content hash — migrated, not derived, for the same reason as `StoreMetadata` |
 | `SystemPromptTextSchema.cs` | the physical table and column names for the dedup table, stated once |
 | `SystemPromptTextBatch.cs` | the batched raw-SQL append for dedup rows (Repo Rule 5) |
@@ -51,6 +51,21 @@ The append is `ON CONFLICT (source_file, byte_offset, content_hash) DO NOTHING`.
 ingestion over the same logs therefore adds nothing (FR-5) without the caller remembering where it
 stopped. Naming the conflict target rather than using `INSERT OR IGNORE` keeps a genuine constraint
 failure loud.
+
+### The identity index alone cannot catch a rewritten file, so `DetectRewrites` is the second check
+
+`ON CONFLICT` only fires on an exact `(source_file, byte_offset, content_hash)` match. A file that
+was rewritten rather than grown — its bytes at an offset already stored now hash differently —
+produces a *different* content hash at that offset, which is not a conflict: `Append` would insert
+it as a second, unrelated row rather than refuse it, silently merging two different byte streams
+under one source file. `RawEventBatch.DetectRewrites` is the read-only check that catches this
+before `Append` runs: for each candidate event, it looks up whatever content hash RAW already
+holds at that event's `(source_file, byte_offset)` and reports a `RawRewriteMismatch` when the two
+disagree. A matching hash at an already-stored offset is not a mismatch — that is the ordinary
+re-ingest case `Append`'s own conflict target already treats as a no-op. `AecoPostMortem.Ingestion.
+SessionIngestor.Ingest` is the caller: it runs `DetectRewrites` before `Append` and skips the append
+entirely — reporting the mismatch on its own result instead — the moment any mismatch turns up
+(issue #5, FR-5's edge case: byte offsets are safe identity only because growth is append-only).
 
 ### Only RAW carries a migration
 

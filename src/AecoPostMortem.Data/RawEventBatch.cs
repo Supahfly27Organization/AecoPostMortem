@@ -178,4 +178,57 @@ public static class RawEventBatch
     }
 
     static string Name(int row, int column) => $"$r{row}c{column}";
+
+    /// <summary>
+    /// Read-only: finds events whose <c>(source_file, byte_offset)</c> already carries a stored
+    /// row with a <em>different</em> content hash — the signature of a file rewritten rather than
+    /// appended to (FR-5's edge case: byte offsets are safe identity only because growth is
+    /// append-only). Nothing is written or deleted here; the caller decides whether it is still
+    /// safe to <see cref="Append"/>. A matching content hash at the same offset is not a
+    /// mismatch — that is the ordinary re-ingest case <see cref="Append"/> already treats as a
+    /// no-op via the identity index.
+    /// </summary>
+    public static IReadOnlyList<RawRewriteMismatch> DetectRewrites(PostMortemContext context, IEnumerable<RawEvent> events)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(events);
+
+        var batch = events as IReadOnlyCollection<RawEvent> ?? events.ToArray();
+        if (batch.Count == 0)
+        {
+            return [];
+        }
+
+        var sourceFiles = batch.Select(raw => raw.SourceFile).Distinct(StringComparer.Ordinal).ToArray();
+
+        // OrderBy(Id) before the grouping so a duplicate (source_file, byte_offset) pair — only
+        // reachable via data written before this check existed — resolves to the most recently
+        // inserted hash rather than to whichever row an unordered GroupBy happens to see first.
+        var stored = context.RawEvents
+            .Where(row => sourceFiles.Contains(row.SourceFile))
+            .OrderBy(row => row.Id)
+            .Select(row => new { row.SourceFile, row.ByteOffset, row.ContentHash })
+            .ToList()
+            .GroupBy(row => (row.SourceFile, row.ByteOffset))
+            .ToDictionary(group => group.Key, group => group.Last().ContentHash);
+
+        var mismatches = new List<RawRewriteMismatch>();
+        foreach (var raw in batch)
+        {
+            if (stored.TryGetValue((raw.SourceFile, raw.ByteOffset), out var storedHash)
+                && !string.Equals(storedHash, raw.ContentHash, StringComparison.Ordinal))
+            {
+                mismatches.Add(new RawRewriteMismatch(raw.SourceFile, raw.ByteOffset, storedHash, raw.ContentHash));
+            }
+        }
+
+        return mismatches;
+    }
 }
+
+/// <summary>
+/// One event whose byte offset was already stored under a different content hash — a rewritten
+/// file caught before <see cref="RawEventBatch.Append"/> could merge two different histories under
+/// one <see cref="SourceFile"/> (FR-5).
+/// </summary>
+public sealed record RawRewriteMismatch(string SourceFile, long ByteOffset, string StoredContentHash, string ReadContentHash);

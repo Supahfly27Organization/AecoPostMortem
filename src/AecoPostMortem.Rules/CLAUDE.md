@@ -14,6 +14,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
+| `InterruptionLoadCheck.cs` | FR-20's check shape (issue #30): `PermissionPromptOutcome` and `QuestionOutcome` (plain per-event inputs, no tool name), `InterruptionLoad` (the paired-count result — permission prompts and questions never summed), `InterruptionLoadCheck.Evaluate` |
 | `RuleStatement.cs` | FR-26 (S-19, issue #32): `RuleStatement` (source file + verbatim text) and `InstructionBlock` (a block's source file plus the statements its list items yielded) |
 | `RuleStatementExtractor.cs` | FR-26's `<custom_instruction>` parser: `RuleStatementExtractor.ExtractBlocks` takes a system prompt's own text and returns its blocks — pure, no file, no session |
 | `RuleStatementDeduplication.cs` | `SessionInstructionBlocks` (one session's blocks, plus `HasInstructionBlocks`), `RuleStatementOccurrence` (a statement plus every session that carried it), and `RuleStatementDeduplication.Deduplicate`, which collapses identical statements across sessions |
@@ -140,6 +141,25 @@ deliberately unusual identities to prove the grouping is generic. The check retu
 every tool observed, including ones with zero failures; deciding which rates are worth surfacing as
 a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
+### `PermissionPromptOutcome.ResultKind` is carried verbatim, never matched against a denial string
+
+FR-20's Scenario 2 requires a permission prompt's outcome to come "from the recorded result kind,
+not inferred." `PermissionPromptOutcome.ResultKind` is whatever string the caller resolved from
+`permission.completed.data.result.kind` — this project never compares it against a literal like
+`"denied"`, because Repo Rule 6 forbids naming values this project cannot verify against Copilot's
+actual enum, and doing so would turn "read from the field" back into a string match, the exact
+thing FR-20 says Copilot data avoids. `null` means the prompt never resolved at all — a distinct
+state from any recorded outcome, denial included, per the measured 1,033-requested-against-1,031-
+completed edge case (issue #30).
+
+### `InterruptionLoad` pairs its counts the same way `HookFailureCounts` does
+
+`PermissionPromptCount` and `QuestionCount` are both `required` on `InterruptionLoad`, so a caller
+cannot construct a result that states one without the other — the same reasoning
+`HookFailureCounts` documents for its two denominators. `PermissionPromptsWithoutOutcome` is a
+computed property, never a stored field, mirroring `FailureRate.Percentage`: there is no
+constructor path that could let it disagree with the two counts it is derived from.
+
 ### A block's source file is its own first line, heading marker stripped
 
 `RuleStatementExtractor.ExtractBlocks` takes the first non-blank line inside a
@@ -191,10 +211,11 @@ pure function of its input and belongs where every other pure check-shape reduct
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
-three entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15) and
-`FailedToolCallsCheck` (issue #26, FR-16). The shape they establish — plain per-call/per-session
-input records in, structurally-required or structurally-paired results out, no branch on any
-specific tool name — is the pattern later checks in this project should follow.
+four entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+`FailedToolCallsCheck` (issue #26, FR-16) and `InterruptionLoadCheck` (issue #30, FR-20). The shape
+they establish — plain per-call/per-session input records in, structurally-required or
+structurally-paired results out, no branch on any specific tool name — is the pattern later checks
+in this project should follow.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

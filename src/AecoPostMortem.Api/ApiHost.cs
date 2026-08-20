@@ -24,6 +24,11 @@ public static class ApiHost
     /// (S-08). Use <see cref="SessionRoute"/> to build the concrete request path for one session.</summary>
     public const string SessionRouteTemplate = "/api/sessions/{sessionId}";
 
+    /// <summary>The route template <see cref="Build"/> registers for FR-21 part 2 of 3's step
+    /// evidence endpoint (S-52, issue #16) — the inspector's Thinking and Raw tabs. Use
+    /// <see cref="StepEvidenceRoute"/> to build the concrete request path for one step.</summary>
+    public const string StepEvidenceRouteTemplate = "/api/sessions/{sessionId}/steps/{stepId}";
+
     /// <summary>
     /// Builds the host without starting it — the caller decides when and how to run it, which is
     /// what keeps this testable without a Kestrel listener staying up for the life of a test run.
@@ -76,6 +81,17 @@ public static class ApiHost
             return envelope is null ? Results.NotFound() : Results.Ok(envelope);
         });
 
+        app.MapGet(StepEvidenceRouteTemplate, (string sessionId, string stepId, string? kind) =>
+        {
+            if (kind is null || !Enum.TryParse<SessionTapeStepKind>(kind, ignoreCase: true, out var parsedKind))
+            {
+                return Results.BadRequest("A valid 'kind' query parameter is required.");
+            }
+
+            var evidence = GetStepEvidence(store, sessionId, stepId, parsedKind);
+            return evidence is null ? Results.NotFound() : Results.Ok(evidence);
+        });
+
         if (resolvedWebRoot is not null)
         {
             app.UseDefaultFiles();
@@ -111,6 +127,21 @@ public static class ApiHost
         return $"/api/sessions/{Uri.EscapeDataString(sessionId)}";
     }
 
+    /// <summary>Builds the concrete request path for one step's <see cref="StepEvidenceRouteTemplate"/>
+    /// endpoint. <paramref name="kind"/> is carried as a query parameter, not a route segment: a
+    /// step's identity alone (<see cref="SessionTapeStep.StepId"/>) does not say which envelope
+    /// field to match it against — a client already has <see cref="SessionTapeStepKind"/> on the
+    /// selected step from the tape it just fetched.</summary>
+    public static string StepEvidenceRoute(string sessionId, string stepId, SessionTapeStepKind kind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stepId);
+
+        var kindText = kind.ToString();
+        var kindQuery = Uri.EscapeDataString(char.ToLowerInvariant(kindText[0]).ToString() + kindText[1..]);
+        return $"/api/sessions/{Uri.EscapeDataString(sessionId)}/steps/{Uri.EscapeDataString(stepId)}?kind={kindQuery}";
+    }
+
     /// <summary>
     /// FR-21's masthead and tape (S-08, issue #15), read through <c>Data.Execution</c> — the
     /// minimal read path this story needs. Nothing in this repository yet writes
@@ -141,7 +172,44 @@ public static class ApiHost
         var hooks = context.Hooks.Where(h => h.SessionId == sessionId).ToList();
 
         var recording = SessionRecording.Build(session, turns, toolCalls, agents, skills, hooks);
-        return SessionEnvelope.From(recording);
+
+        // No check orchestrator runs against the live store yet (FR-21 part 2 of 3, S-52, issue
+        // #16) — the same "not yet wired to a live corpus" gap `ProcessDigest`/`DigestEnvelope`
+        // document for their own `findings` input (`Findings/CLAUDE.md`, `Api/CLAUDE.md`). An empty
+        // list is the honest answer today: `SessionFindings.For` still runs, so the chip row's own
+        // designed "no findings" state is real, not a placeholder skipped by short-circuiting here.
+        var findings = SessionFindings.For(sessionId, []);
+
+        return SessionEnvelope.From(recording, findings, FindingEnvelope.From);
+    }
+
+    /// <summary>
+    /// FR-21 part 2 of 3 (S-52, issue #16): the inspector's Thinking and Raw tabs for one step,
+    /// resolved straight from the session's own <see cref="RawEvent"/>s (<see cref="StepEvidenceLookup"/>)
+    /// — the Detail tab needs no query of its own, since every field it renders already travels on
+    /// the tape's own <see cref="SessionTapeStepEnvelope"/>. <see langword="null"/> only when
+    /// <paramref name="sessionId"/> names no session at all, the same "session not found" distinction
+    /// <see cref="GetSession"/> draws — a session that exists but carries no raw event for this step
+    /// still answers with <see cref="StepEvidenceEnvelope"/>'s own skipped/unavailable states, never
+    /// a 404.
+    /// </summary>
+    public static StepEvidenceEnvelope? GetStepEvidence(
+        LocalStore store, string sessionId, string stepId, SessionTapeStepKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stepId);
+
+        using var context = store.Open();
+
+        var sessionExists = context.Sessions.Any(s => s.SessionId == sessionId);
+        if (!sessionExists)
+        {
+            return null;
+        }
+
+        var events = context.RawEvents.Where(e => e.SessionId == sessionId).ToList();
+        return StepEvidenceLookup.Find(events, kind, stepId);
     }
 
     /// <summary>

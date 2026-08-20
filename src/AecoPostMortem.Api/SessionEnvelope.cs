@@ -149,9 +149,37 @@ public sealed record SessionTapeStepEnvelope
     }
 }
 
+/// <summary>The wire shape for one <see cref="SessionFindingChip"/> (FR-21 part 2 of 3, S-52, issue
+/// #16): the finding itself, already mapped to its <see cref="FindingEnvelope"/> shape, plus how
+/// many sessions across the corpus it affects — the chip row's own "with its count" (the story's own
+/// Gherkin wording).</summary>
+public sealed record SessionFindingChipEnvelope
+{
+    public required FindingEnvelope Finding { get; init; }
+
+    public required int SessionsAffected { get; init; }
+
+    /// <summary><paramref name="mapFinding"/> is supplied by the caller for the same reason
+    /// <see cref="DigestEnvelope.From"/> takes one: only the caller knows whether a given
+    /// <see cref="Finding"/> needs <see cref="FindingEnvelope.FromAdherence"/>'s resolution and rule
+    /// version instead of the bare <see cref="FindingEnvelope.From"/> shape (FR-33).</summary>
+    public static SessionFindingChipEnvelope From(SessionFindingChip chip, Func<Finding, FindingEnvelope> mapFinding)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        ArgumentNullException.ThrowIfNull(mapFinding);
+
+        return new SessionFindingChipEnvelope
+        {
+            Finding = mapFinding(chip.Finding),
+            SessionsAffected = chip.SessionsAffected,
+        };
+    }
+}
+
 /// <summary>
-/// FR-21's served masthead and tape (S-08, issue #15): the wire shape a client reads
-/// <see cref="SessionRecording"/> through, the same layering <see cref="DigestEnvelope"/> already
+/// FR-21's served masthead and tape (S-08, issue #15), plus FR-21 part 2 of 3's finding chip row
+/// (S-52, issue #16): the wire shape a client reads <see cref="SessionRecording"/> and
+/// <see cref="SessionFindings"/> through, the same layering <see cref="DigestEnvelope"/> already
 /// establishes for <see cref="ProcessDigest"/> (S-36).
 /// </summary>
 public sealed record SessionEnvelope
@@ -160,14 +188,24 @@ public sealed record SessionEnvelope
 
     public required IReadOnlyList<SessionTapeStepEnvelope> Steps { get; init; }
 
-    public static SessionEnvelope From(SessionRecording recording)
+    /// <summary>FR-21 part 2 of 3, Scenario 3: "a chip row states each finding affecting this
+    /// session with its count." An empty list is itself the designed "no findings affect this
+    /// session" state, not a missing field — the client renders it explicitly rather than as a blank
+    /// area (see `web/CLAUDE.md`).</summary>
+    public required IReadOnlyList<SessionFindingChipEnvelope> Findings { get; init; }
+
+    public static SessionEnvelope From(
+        SessionRecording recording, SessionFindings findings, Func<Finding, FindingEnvelope> mapFinding)
     {
         ArgumentNullException.ThrowIfNull(recording);
+        ArgumentNullException.ThrowIfNull(findings);
+        ArgumentNullException.ThrowIfNull(mapFinding);
 
         return new SessionEnvelope
         {
             Masthead = SessionMastheadEnvelope.From(recording.Masthead),
             Steps = recording.Tape.Steps.Select(SessionTapeStepEnvelope.From).ToList(),
+            Findings = findings.Chips.Select(chip => SessionFindingChipEnvelope.From(chip, mapFinding)).ToList(),
         };
     }
 }

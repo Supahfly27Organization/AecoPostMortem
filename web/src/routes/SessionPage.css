@@ -75,3 +75,147 @@
 .session-page__no-selection {
   color: #666;
 }
+
+.session-chips {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.session-chips__chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #d0d0d0;
+  border-left: 3px solid #888;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: #fff;
+}
+
+.session-chips__chip[data-provenance='inferred'] {
+  border-left-color: #b8860b;
+}
+
+.session-chips__chip b {
+  font-variant-numeric: tabular-nums;
+}
+
+.session-chips__empty {
+  margin: 0 0 1.5rem;
+  color: #666;
+}
+
+.session-page__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.session-tape__step-button {
+  display: flex;
+  width: 100%;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.session-tape__step-button[aria-pressed='true'] {
+  border-color: #2c6ecb;
+  background: #eaf1fc;
+}
+
+.session-tape .session-tape__step {
+  padding: 0;
+  border: none;
+}
+
+.inspector {
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  min-height: 8rem;
+}
+
+.inspector__empty {
+  color: #666;
+  margin: 0;
+}
+
+.inspector__tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid #e2e2e2;
+}
+
+.inspector__tab {
+  padding: 0.4rem 0.75rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  border-bottom: 2px solid transparent;
+}
+
+.inspector__tab[aria-selected='true'] {
+  border-bottom-color: #2c6ecb;
+  font-weight: 600;
+}
+
+.inspector__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.inspector__detail-field {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.inspector__detail-field dt {
+  min-width: 6rem;
+  color: #666;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.inspector__detail-field dd {
+  margin: 0;
+}
+
+.inspector__unavailable {
+  color: #666;
+}
+
+.inspector__thinking-text {
+  white-space: pre-wrap;
+}
+
+.inspector__raw-event-type {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.inspector__raw-payload {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f7f7f7;
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+  padding: 0.75rem;
+  font-size: 0.85rem;
+}

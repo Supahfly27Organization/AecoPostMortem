@@ -28,6 +28,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
 | `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
+| `SessionFindings.cs` | FR-21, part 2 of 3 (S-52, issue #16): `SessionFindingChip`, `SessionFindings` — the chip row's own data path, joining `Finding.Recurrence.Occurrences` to one session id, distinct from `SessionRecording`'s tape |
 
 ## References
 
@@ -209,6 +210,31 @@ id (`StringComparer.Ordinal`) for the same determinism reasoning `AbortedTurnChe
 tie-break (PRD §3.8) — two entities can share a timestamp, never a `(kind, id)` pair within one
 session. `SessionTape.HasSteps` is computed from `Steps.Count`, never a second stored flag: an empty
 list already states Scenario 3's "no steps were recorded" on its own.
+
+### A finding chip's "count" is `ProcessDigest.SessionsAffected`, not a per-check evidence lookup
+
+The mockup this story worked from (`docs/product-superpowers/discovery/mockups/flight-recorder.html`)
+shows each chip carrying a different kind of number — "17 failed tool calls", "13× same file
+re-read", "8% rule adherence" — each drawn from that specific check's own evidence shape. Building
+that generically would mean `SessionFindings.For` knowing every check's `EvidenceItem.Field`
+convention by name, which is exactly the kind of check-specific knowledge this project's other
+generic surfaces (`SilentCheckEnvelope`, `ProcessDigest`) deliberately avoid. `SessionFindingChip.
+SessionsAffected` instead reuses `ProcessDigest.SessionsAffected(Finding)` verbatim — the one figure
+every finding class already carries the same way, already trusted as the digest's own ranking key.
+This is a narrower reading of "with its count" than the mockup's own bespoke-per-chip numbers; a
+future story that wants the mockup's exact per-check figures would extend this chip's shape, not
+change how it is joined to a session.
+
+### `SessionFindings.For` joins on `Recurrence.Occurrences`, not on any bare `SessionId` field
+
+`Finding` deliberately carries no `SessionId` (this file's own "the finding record has no `Id` and
+no `SessionId`" note) — a finding's only session-scoped data is `Recurrence.Occurrences`. `For`
+therefore matches by scanning `Occurrences` for the session id, the same join `ProcessDigest`
+implicitly relies on when it ranks by `SessionsAffected`. Both an Inferred finding and one the
+operator already rejected still produce a chip here — provenance and response are for the chip's
+own rendering (`web/src/routes/SessionPage.tsx`'s `data-provenance` attribute) to read, not for this
+join to filter on; FR-21's Scenario 3 says "each finding affecting this session," with no carve-out
+for provenance or operator response.
 
 ### `ProcessDigest.Build` takes plain, already-resolved inputs — the same reason it can prove it never scans
 
@@ -543,5 +569,16 @@ landed: `SessionMasthead` states identity, repository, branch, CLI version, elap
 five step-population counts; `SessionTape` orders every `Prompt`/`Hook`/`Skill`/`ToolCall`/`McpCall`
 step by wall-clock time with its offset from session start, and states plainly when it carries none.
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
-`web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
-path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+`web/src/routes/SessionPage.tsx`.
+
+`SessionFindings` (issue #16, S-52, FR-21 part 2 of 3) — the chip row's own data path — has landed:
+`SessionFindings.For(sessionId, findings)` filters to findings whose `Recurrence.Occurrences` names
+that session and pairs each with `ProcessDigest.SessionsAffected` for the chip's own "with its
+count" figure (see "Non-obvious decisions" below). `AecoPostMortem.Api.SessionEnvelope.Findings`
+consumes it; nothing yet runs every check orchestrator against the live store and hands the results
+here — `ApiHost.GetSession` passes an empty `Finding` list today, the same "not yet wired to a live
+corpus" gap `ProcessDigest.Build`'s own status note documents for its own `findings` parameter. The
+inspector's Detail/Thinking/Raw tabs (same story) are built in `AecoPostMortem.Api`
+(`StepEvidenceLookup`, `StepEvidenceEnvelope`) rather than here — they read a session's own
+`RawEvent`s directly, not a `Finding`, so they have no reason to touch this project. S-53 (scale,
+states) is the remaining part of FR-21, not built here.

@@ -53,6 +53,17 @@ public abstract record FindingEnvelope
 
     public required Recurrence Recurrence { get; init; }
 
+    /// <summary>FR-41 (issue #44, S-36): how many distinct sessions this finding touched — the key
+    /// <see cref="ProcessDigest.Build"/> ranked <see cref="DigestEnvelope.RankedFindings"/> by, and
+    /// the figure S-36's edge case requires a row to render most prominently (a finding touching one
+    /// session is an anecdote beside one touching thirty). Served rather than left for a client to
+    /// re-derive from <see cref="Recurrence"/>: a client counting its own distinct session ids could
+    /// silently disagree with the order it is rendering, and every one of them would have to
+    /// re-implement the same distinct-count rule. Always computed by
+    /// <see cref="ProcessDigest.SessionsAffected"/>, never taken as a parameter, so the served number
+    /// and the ranking can never come from two different rules.</summary>
+    public required int SessionsAffected { get; init; }
+
     /// <summary>FR-56: never a missing field — see <see cref="SuggestionEnvelope"/>.</summary>
     public required SuggestionEnvelope Suggestion { get; init; }
 
@@ -66,6 +77,7 @@ public abstract record FindingEnvelope
         ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
+        SessionsAffected = ProcessDigest.SessionsAffected(finding),
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),
         OperatorResponse = finding.OperatorResponse,
     };
@@ -83,6 +95,7 @@ public abstract record FindingEnvelope
         ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
+        SessionsAffected = ProcessDigest.SessionsAffected(finding),
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),
         OperatorResponse = finding.OperatorResponse,
         Figure = figure,
@@ -100,6 +113,7 @@ public abstract record FindingEnvelope
         ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
+        SessionsAffected = ProcessDigest.SessionsAffected(finding),
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),
         OperatorResponse = finding.OperatorResponse,
         UnevaluatedCondition = unevaluatedCondition,

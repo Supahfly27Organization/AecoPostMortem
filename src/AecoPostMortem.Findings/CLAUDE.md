@@ -261,6 +261,9 @@ S-36's own edge case says the masthead's totals are the one place this surface c
 and it must not (counting a million rows measured 126 ms on SQLite and 118 ms on Postgres —
 `docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`). `MastheadCounters`
 is therefore a plain input record — "the stored counters maintained at ingest", not a live count —
+(the same guarantee is enforced again one layer out, where it actually costs something: this project
+has no `Data` reference at all, so `AecoPostMortem.Api`'s `MastheadEnvelopeStructureTests` guards the
+served masthead, which does sit in a project that can reach the store)
 the same reasoning `HookFailureFinding.Build` and `FailedToolCallsFinding` give for taking plain
 inputs instead of reading through `Data` directly: no code in this repository yet writes those
 counters at ingest time, so the caller (a later story) supplies them. `ProcessDigestStructureTests`

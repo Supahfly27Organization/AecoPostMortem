@@ -259,10 +259,9 @@ public sealed class MonitorComparisonRouteTests
         string hashV1, hashV2;
         using (var context = temporary.Store.Open())
         {
-            // Session ids sort ordinally the same way they sort chronologically: RuleSetVersionAdjacency
-            // orders a repository's versions by FirstSessionId's own ordinal string comparison, not by
-            // StartedAt (Rules/CLAUDE.md), so an out-of-order id pair here would test a non-adjacent
-            // pair by accident.
+            // RuleSetVersionAdjacency orders a repository's versions by each version's own
+            // FirstSessionStartedAt (Rules/CLAUDE.md) — s1's StartedAt precedes s2's below, so this
+            // pair is adjacent by real time, not merely by session id text.
             context.Sessions.Add(ASession("s1", "org/repo", "2026-08-16T10:00:00Z"));
             context.RawEvents.Add(SystemMessage("s1", PreferRgOverGrepPrompt));
             context.ToolCalls.Add(AToolCall("s1", "tc1", "rg"));

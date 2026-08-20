@@ -385,10 +385,13 @@ public sealed class RulesInventoryTests
         Assert.All(inventory.AvailableVersions, version => Assert.Equal("repo-a", version.Repository));
     }
 
-    /// <summary>Session ids in the real corpus are opaque, so the ordinal-by-first-session-id order
-    /// <see cref="RuleSetVersioning.Compute"/> returns bears no relation to time. An operator picking
-    /// a version has to be able to tell which one is the most recent — that is the version FR-40's
-    /// retirement rule is stated against, and the only one in which nothing is retired.</summary>
+    /// <summary>Session ids in the real corpus are opaque (random UUIDs), so an order keyed on session
+    /// id text would bear no relation to time. <see cref="RuleSetVersioning.Compute"/> orders by each
+    /// version's own <see cref="RuleSetVersion.FirstSessionStartedAt"/> instead — proven here with
+    /// session ids ("s-zebra" before "s-alpha") that sort backwards from their own chronology, so this
+    /// test only passes if the ordering is genuinely time-based. An operator picking a version has to
+    /// be able to tell which one is the most recent — that is the version FR-40's retirement rule is
+    /// stated against, and the only one in which nothing is retired.</summary>
     [Fact]
     public void Versions_are_offered_in_the_repositorys_own_chronological_order()
     {

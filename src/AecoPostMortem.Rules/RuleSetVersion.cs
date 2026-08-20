@@ -45,6 +45,14 @@ public sealed record RuleSetVersion
 
     public required string FirstSessionId { get; init; }
 
+    /// <summary>
+    /// <see cref="FirstSessionId"/>'s own <see cref="SessionRuleSet.StartedAt"/> — the real
+    /// chronological sort key. Session ids are opaque (random UUIDs in the reference corpus), so
+    /// ordering versions by <see cref="FirstSessionId"/> text has no relationship to time; ordering
+    /// by this field does.
+    /// </summary>
+    public required string FirstSessionStartedAt { get; init; }
+
     public required string LastSessionId { get; init; }
 
     public required int SessionCount { get; init; }

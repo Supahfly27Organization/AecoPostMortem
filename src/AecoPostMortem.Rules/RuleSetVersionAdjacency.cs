@@ -16,9 +16,10 @@ public static class RuleSetVersionAdjacency
     /// Confirms <paramref name="before"/> and <paramref name="after"/> name the same repository and
     /// sit immediately next to each other within <paramref name="versions"/> — that repository's own
     /// versions, in whatever order <see cref="RuleSetVersioning.Compute"/> produced them, ordered
-    /// here by each version's own <see cref="RuleSetVersion.FirstSessionId"/> — and returns the two
-    /// full <see cref="RuleSetVersion"/> values (identity, window and session count) so a caller
-    /// never has to look either back up by hash.
+    /// here by each version's own <see cref="RuleSetVersion.FirstSessionStartedAt"/>, tied-broken by
+    /// <see cref="RuleSetVersion.FirstSessionId"/> for a total order regardless of arrival order —
+    /// and returns the two full <see cref="RuleSetVersion"/> values (identity, window and session
+    /// count) so a caller never has to look either back up by hash.
     /// </summary>
     /// <exception cref="MixedRuleSetVersionException"><paramref name="before"/> and
     /// <paramref name="after"/> name different repositories — there is no single chronological order
@@ -43,7 +44,8 @@ public static class RuleSetVersionAdjacency
 
         var chronological = versions
             .Where(version => string.Equals(version.Repository, before.Repository, StringComparison.Ordinal))
-            .OrderBy(version => version.FirstSessionId, StringComparer.Ordinal)
+            .OrderBy(version => version.FirstSessionStartedAt, StringComparer.Ordinal)
+            .ThenBy(version => version.FirstSessionId, StringComparer.Ordinal)
             .ToArray();
 
         var beforeIndex = Array.FindIndex(

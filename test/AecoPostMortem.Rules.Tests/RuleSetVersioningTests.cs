@@ -140,4 +140,37 @@ public sealed class RuleSetVersioningTests
         Assert.Null(version.Repository);
         Assert.Equal(2, version.SessionCount);
     }
+
+    [Fact]
+    public void A_versions_FirstSessionStartedAt_is_its_first_sessions_own_start_time()
+    {
+        SessionRuleSet[] sessions =
+        [
+            Session("s1", "repo-a", "2026-01-01T00:00:00Z", Block("CLAUDE.md", "Rule A.")),
+            Session("s2", "repo-a", "2026-01-05T00:00:00Z", Block("CLAUDE.md", "Rule A.")),
+        ];
+
+        var version = Assert.Single(RuleSetVersioning.Compute(sessions));
+
+        Assert.Equal("2026-01-01T00:00:00Z", version.FirstSessionStartedAt);
+    }
+
+    [Fact]
+    public void Versions_are_ordered_by_real_start_time_not_by_session_id_text()
+    {
+        // "aaa-late" sorts before "zzz-early" under ordinal string comparison, but "zzz-early"'s
+        // own session genuinely started first in time — a version list ordered by FirstSessionId
+        // text would (wrongly) place "aaa-late" first.
+        SessionRuleSet[] sessions =
+        [
+            Session("zzz-early", "repo-a", "2026-01-01T00:00:00Z", Block("CLAUDE.md", "Rule A.")),
+            Session("aaa-late", "repo-a", "2026-02-01T00:00:00Z", Block("CLAUDE.md", "Rule B.")),
+        ];
+
+        var versions = RuleSetVersioning.Compute(sessions);
+
+        Assert.Equal(2, versions.Count);
+        Assert.Equal("zzz-early", versions[0].FirstSessionId);
+        Assert.Equal("aaa-late", versions[1].FirstSessionId);
+    }
 }

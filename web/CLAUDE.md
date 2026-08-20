@@ -28,11 +28,13 @@ passing `--prefix`, for the same reason.
 | `src/api/useDigest.ts` | the fetch-once-on-mount hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape |
 | `src/digest/Masthead.tsx` | FR-41's corpus masthead (S-36, issue #44): sessions, span, repositories, events, tool calls and rule coverage, every figure read straight off `MastheadEnvelope`'s ingest-time counters. Marks itself `data-provisional` mid-ingest and says an empty corpus has no span |
 | `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed |
-| `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone |
+| `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone. FR-39 (S-35, issue #43) added `data-emphasis="prominent"` on the percentage span, the marker `MonitorComparisonBlock.tsx`'s own session count shares |
 | `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count |
 | `src/digest/ProvenanceBadge.tsx` | PRD §3.8's three provenance levels, rendered distinguishably — a `data-provenance` attribute drives a distinct colour per level, alongside the badge's own text label |
 | `src/digest/SuggestionBlock.tsx` | Scenario 4: renders `SuggestionEnvelope`'s `present`/`absent` states — an explicit "No suggestion is offered." for `absent`, never a blank area |
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
+| `src/api/monitor.ts` | FR-39's `MonitorComparisonEnvelope` shape and `fetchMonitorComparison`, hand-kept in sync with `AecoPostMortem.Api.MonitorComparisonEnvelope` (`src/AecoPostMortem.Api/MonitorComparisonEnvelope.cs`) — reuses `AdherenceFigure` from `digest.ts` and `RuleSetVersionEnvelope` from `rulesInventory.ts` rather than redeclaring either |
+| `src/digest/MonitorComparisonBlock.tsx` | FR-39 (S-35, issue #43): renders a `MonitorComparisonEnvelope` as two sides, Before and After, each an `AdherenceFigureBlock` preceded by its own session count at the identical visual weight (`adherence-figure__percentage`'s own class plus `data-emphasis="prominent"`) — Scenario 2's "as visible as the percentage" |
 | `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field |
 | `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
 | `src/api/useStepEvidence.ts` | FR-21 part 2 of 3 (S-52, issue #16): the fetch-per-`(sessionId, stepId, kind)` hook the inspector reads once a step is selected, mirroring `useSession`'s loading/error/loaded shape |
@@ -168,6 +170,25 @@ A `null` percentage (PRD §5.5's zero-occurrence case) renders as a sentence —
 observed for this rule, so it has no adherence percentage." — never `0%`, which would read as
 measured disobedience rather than absent data. The resolution table still renders, so the operator
 can see *which* operands found nothing and through which layer.
+
+### The Monitor comparison's session count shares the percentage's own class, rather than a lookalike
+
+FR-39 Scenario 2 (issue #43): "the session count on each side is as visible as the percentage."
+`MonitorComparisonBlock`'s per-side sample size carries `adherence-figure__percentage` — the
+identical CSS class `AdherenceFigureBlock` puts on its own percentage span — plus the same
+`data-emphasis="prominent"` marker, rather than a second class in `MonitorComparisonBlock.css` that
+happens to declare the same `font-size`/`font-weight` values today. Two classes that merely agree by
+coincidence can drift the moment either file is edited on its own; one shared class cannot.
+`MonitorComparisonBlock.test.tsx` asserts both spans carry `adherence-figure__percentage` and
+`data-emphasis="prominent"` for exactly this reason — a structural equality check, not a comparison
+of literal pixel values jsdom cannot reliably report anyway.
+
+Reusing `AdherenceFigureBlock` for each side's percentage and resolution table (rather than
+re-rendering the percentage inside `MonitorComparisonBlock` itself) is what keeps this file's own
+"one component owns both halves of an adherence figure" rule, above, intact: there is still no
+component in this app — this one included — that renders a bare percentage without the operand
+table beside it. The session count is a second, equally prominent figure placed beside that
+pairing, never a second percentage competing with it.
 
 ### The ranking count is the one figure that stays visible while a row is collapsed
 
@@ -383,6 +404,17 @@ a reader can already tell which rows belong to which lane by eye (matching borde
 this app computing that correspondence itself. Wiring the two together into one combined view (e.g.
 scrolling the tape to a lane's rows on click) is left for a later story — this one renders both,
 distinctly, and stops there.
+
+FR-39 (S-35, issue #43) added the Monitor comparison's own block (`digest/MonitorComparisonBlock.tsx`,
+`api/monitor.ts`): a `MonitorComparisonEnvelope` renders as two `AdherenceFigureBlock`s, Before and
+After, each preceded by its own session count sharing the percentage's own CSS class and
+`data-emphasis` marker (see "The Monitor comparison's session count..." above). `/api/monitor-
+comparison` is not served yet — `AecoPostMortem.Api/CLAUDE.md`'s own status note documents the same
+not-yet-wired gap `/api/digest` and `/api/rules-inventory` carry — and no route in `App.tsx` mounts
+this block yet either: it is a reusable renderer, the same "built ahead of the page that will place
+it" pattern `AdherenceFigureBlock` followed before `FindingRow` existed to call it. `MonitorComparison
+Block.test.tsx` exercises it directly against the reference corpus's own measured 41.8% → 71.7% edit
+(3 sessions, then 4).
 
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there

@@ -33,6 +33,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleShapeCatalogue.cs` | FR-34's catalogue itself: `RuleShapeCatalogue.Shapes`, `.TryMatch` and `.MatchAll` — eight phrasing patterns across five shapes, matched in precedence order, with operands read from the matched statement's own text |
 | `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only) and `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows) |
 | `ContradictionCheck.cs` | FR-43 (S-38, issue #47): `ContradictionCandidate` (a pair of statements plus their shared, negation-stripped wording) and `ContradictionCheck.Run` — pairwise keyword-polarity detection over whatever statements the caller hands in, `i < j` only so no statement is ever compared against itself |
+| `RuleSetVersionAdjacency.cs` | FR-39 (S-35, issue #43): `RuleSetVersionAdjacency.RequireAdjacentPair` — confirms two `RuleSetVersionId`s are the same repository and immediately consecutive within a repository's own chronologically ordered `RuleSetVersion`s, returning both as `(Before, After)`, or throws `MixedRuleSetVersionException` (different repositories), `UnknownRuleSetVersionException` (a hash the repository never carried) or `NonAdjacentRuleSetVersionsException` (naming every intervening version) — the primitive the Monitor comparison scopes itself with before computing anything |
 
 ## The invariant
 
@@ -507,6 +508,42 @@ and one hash — the same `RuleSetVersionId` `RuleSetVersioning` produces — so
 first and cannot construct a figure across an edit even by accident, mirroring how `HookFailureCounts`
 makes a bare denominator uncompilable rather than merely undocumented.
 
+### `RuleSetVersionAdjacency` orders by `FirstSessionId`, not by insertion order
+
+FR-39's refusal needs "nothing sits between them" to mean something for whatever order a caller
+happens to hand `RuleSetVersioning.Compute`'s own output in — that method already sorts its overall
+result by `(Repository, FirstSessionId)`, but a caller filtering or recombining versions from
+several calls could hand `RequireAdjacentPair` a list in any order. `RequireAdjacentPair`
+re-orders the repository's own versions by `FirstSessionId` (`StringComparer.Ordinal`, the same
+comparer `RuleSetVersioning.Compute` itself uses) before locating either requested hash, so
+adjacency is never a fact about the order two versions happened to arrive in.
+
+### The refusal carries the full `RuleSetVersion`, not just the id that failed
+
+`NonAdjacentRuleSetVersionsException.Before`/`.After`/`.Intervening` are `RuleSetVersion` values —
+identity, window and sample size — rather than bare `RuleSetVersionId`s. A caller reporting the
+refusal (FR-39's own Scenario 3: "naming the intervening version") can therefore state which
+version sits in the way, when it was in force and how many sessions carried it, without a second
+lookup back into `RuleSetVersioning.Compute`'s own output.
+
+### Two requested versions passed in the same, or reversed, order still refuse
+
+`RequireAdjacentPair` requires `after`'s chronological position to be exactly one past `before`'s —
+not merely "one apart" — so passing the same version twice, or `before`/`after` swapped relative to
+their real chronological order, both refuse via `NonAdjacentRuleSetVersionsException` rather than
+silently reordering the caller's own labels. Neither case is named by FR-39's Gherkin, so this
+project does not invent a distinct exception type for it: refusing is always the safe default, and
+`Intervening` is simply empty when the pair was equal or reversed rather than the pair actually
+skipping over something.
+
+### A different repository is `MixedRuleSetVersionException`, reused rather than duplicated
+
+Two versions naming different repositories have no single chronological order to place them in at
+all — the same fact `RuleSetVersionScope.RequireSingleVersion` already refuses for a figure spanning
+more than one repository. `RequireAdjacentPair` reuses that exact exception type rather than
+introducing a second one for what is the identical defect one level up (comparing, not merely
+scoping), so a caller catching `MixedRuleSetVersionException` already handles both.
+
 ### A statement's status is supplied by the caller, not decided here
 
 `RulesInventory.Build` takes a `Func<RuleStatement, RuleStatementStatus>` rather than classifying
@@ -651,3 +688,13 @@ pairwise, self-match-excluding candidate detector; `AecoPostMortem.Findings.Cont
 the caller that groups sessions by rule-set version before handing each version's deduplicated
 statements in, and registers the run (`CheckId = "contradiction-check"`) on the "checks that found
 nothing" surface FR-42 (S-37) already published ahead of this story.
+
+The Monitor comparison's adjacency refusal (S-35, issue #43, FR-39) has also landed:
+`RuleSetVersionAdjacency.RequireAdjacentPair` is the primitive `Findings.MonitorComparison.Compare`
+scopes itself with before computing anything, the exact role `RuleSetVersionScope.
+RequireSingleVersion`'s own remarks anticipated for it. It refuses a pair spanning different
+repositories (`MixedRuleSetVersionException`, reused), a hash the repository never carried
+(`UnknownRuleSetVersionException`, reused from `RulesInventory.cs`), or two versions with anything
+sitting between them in chronological order (`NonAdjacentRuleSetVersionsException`, naming every
+intervening version) — and returns the two full `RuleSetVersion` values on success, so a caller
+never has to look either back up by hash.

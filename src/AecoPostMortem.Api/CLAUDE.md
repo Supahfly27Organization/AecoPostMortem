@@ -18,6 +18,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
 | `SubagentOutputEnvelope.cs` | FR-22 (S-09, issue #18): the inspector's lane-output contract — `Present`/`NotRecorded`/`Failed`, a closed three-shape union so "a real report", "nothing recorded" and "the subagent failed" are each a stated value, never inferred |
 | `SubagentOutputLookup.cs` | FR-22 (S-09, issue #18): `SubagentOutputLookup.Find` — resolves one subagent's real report from the last `assistant.message` carrying its own `agentId`, reading envelopes the same way `StepEvidenceLookup` does. Never reads a `tool.execution_complete` result at all, so the parent's truncated `read_agent` stub cannot surface as a lane's output by construction |
+| `MonitorComparisonEnvelope.cs` | FR-39's served comparison (S-35, issue #43): `MonitorComparisonEnvelope` — `BeforeVersion`/`AfterVersion` reuse `RuleSetVersionEnvelope` (S-22), `Before`/`After` carry `Findings.AdherenceFigure` directly, no separate figure envelope — and `MonitorComparisonEnvelope.From(Findings.MonitorComparison)` |
 
 ## References
 
@@ -423,6 +424,16 @@ missing `Agent.Error` (`subagent.failed.data.error` was not recorded on that eve
 `Failed` shape, with a fixed fallback sentence, rather than falling through to `NotRecorded` —
 Scenario 4 does not admit a fourth "failed with nothing to say" state.
 
+### `MonitorComparisonEnvelope` reuses `RuleSetVersionEnvelope` and `AdherenceFigure` verbatim, no third figure shape
+
+FR-39 Scenario 2 ("the session count on each side is as visible as the percentage") is satisfied by
+reusing two contracts this project already serves elsewhere, rather than inventing a
+`MonitorComparisonEnvelope`-specific figure: `BeforeVersion`/`AfterVersion` are the same
+`RuleSetVersionEnvelope` `RulesInventoryEnvelope.cs` (S-22) already carries `SessionCount` on, and
+`Before`/`After` are `Findings.AdherenceFigure` directly — the identical domain type
+`FindingEnvelope.Adherence.Figure` already serialises. A client that already renders one of those
+two shapes elsewhere in this app needs no new parsing logic to render this one.
+
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
@@ -502,3 +513,13 @@ one read, not a fourth RAW query. Lanes are ordered by `StartedAt` then `AgentId
 is deterministic. `web/src/routes/SessionPage.tsx`'s `AgentLanes` is the client, rendering each
 lane's identity, outcome and `SubagentOutputEnvelope` — never falling back to a `read_agent` tool
 call's truncated result, since `SubagentOutputLookup` never reads one.
+
+`MonitorComparisonEnvelope.cs` (S-35, issue #43, FR-39) is contract-only in the same sense the
+digest and Rules Inventory contracts were before their own live endpoints landed:
+`web/src/digest/MonitorComparisonBlock.tsx` and `web/src/api/monitor.ts` are real consumers of the
+shape, but `ApiHost.Build` does not `MapGet` `/api/monitor-comparison` — resolving a whole store's
+`RawEvent`s into `SessionRuleSet`s, picking the two adjacent versions and the operand pair to
+compare, and running `Findings.MonitorComparison.Compare` against the live store is wiring no story
+has done yet, the same not-yet-wired gap `/api/digest` and `/api/rules-inventory` document. The web
+component is built ahead of that wiring, the same seam `AdherenceFigureBlock.tsx` established
+before any digest endpoint served a real `AdherenceFigure`.

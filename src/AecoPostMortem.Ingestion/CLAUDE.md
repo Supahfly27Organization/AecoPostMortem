@@ -182,6 +182,15 @@ task call itself carried, `null` for a spawn from the main thread. A `subagent.s
 (`Agent.SpawningToolCallId` is `required`, so an unresolved spawn cannot honestly populate it) and
 counted instead in `SpawnResolutionCheck` — reported, never silently dropped (Scenario 3).
 
+Scenario 3's own `Given` is the reference corpus, so it is also asserted there:
+`test/AecoPostMortem.Ingestion.Tests/ExecutionRecordCorpusTests.cs` rebuilds every ingested session
+off the shared `CorpusIngestFixture` and checks that the spawns examined equal
+`fixtures/corpus-manifest.json`'s own `subagent.started` census (470 today, read from the manifest
+rather than typed into the test) with zero unresolved. Both halves matter: a builder that resolved
+every spawn it looked at but never looked at most of them would pass an unresolved-count check
+alone. Hand-built events prove the resolution rule; only the real bytes prove the 470-of-470 claim —
+the same argument the `ts`/`timestamp` entry below makes at length.
+
 ### `Agent.Outcome` reads `subagent.completed`'s four cost fields as one unit
 
 If none of `totalTokens`, `totalToolCalls`, `durationMs` and `model` are present, the outcome is

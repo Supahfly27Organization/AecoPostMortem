@@ -10,7 +10,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `FindingClassRegistry.cs` | the four finding classes, each declaring its recurrence key (FR-57) |
 | `Evidence.cs` | `EvidenceItem` — one quoted event field |
 | `Recurrence.cs` | `Recurrence`, `RecurrenceOccurrence` — FR-57's version-independent identity |
-| `Resolution.cs` | FR-33's layer-used-per-operand and call count, carried where an adherence figure has one |
+| `Resolution.cs` | FR-56's two reserved suggestion placeholders (`{OperandLayer}`, `{CallCount}`) for one operand, carried on `Finding.Resolution` where one applies — not FR-33's served figure, see `AdherenceFigure.cs` |
+| `AdherenceFigure.cs` | FR-33 (S-24, issue #38): `OperandResolution` (one operand, the S-23 layer that resolved it, the calls it produced) and `AdherenceFigure` — the percentage as a *computed* property over those call counts, plus the `RuleSetVersionId` it was scoped to. `FromTwoOperands` builds one from `Rules.OperandResolver.ResolveTwoOperands` |
 | `Suggestion.cs` | FR-56's deterministic template text |
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
@@ -28,6 +29,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
 | `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding`. FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and `SessionRecording.Status`, plus an optional `CheckRegistryEntry? spawnResolution` parameter on `Build` |
+| `ContradictionCheck.cs` | FR-43 (S-38, issue #47): orchestrates `Rules.ContradictionCheck` — groups sessions by rule-set version before calling in (never comparing statements from two versions), wraps the result in `ContradictionCheck.Result` (`Candidates`, a required `Provenance` always `Inferred`, and the `CheckRegistryEntry`), `CheckId = "contradiction-check"`. Not a `Finding`-producing check — see below |
+| `SubagentAttribution.cs` | FR-49 (S-43, issue #53): `SubagentRuleDisplay` — closed to `Nothing` (the default) or an explicit, caller-stated `AssumedInherited` (always `Provenance.Inferred`, computed not settable) — and `SubagentObservedContext.From(Agent, taskPrompt, sessionSkills)`, the subagent's own spawn description, task prompt and skill invocations, always `Provenance.Observed`. Neither type infers or guesses a rule set; not a `Finding` |
 
 ## References
 
@@ -74,6 +77,13 @@ supply once that ETL exists, the same way `ToolCallOutcome` is reused directly b
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
 ingestion. See `AecoPostMortem.Ingestion/CLAUDE.md`.
+
+`ContradictionCheck` (issue #47, S-38) is the fourth caller of `Rules`, and the first whose `Rules`
+call takes `Rules.SessionRuleSet`s rather than a plain per-call/per-session operand: FR-43's second
+scenario needs the rule-set-version grouping `Rules.RuleSetVersioning`/`RuleSetVersionScope` already
+established the identity for (repository + `RuleSetVersionHasher.ComputeHash`), and
+`Rules.RuleStatementDeduplication.Deduplicate` for each version's own in-force statement set, before
+`Rules.ContradictionCheck.Run` ever sees them.
 
 `ToolFailureClusterFinding` (issue #51, S-40) is the second caller of `FailedToolCallsCheck`,
 alongside `FailedToolCallsFinding` — both read the identical `ToolFailureRate` result and diverge
@@ -146,6 +156,41 @@ in, before the read-event filter runs — so a session whose only tool call is m
 parser-defect edge case in issue #25) still counts as considered, it just contributes no read
 events. This matches `CheckRegistryEntry`'s own doc comment: population is "the candidate set the
 check considered", defined whether or not the check goes on to find anything.
+
+### FR-33's figure makes the percentage a computed property, so a bare figure is unrepresentable
+
+`AdherenceFigure` (S-24, issue #38) is the story's whole answer to "the API refuses to serve a bare
+figure." The refusal is not a validation step at the endpoint — it is that `Percentage` has no
+setter and is derived from `Adherent.CallCount` and `Divergent`'s call counts, so a percentage
+cannot be constructed apart from the operands that produced it, and cannot drift from them
+afterwards. `RuleVersion`, `Adherent` and `Divergent` are all `required` (CS9035 on omission), the
+same guarantee `Finding.Provenance` gives, and `Api.FindingEnvelope.Adherence` therefore needs
+exactly one member (`Figure`) rather than three a caller could pair wrongly. This is the same move
+`Rules.FailureRate` already makes for its own percentage, applied one level up to the figure a
+client actually reads.
+
+`Adherent` is a single `required` member rather than the first element of one operand list on
+purpose: an empty list is representable in the type system, a missing required member is not, so
+"at least one operand's layer is always stated" holds structurally rather than by a length check.
+`Operands` (adherent side first) is computed from the two, so the served list can neither be
+omitted nor disagree with them.
+
+A zero-occurrence rule yields `Percentage == null`, never `0` — PRD §5.5 tolerates zero
+occurrences, so the figure still ships with its operands and their layers and says plainly that
+there is no percentage. `0%` of nothing would read as measured disobedience. Same rule `Guardrail`
+follows for a share with no adjudicated findings behind it.
+
+`FromTwoOperands` is the bridge to S-23 (issue #37): it takes `OperandResolver.ResolveTwoOperands`'
+own result plus the corpus it was resolved against and only *counts calls* — it never re-decides
+which tools an operand owns, so FR-32's A-wins subtraction is preserved rather than reapplied here.
+An operand that resolved through `OperandResolutionLayer.Unresolved` still appears on the figure
+with a zero count; dropping it would silently shrink the denominator, which is exactly the kind of
+invisible choice the measured fivefold spread came from.
+
+`Layer` is `Rules.OperandResolutionLayer` itself, not a string: the four layers are the only answers
+FR-31 admits, and a string would let a caller invent a fifth. This is also why FR-33's figure lives
+in `Findings` and not `Rules` — it names no tool itself, but it composes `Rules`' output with call
+counts the orchestration layer resolved, which is this project's job by Repo Rule 6.
 
 ### A Waste finding carries its rate in Evidence, never in Resolution
 
@@ -235,6 +280,9 @@ S-36's own edge case says the masthead's totals are the one place this surface c
 and it must not (counting a million rows measured 126 ms on SQLite and 118 ms on Postgres —
 `docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`). `MastheadCounters`
 is therefore a plain input record — "the stored counters maintained at ingest", not a live count —
+(the same guarantee is enforced again one layer out, where it actually costs something: this project
+has no `Data` reference at all, so `AecoPostMortem.Api`'s `MastheadEnvelopeStructureTests` guards the
+served masthead, which does sit in a project that can reach the store)
 the same reasoning `HookFailureFinding.Build` and `FailedToolCallsFinding` give for taking plain
 inputs instead of reading through `Data` directly: no code in this repository yet writes those
 counters at ingest time, so the caller (a later story) supplies them. `ProcessDigestStructureTests`
@@ -457,6 +505,42 @@ ignore" action and the guardrail's rendering will build against; nothing in this
 writes an `OperatorResponseRecord` from a real operator action or persists `OperatorResponseLog`
 across runs.
 
+### A subagent's rules are `Nothing` or an explicit `Inferred` assumption — never derived
+
+FR-49 (S-43, issue #53) exists because Copilot's own system prompt carries no agent id: there is no
+event anywhere in RAW this product could quote as "the rules this subagent ran under," unlike a
+session's own rule set (`RuleStatementExtractor`, S-19, which reads real `<custom_instruction>`
+blocks). `SubagentRuleDisplay` is closed to exactly two shapes through a private constructor, the
+same closed-union reasoning `SessionTokenFigures` uses for its own absent state:
+`SubagentRuleDisplay.Nothing` (the default, and the story's own preferred outcome — the edge case
+says showing nothing "is an acceptable, preferred outcome over a labelled guess appearing in the
+digest's ranked list") or `SubagentRuleDisplay.AssumedInherited`, built only from rule statements a
+caller supplies on purpose. Nothing in this type walks `Data.Execution.Agent.ParentAgentId` or any
+other structural link to *derive* an inheritance assumption — that would be exactly the guess the
+edge case forbids ("do not try to infer or guess a subagent's rule set from context"). A future
+caller that wants to assume a subagent inherited its spawning session's own rule set resolves that
+rule set itself (S-19/S-20) and passes it to `AssumedInherited` explicitly; this type only enforces
+that whatever comes out the other side is labelled `Provenance.Inferred` — a computed property, not
+a settable field, so `InheritedRuleSetAssumption` cannot be constructed carrying any other
+provenance (Scenario 1).
+
+### `SubagentObservedContext` is a second, wholly separate contract from the rule-display question
+
+Scenario 2 needs three facts genuinely on record for a subagent — its spawn description, its task
+prompt, its own skill invocations — reported as Observed, never mixed into the same type as the
+rule-display question above (a caller could otherwise be tempted to read "we have Observed context"
+as license to also assert a rule set). `SpawnDescription` reads `Agent.Description` verbatim
+(`subagent.started.data.agentDescription`, S-49) and `SkillInvocations` filters the session's own
+`Skill` rows to `OwnerKind.Agent` with a matching `AgentId` — never a parent's or a sibling's
+invocations, the same "never a parent's" discipline `ExecutionRecordBuilder` documents for
+`ToolCall.TurnId` being `null` on a subagent's own calls. `TaskPrompt` is a plain, caller-supplied
+input rather than read off `Data` directly: no derived entity yet carries the spawning `task` call's
+own prompt argument — `ToolCall` has no `Arguments` column, only `Path` is extracted today
+(`AecoPostMortem.Ingestion/CLAUDE.md`, "arguments is parsed polymorphically") — the same
+not-yet-wired gap `PhaseChurnFinding` documents for its own `DeclaredIntent` input. `Provenance` is
+again a computed property fixed to `Observed`, never settable, so this shape cannot accidentally
+carry any other provenance value.
+
 ### `ToolFailureClusterFinding`'s cross-reference is an already-resolved plain input, not a substring match
 
 Scenario 2 of issue #51 needs to know which tool identity a rule mandates — the same "which real
@@ -507,6 +591,36 @@ Inferred`, `FindingClass.MissingCapability` — Epic E8, "the highest-value find
 provenance," PRD Phase D). Two `CheckId`s (`"failed-tool-calls"` vs. `"tool-failure-clusters"`) over
 one shared computation, not one check registered twice.
 
+### `ContradictionCheck` produces no `Finding` — it is a special-purpose check, like `MalformedLineCheck` and `SpawnResolutionCheck`
+
+`CheckRegistryEntry`'s own remarks name three "PRD §3.9 special-purpose checks" that use the
+abstract `CheckId` string rather than one of `FindingClassRegistry`'s four closed classes:
+contradiction, unresolvable-spawn, malformed-line. The other two (`Ingestion.MalformedLineCheck`,
+`Ingestion.SpawnResolutionCheck`) already register a `CheckRegistryEntry` directly with no `Finding`
+in between — a contradiction is not rule adherence, waste, or a missing capability (PRD §3.3's own
+four-item table), so forcing one onto an existing `FindingClass` would either misrepresent what it
+is or require widening the closed set for one check. `ContradictionCheck.Result.Provenance` carries
+FR-43's "never Observed" requirement directly instead, as a `required` member on this project's own
+result type set unconditionally to `Provenance.Inferred` — the same "fails construction by being
+required, not by validating" reasoning `Finding.Provenance` already documents above — because this
+check can only ever confirm that two statements' surface keyword polarity conflicts, never that
+their meaning genuinely does.
+
+### `ContradictionCheck.Run` groups by rule-set version, never comparing across one
+
+FR-43 Scenario 2 ("it compares only statements in force together") is a stronger requirement than
+`RuleSetVersionScope.RequireSingleVersion`'s refusal: a corpus spans many rule-set versions over
+time by design, and the check has to find contradictions *within* each one, not refuse the moment
+more than one version is present in its input. `ContradictionCheck.Run` therefore groups the
+sessions it is handed by `RuleSetVersionId` (`Repository` + `RuleSetVersionHasher.ComputeHash`,
+the identical identity `RuleSetVersioning.Compute` already uses) and calls
+`Rules.ContradictionCheck.Run` once per group — a statement from one version's block set is
+therefore never even placed in the same list as a statement from another, structurally, not by a
+version-equality check inside the pairwise loop. `Population` on the resulting
+`CheckRegistryEntry` is the total session count across every version in the input (matching PRD
+§3.9's own worked phrasing, "a measured 0 contradictions found across 35 sessions checked" — sessions,
+not statements), while `FindingCount` sums candidates found across all versions combined.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
@@ -546,6 +660,16 @@ textually distinct sentence per provenance level, served on `Api.FindingEnvelope
 S-54" above) — `web/src/routes/DigestPage.tsx` is no longer the `ComingSoon` placeholder either
 story left it as.
 
+`AdherenceFigure` (issue #38, S-24, FR-33) publishes the shape every adherence percentage is served
+through: the percentage computed from its per-operand call counts, each operand's S-23 resolution
+layer, and the `RuleSetVersionId` it was scoped to. `Api.FindingEnvelope.Adherence` carries it as its
+one `required` member, and `web/src/digest/AdherenceFigureBlock.tsx` renders it. No check in this
+project produces one yet — no `RuleAdherenceToolChoice` check exists (S-25/S-26 build the operand
+extraction it would need), so `FromTwoOperands` is exercised against `Rules.OperandResolver` directly
+by `AdherenceFigureTests` rather than by a real check. This is the same contract-first pattern
+`SessionTokenFigures` and `ProcessDigest.Build` used: the type makes the bare figure unrepresentable
+now, so every later producer inherits the guarantee instead of re-earning it.
+
 `SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract, now consumed by the masthead
 it was published ahead of: `SessionRecording.Build` calls `From(Session)` for
 `SessionMasthead.ContextSize`.
@@ -573,3 +697,19 @@ subagent spawn unresolved — are decided here, from `Session.EndedAt` and an al
 Api.ApiHost.GetSession` is the first and only caller that supplies a real `spawnResolution` value,
 by running the session's own RAW events through `Ingestion.ExecutionRecordBuilder` purely for that
 diagnostic (`AecoPostMortem.Api/CLAUDE.md`).
+
+`ContradictionCheck` (issue #47, S-38, FR-43) publishes the third of PRD §3.9's special-purpose
+checks, alongside `Ingestion.MalformedLineCheck` and `Ingestion.SpawnResolutionCheck`: pairwise,
+self-match-excluding, keyword-polarity detection (`Rules.ContradictionCheck`) scoped to one
+rule-set version at a time and registered on the "checks that found nothing" surface FR-42 (S-37,
+issue #46) already published a `"contradiction-check"`-shaped test for ahead of this story landing.
+No corpus-wide caller wires a real store's sessions into it yet — like every other check-shape
+story in this project, it publishes the contract the eventual analysis-run orchestrator (the `run`
+CLI command, not yet built) will call.
+
+`SubagentRuleDisplay` and `SubagentObservedContext` (issue #53, S-43, FR-49) publish the same
+contract-first pattern for a subagent's rules and its own context: no CLI command or
+`AecoPostMortem.Api` envelope serves either yet — that wiring, and whatever caller eventually
+decides to construct an `AssumedInherited` display, are later work (plausibly S-52/S-53's own
+inspector tabs, which already own the session-page rendering this would slot into) this story only
+makes possible.

@@ -9,7 +9,7 @@
 .finding-row__summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.9rem;
   width: 100%;
   padding: 0.6rem 0.9rem;
   border: none;
@@ -23,7 +23,32 @@
   background: #f7f8fa;
 }
 
+/* S-36's edge case, in layout terms: the ranking key is the largest thing on the row and always
+   occupies the same leading column, so scanning down the list compares session counts against each
+   other rather than against whatever length each finding's own key happens to be. One session
+   against thirty has to be obvious without reading either row. */
+.finding-row__sessions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 4.5rem;
+  line-height: 1.1;
+}
+
+.finding-row__sessions-count {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.finding-row__sessions-unit {
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5b6470;
+}
+
 .finding-row__key {
+  flex: 1 1 auto;
   font-family: ui-monospace, monospace;
   font-size: 0.9rem;
 }

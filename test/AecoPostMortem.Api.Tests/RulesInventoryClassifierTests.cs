@@ -3,18 +3,20 @@ using AecoPostMortem.Rules;
 namespace AecoPostMortem.Api.Tests;
 
 /// <summary>
-/// FR-40's classify function. Every statement the catalogue matched to a shape other than
-/// <see cref="RuleShapeKind.PreferAOverB"/> is <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>
-/// — no built check watches those shapes against the real corpus yet (the same gap
-/// <c>ToolVocabularyMismatchCheck</c> not being wired into <c>ApiHost.GetDigest</c> documents) — and
-/// FR-34's own two unmatched dispositions map onto FR-40's remaining two statuses this piece can
-/// answer honestly: <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> is also
+/// FR-40's classify function. Every statement the catalogue matched to a shape none of
+/// <see cref="RuleShapeKind.PreferAOverB"/>, <see cref="RuleShapeKind.ToolIsBanned"/> or
+/// <see cref="RuleShapeKind.NeverReadPath"/> is <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>
+/// — no built check watches <see cref="RuleShapeKind.UseAAfterB"/> or
+/// <see cref="RuleShapeKind.AlwaysPassParam"/> against the real corpus yet — and FR-34's own two
+/// unmatched dispositions map onto FR-40's remaining two statuses this piece can answer honestly:
+/// <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> is also
 /// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, and
 /// <see cref="UnmatchedStatementDisposition.NotCheckable"/> is <see cref="RuleStatementStatus.NotARule"/>.
-/// A <see cref="RuleShapeKind.PreferAOverB"/> match is the one shape this classifier now actually
-/// watches: it resolves both operands against the real <see cref="ToolInvocationShape"/> corpus via
-/// <see cref="OperandResolver.ResolveTwoOperands"/>, and reports <see cref="RuleStatementStatus.Watched"/>
-/// only when both sides resolve to at least one real tool.
+/// A <see cref="RuleShapeKind.PreferAOverB"/> match resolves both operands against the real
+/// <see cref="ToolInvocationShape"/> corpus via <see cref="OperandResolver.ResolveTwoOperands"/> and is
+/// <see cref="RuleStatementStatus.Watched"/> only when both sides resolve; a
+/// <see cref="RuleShapeKind.ToolIsBanned"/> match resolves its one operand the same way. A
+/// <see cref="RuleShapeKind.NeverReadPath"/> match is watched unconditionally — see its own test below.
 /// </summary>
 public sealed class RulesInventoryClassifierTests
 {
@@ -30,7 +32,7 @@ public sealed class RulesInventoryClassifierTests
     [Fact]
     public void A_statement_the_catalogue_matched_to_an_unwatched_shape_is_checkable_not_yet_built()
     {
-        var statement = Statement("Never read secrets.env.");
+        var statement = Statement("Always pass an explicit encoding parameter.");
 
         var classify = Classify(statement);
 
@@ -129,5 +131,20 @@ public sealed class RulesInventoryClassifierTests
         var classify = Classify(statement, invocations);
 
         Assert.Equal(RuleStatementStatus.CheckableNotYetBuilt, classify(statement));
+    }
+
+    [Fact]
+    public void A_never_read_path_match_is_watched_even_against_an_empty_corpus()
+    {
+        // Unlike a tool-name operand, a path operand always produces a determinate real/no-access
+        // verdict against the ToolCall corpus (Rules/NeverReadPathCheck.cs) — there is no
+        // "unresolved" state for a path the way there is for a tool name, so a matched
+        // NeverReadPath statement is Watched unconditionally, not gated on the invocation corpus
+        // this classifier otherwise resolves tool-name operands against.
+        var statement = Statement("Never read `src/Secrets/`.");
+
+        var classify = Classify(statement);
+
+        Assert.Equal(RuleStatementStatus.Watched, classify(statement));
     }
 }

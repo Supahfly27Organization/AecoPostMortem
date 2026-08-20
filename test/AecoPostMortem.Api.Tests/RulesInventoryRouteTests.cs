@@ -59,7 +59,7 @@ public sealed class RulesInventoryRouteTests
     const string Prompt = """
         <custom_instruction>
         CLAUDE.md
-        - Never read secrets.env.
+        - Always pass an explicit encoding parameter.
         - Task → Read These First
         </custom_instruction>
         """;
@@ -109,7 +109,7 @@ public sealed class RulesInventoryRouteTests
             Assert.Equal(RulesInventoryState.Listed, envelope.State);
             Assert.Equal(2, envelope.Rows.Count);
 
-            var checkable = envelope.Rows.Single(row => row.Text == "Never read secrets.env.");
+            var checkable = envelope.Rows.Single(row => row.Text == "Always pass an explicit encoding parameter.");
             Assert.IsType<RuleStatementStatusEnvelope.CheckableNotYetBuiltStatus>(checkable.Status);
 
             var notARule = envelope.Rows.Single(row => row.Text == "Task → Read These First");

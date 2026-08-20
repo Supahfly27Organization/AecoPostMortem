@@ -16,7 +16,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
 | `SessionRuleSetLookup.cs` | FR-27's own not-yet-wired gap, closed: `SessionRuleSetLookup.BuildAll` resolves a whole store's `RawEvent`s into one `Rules.SessionRuleSet` per `Data.Execution.Session` row, calling `Ingestion.SessionRuleExtractor.Extract` per session — the corpus-wide walk nothing did before this landed |
 | `ToolInvocationShapeLookup.cs` | The real `Rules.ToolInvocationShape` corpus (piece 3), closed: `BuildAll` reads `HasPath`/`McpServerName` straight off `Data.Execution.ToolCall` (already real columns) and `SpawnsAgent` off `Data.Execution.Agent.SpawningToolCallId` (already structural) — no new RAW parsing for any of the three — and reads `HasPattern`/`HasReplacement`/`HasFileText`/`HasCommand` from each call's own RAW `tool.execution_start.data.arguments`, field names verified against the live 35-session reference corpus: `pattern` (`rg`/`grep`/`glob`), `old_str`/`new_str` (`edit`), `file_text` (`create`), `command` (`powershell`). `apply_patch`'s own `arguments` is a JSON string (the whole patch body), not an object — a real wrinkle the corpus check caught — so all four are `false` for a string-shaped call rather than guessed at |
-| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched`; a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; every other matched shape stays `CheckableNotYetBuilt`, and the caller-supplied `NotCheckable(reason)` stays unreachable |
+| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched`; a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` match is `Watched` unconditionally, no resolution involved (piece 3's third slice); every other matched shape stays `CheckableNotYetBuilt`, and the caller-supplied `NotCheckable(reason)` stays unreachable |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles) |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
@@ -85,6 +85,12 @@ Piece 3's second slice (`BannedToolFinding`) widens `GetDigest` a fourth way: it
 `GetRulesInventory` — scoped to the selected repository's own sessions this time, and calls `Rules.
 RuleShapeCatalogue.MatchAll` directly, this method's own first use of that entry point (see this
 file's own remarks below for exactly what is scoped how and why).
+
+Piece 3's third slice (`NeverReadPathFinding`) widens `GetDigest` a fifth way, more narrowly: it
+reuses the identical `RuleShapeMatch` list `BannedToolFinding` already built (renamed
+`ruleShapeMatches` to reflect that both checks now filter it independently) and `scopedToolCalls`
+directly — it needs no `ToolInvocationShape` corpus at all, since `Rules.NeverReadPathCheck` matches
+paths, not tool names.
 
 `ApiHost.GetRulesInventory` (S-22, issue #35) is what that real rule extraction at scale turned out
 to be: it reads `Session`/`RawEvent` corpus-wide (the same two tables `GetDigest` already reads a
@@ -294,14 +300,20 @@ one operand a ban names, `Watched` when it resolves — no `ToolRole` involved, 
 ban's own adherence check needs answered ("was the named tool called at all", `Rules.BannedToolCheck`)
 never needed a role in the first place, once the check was actually designed instead of assumed to
 need `ToolVocabularyMismatchCheck`'s own `RuleToolMention` shape (`Rules/CLAUDE.md`'s two new
-non-obvious-decision entries explain why that check does not fit a prohibition). `NeverReadPath`/
-`UseAAfterB`/`AlwaysPassParam` have no built check at all yet. `RulesInventoryClassifier.
-BuildClassifier` therefore still classifies every other matched shape, and every unmatched statement
-carrying a normative marker (`UnmatchedStatementDisposition.CheckableNotBuilt`), as
-`RuleStatementStatus.CheckableNotYetBuilt`; an unmatched statement carrying none
-(`UnmatchedStatementDisposition.NotCheckable`) still classifies as `RuleStatementStatus.NotARule`.
-The caller-supplied `NotCheckable(reason)` variant is never constructed anywhere in this file — no
-shape's absence is attributed to what the logs cannot record, only to what no check yet watches.
+non-obvious-decision entries explain why that check does not fit a prohibition).
+
+`RuleShapeKind.NeverReadPath` is piece 3's third slice: `Watched` unconditionally, the moment the
+catalogue matches the shape — no `OperandResolver` call at all, unlike `PreferAOverB`/`ToolIsBanned`.
+A path operand always produces a determinate real/no-access verdict against the `ToolCall` corpus
+(`Rules.NeverReadPathCheck`), so there is no `Unresolved` state for it to fall through to the way a
+tool-name operand has. `UseAAfterB`/`AlwaysPassParam` still have no built check at all.
+`RulesInventoryClassifier.BuildClassifier` therefore still classifies every other matched shape, and
+every unmatched statement carrying a normative marker
+(`UnmatchedStatementDisposition.CheckableNotBuilt`), as `RuleStatementStatus.CheckableNotYetBuilt`;
+an unmatched statement carrying none (`UnmatchedStatementDisposition.NotCheckable`) still classifies
+as `RuleStatementStatus.NotARule`. The caller-supplied `NotCheckable(reason)` variant is never
+constructed anywhere in this file — no shape's absence is attributed to what the logs cannot record,
+only to what no check yet watches.
 
 ### `GetDigest`'s seventh check reuses `GetRulesInventory`'s two corpora, scoped to the selected repository instead of corpus-wide
 
@@ -623,6 +635,16 @@ from` immediately followed by a use/call/invoke/run/query verb, which "avoid re-
 renders `CheckableNotYetBuilt`. This is the mechanism reporting an honest empty state, not a bug —
 proven separately at the unit level (`BannedToolCheckTests`, `BannedToolFindingTests`,
 `RulesInventoryClassifierTests`) with a synthetic corpus where a banned tool genuinely was called.
+
+`NeverReadPathFinding`, the eighth (piece 3's third slice), is the first piece-3 adherence check to
+find a real signal on this corpus rather than an honest empty state: the dominant repository carries
+a real `NeverReadPath` rule (`` Never read `UpFront.Data/Migrations/` unless the task is explicitly
+about migrations ``, phrased two ways across rule-set versions), and 99 real tool calls across the
+corpus touched a path under it — verified via the real store's own `tool_call.path` column and via a
+real browser rendering both the `/rules` page's `Watched` badge and two real `RuleAdherenceToolChoice`
+findings on `/` (`DERIVED`, 4 sessions each), zero frontend changes needed. Segment-boundary matching
+was verified not to false-positive on the lookalike `UpFront.Auth.Data/Migrations/` directory, which
+shares no contiguous substring with the rule's own operand.
 
 FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on every shape) and
 `DigestEnvelope.InferredFindings` (served separately from `RankedFindings`, mirroring

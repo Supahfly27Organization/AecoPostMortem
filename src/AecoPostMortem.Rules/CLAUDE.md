@@ -14,6 +14,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
 | `ToolVocabularyMismatchCheck.cs` | FR-35 (S-26, issue #40): `RuleToolMention` (a rule's source text, one named tool, and the `ToolRole` it targets — plain input), `ToolVocabularyMismatch` (sealed base) with `MinorToolNamed`/`NonExistentToolNamed`, and `ToolVocabularyMismatchCheck.Run`, which resolves each mention through `OperandResolver` and compares against the target role's `DominantTool` |
 | `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why `ToolVocabularyMismatchCheck` does not fit a prohibition |
+| `NeverReadPathCheck.cs` | Piece 3's `NeverReadPath` adherence check: `NeverReadPathMention` (a rule's source text and the one path it prohibits — plain input) and `NeverReadPathViolation` (the mention plus how many real `ReadEvent`s matched it and which sessions), and `NeverReadPathCheck.Run`, which matches each mention's path against the corpus on a path-segment boundary (never a bare substring) and reports only mentions with at least one match — no `OperandResolver` involved, since a path operand is not a tool-vocabulary lookup |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -384,6 +385,29 @@ real ban and say nothing, since a banned tool being non-dominant is true almost 
 `BannedToolCheck` answers the actually adherence-worthy question instead — was the named tool called
 at all — with no `ToolRole` involved.
 
+### `NeverReadPathCheck` matches on a path-segment boundary, never a bare substring
+
+A rule's own path operand is typically relative (this repository's own rule, `` Never read
+`src/AecoPostMortem.Data/Migrations/` ``, is itself an example), while a real observed
+`ReadEvent.Path` is absolute — confirmed against the live reference corpus, whose own `ToolCall.Path`
+values are absolute Windows paths (`F:\git\UpFront\...`). An exact-string match would therefore never
+fire, but an unqualified substring match risks the same "confident wrong operand" failure mode this
+project has already been burned by once (`Ingestion/CLAUDE.md`'s own `EventEnvelopeParserV1`
+cautionary tale) — an operand like `Data` would wrongly match a directory named `DataAccessLayer`.
+`NeverReadPathCheck.Matches` normalizes both sides to `/` and requires the operand to align on a `/`
+boundary at both ends (whole path, leading segment run, trailing segment run, or a segment run in the
+middle) — verified against the live corpus: a real rule naming `UpFront.Data/Migrations/` correctly
+matches paths under it and does not match the lookalike `UpFront.Auth.Data/Migrations/` directory,
+since the two do not share a contiguous substring at all.
+
+### `NeverReadPathCheck` needs no `OperandResolver`, unlike every other adherence check in this file
+
+`PreferAOverB` and `ToolIsBanned` both resolve a rule's operand against the corpus' own tool
+vocabulary (`OperandResolver.Resolve`/`.ResolveTwoOperands`) because their operands name tools.
+`NeverReadPath`'s operand names a path, and a path is matched against `ReadEvent.Path` directly — there
+is no tool-name resolution question to ask, so this check is a plain segment-boundary match over its
+own input with no dependency on `OperandResolver` at all.
+
 ### `BannedToolUsage.CallCount` can never be zero for a returned result
 
 Every layer `OperandResolver.Resolve` can return (`ExactToolName`, `McpServerField`, `DerivedRole`)
@@ -677,11 +701,12 @@ through it, resolves the matched operands against that corpus's tools, or render
 that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
-eight entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+nine entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
 `AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19),
-`ToolVocabularyMismatchCheck` (issue #40, FR-35) and `BannedToolCheck` (piece 3's second slice,
-FR-35's `ToolIsBanned` counterpart). The shape they establish — plain per-call/per-session/per-turn/
+`ToolVocabularyMismatchCheck` (issue #40, FR-35), `BannedToolCheck` (piece 3's second slice,
+FR-35's `ToolIsBanned` counterpart) and `NeverReadPathCheck` (piece 3's third slice, FR-35's
+`NeverReadPath` counterpart). The shape they establish — plain per-call/per-session/per-turn/
 per-mention input records in, structurally-required or structurally-paired results out, no branch on
 any specific tool name — is the pattern later checks in this project should follow.
 
@@ -692,6 +717,20 @@ does not fit a prohibition, and why `BannedToolUsage.CallCount` can never be zer
 result. `AecoPostMortem.Findings.BannedToolFinding` is the real caller, wired into
 `AecoPostMortem.Api.ApiHost.GetDigest` as a seventh check orchestrator, and
 `RulesInventoryClassifier` now also watches a `ToolIsBanned` match whose single operand resolves.
+
+`NeverReadPathCheck` (piece 3's third slice) closes the `NeverReadPath` gap the same way: no
+`OperandResolver` involved, only a path-segment-boundary match against real `ReadEvent`s (see this
+file's own remarks above for why an exact or bare-substring match were both rejected).
+`AecoPostMortem.Findings.NeverReadPathFinding` is the real caller, wired into `AecoPostMortem.Api.
+ApiHost.GetDigest` as an eighth check orchestrator, and `RulesInventoryClassifier` now watches every
+matched `NeverReadPath` statement unconditionally — unlike a tool-name operand, a path operand always
+produces a determinate verdict against the corpus, so there is no `Unresolved` state to fall through
+to. Verified against the live 35-session reference corpus: the dominant repository
+(`supahfly27/UpFront`) carries a real `NeverReadPath` rule (`` Never read `UpFront.Data/Migrations/`
+unless the task is explicitly about migrations `` — phrased two ways across rule-set versions), and
+the check found a real violation: 99 real accesses to that path across the corpus, now a genuine
+`RuleAdherenceToolChoice` finding — the first piece-3 adherence check on this corpus to find a real
+signal rather than an honest empty state.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

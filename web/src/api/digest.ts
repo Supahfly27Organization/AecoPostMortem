@@ -3,12 +3,11 @@
 // field shapes are the contract between the .NET host and this client; keep both in sync by hand
 // until a generated client exists (the same gap `web/src/api/appState.ts` documents).
 //
-// `/api/digest` is not served by `ApiHost` yet — FR-41's real orchestration (assembling
-// `MastheadCounters`, a `CheckRegistry` and every `Finding` from the live store into one
-// `ProcessDigest`) is later work no story has wired yet. `fetchDigest`/`useDigest` target the route
-// ahead of that wiring, the same seam `fetchAppState`/`useAppState` established for `/api/app-state`
-// before S-48 served it for real: the moment a future story serves this route, this page starts
-// rendering live data with no frontend change.
+// `/api/digest` is served for real by `ApiHost.GetDigest` (S-36, issue #44): six of the seven
+// waste/missing-capability check orchestrators, `MastheadCounters` and a `RepositoryScope`, all
+// assembled into one `ProcessDigest`. `fetchDigest`/`useDigest` had targeted the route ahead of that
+// wiring, the same seam `fetchAppState`/`useAppState` established for `/api/app-state` before S-48
+// served it for real — and the prediction held: this file needed no change once the route went live.
 
 export const DigestRoute = '/api/digest'
 

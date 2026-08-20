@@ -86,16 +86,17 @@ test (`ApiHostTests.The_kind_field_is_serialised_as_camelCase_on_the_wire`) that
 because this hand-kept contract drifted silently once already (a missing naming policy shipped
 `"EmptyStore"` instead of `"emptyStore"`, and neither side's mocked tests caught it).
 
-### `/api/digest` is not served yet — `DigestPage` targets the seam, not a live endpoint
+### `/api/digest` is served for real, with no frontend change needed to light it up
 
-FR-41's real orchestration (assembling `MastheadCounters`, a `CheckRegistry` and every `Finding`
-from the live store into one `ProcessDigest`) is later work no story has wired into `ApiHost` yet
-(`AecoPostMortem.Api/CLAUDE.md`). `fetchDigest`/`useDigest` target `/api/digest` ahead of that
-wiring anyway, the same seam `fetchAppState`/`useAppState` established for `/api/app-state` before
-S-48 served it for real — today a real browser sees `DigestPage`'s own "Could not reach the local
-API" message; the moment a future story serves the route, this page starts rendering live data with
-no frontend change. `DigestPage.test.tsx` and `App.routing.test.tsx` mock `/api/digest`'s response
-directly rather than waiting for that wiring.
+FR-41's real orchestration (six of the seven check orchestrators plus `MastheadCounters` and a
+`RepositoryScope`, all assembled into one `ProcessDigest`) landed in `ApiHost.GetDigest`
+(`AecoPostMortem.Api/CLAUDE.md`, S-36, issue #44). `fetchDigest`/`useDigest` had targeted `/api/digest`
+ahead of that wiring, the same seam `fetchAppState`/`useAppState` established for `/api/app-state`
+before S-48 served it for real — and the prediction held: a real browser against the live 35-session
+reference corpus now renders the masthead and 295 ranked findings with the exact frontend code that
+was already here, no change required. `DigestPage.test.tsx` and `App.routing.test.tsx` still mock
+`/api/digest`'s response directly rather than standing up a real store, the same as every other
+route's tests.
 
 ### The tape's virtualisation math is driven by fixed constants, never by measuring the real DOM
 
@@ -342,9 +343,9 @@ The Process Digest (`routes/DigestPage.tsx`, `api/digest.ts`, `api/useDigest.ts`
 real content — S-36 (issue #44) built the masthead/ranking contract and, in a follow-up, the rendered
 masthead (`digest/Masthead.tsx`), the prominent `sessionsAffected` count on each row, and the three
 designed states' distinct wording; S-54 (issue #45) built row expansion, the recurrence strip, the
-repository scope contract and this route's actual UI. No story
-has wired `/api/digest` to real derived data yet (see the non-obvious decision above), so today the
-route always renders its own loading/error state against a real browser.
+repository scope contract and this route's actual UI. `/api/digest` is now wired to real derived data
+(`ApiHost.GetDigest`, `AecoPostMortem.Api/CLAUDE.md`) — a real browser today renders the live corpus'
+masthead and ranked findings with no change to any file in this directory.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
 `session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,

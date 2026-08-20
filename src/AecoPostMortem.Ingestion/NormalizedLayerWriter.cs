@@ -7,12 +7,11 @@ namespace AecoPostMortem.Ingestion;
 /// Derives one session's NORMALIZED rows from its own RAW events and writes them, replacing
 /// whatever was there before — never patched incrementally, the same "re-derived from RAW, not
 /// migrated" discipline the rest of the derived layer follows. Ties together
-/// <see cref="SessionBuilder"/>, <see cref="ExecutionRecordBuilder"/>, <see cref="SkillBuilder"/>
-/// and <see cref="HookBuilder"/>, which is what <c>ingest</c> and <c>rebuild</c> both call instead of
-/// leaving the six tables empty. <see cref="AecoPostMortem.Data.Execution.Permission"/> and
-/// <see cref="AecoPostMortem.Data.Execution.WriteUnit"/> are deliberately not written here: nothing
-/// that reads a live store needs them yet (the Flight Recorder's <c>GetSession</c> reads exactly the
-/// six tables this writer populates), and <c>WriteUnit</c> stays empty until Phase E regardless.
+/// <see cref="SessionBuilder"/>, <see cref="ExecutionRecordBuilder"/>, <see cref="SkillBuilder"/>,
+/// <see cref="HookBuilder"/> and <see cref="PermissionBuilder"/>, which is what <c>ingest</c> and
+/// <c>rebuild</c> both call instead of leaving the seven tables empty.
+/// <see cref="AecoPostMortem.Data.Execution.WriteUnit"/> is the one table still deliberately not
+/// written here: it stays empty until Phase E regardless (FR-36, PRD §3.4.3).
 /// </summary>
 public static class NormalizedLayerWriter
 {
@@ -47,6 +46,7 @@ public static class NormalizedLayerWriter
         var record = ExecutionRecordBuilder.Build(sessionId, events);
         var skills = SkillBuilder.Build(sessionId, events);
         var hooks = HookBuilder.Build(sessionId, events);
+        var permissions = PermissionBuilder.Build(sessionId, events);
 
         context.Sessions.Add(session);
         context.Turns.AddRange(record.Turns);
@@ -54,18 +54,19 @@ public static class NormalizedLayerWriter
         context.Agents.AddRange(record.Agents);
         context.Skills.AddRange(skills);
         context.Hooks.AddRange(hooks);
+        context.Permissions.AddRange(permissions);
 
         context.SaveChanges();
     }
 
     /// <summary>
-    /// Removes <paramref name="sessionId"/>'s rows from all six derived tables this writer owns, via
-    /// bulk <c>ExecuteDelete</c> the same way <see cref="RawEventBatch.DeleteBySession"/> purges RAW
-    /// for a retroactively excluded session — no per-entity tracking cost for a delete this shaped.
-    /// Exposed separately from <see cref="Derive"/> so a session excluded after already being ingested
-    /// can have its NORMALIZED rows purged too, not only its RAW ones (FR-7's "no event from that
-    /// session is persisted" has to hold for the derived layer as well, or the Flight Recorder would
-    /// still show a session the operator asked to exclude).
+    /// Removes <paramref name="sessionId"/>'s rows from all seven derived tables this writer owns,
+    /// via bulk <c>ExecuteDelete</c> the same way <see cref="RawEventBatch.DeleteBySession"/> purges
+    /// RAW for a retroactively excluded session — no per-entity tracking cost for a delete this
+    /// shaped. Exposed separately from <see cref="Derive"/> so a session excluded after already being
+    /// ingested can have its NORMALIZED rows purged too, not only its RAW ones (FR-7's "no event from
+    /// that session is persisted" has to hold for the derived layer as well, or the Flight Recorder
+    /// would still show a session the operator asked to exclude).
     /// </summary>
     public static void DeleteForSession(PostMortemContext context, string sessionId)
     {
@@ -78,6 +79,7 @@ public static class NormalizedLayerWriter
         context.Agents.Where(row => row.SessionId == sessionId).ExecuteDelete();
         context.Skills.Where(row => row.SessionId == sessionId).ExecuteDelete();
         context.Hooks.Where(row => row.SessionId == sessionId).ExecuteDelete();
+        context.Permissions.Where(row => row.SessionId == sessionId).ExecuteDelete();
 
         // ExecuteDelete issues SQL directly and never touches the change tracker (the same reason
         // RawEventBatch's own append bypasses it) — a row this same context added and saved earlier

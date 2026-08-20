@@ -53,15 +53,16 @@ calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both re
 `AecoPostMortem.Data.Execution.Turn` and calls `AecoPostMortem.Rules.AbortedTurnCheck` — the second
 check, after `RepeatedFileReadFindingCheck`, to read a real derived entity rather than take plain
 inputs, because `Turn.AbortReason` and `Turn.Outcome` already carry everything FR-18 needs. The
-`Data` reference is still not used by `HookFailureFinding` or `FailedToolCallsFinding`:
+`Data` reference is still not used by `HookFailureFinding` or `FailedToolCallsFinding` themselves:
 `HookFailureFinding.Build` takes plain inputs (`allSessionIds`, `sessionsWithToolCall`,
-`HookFailureEvent`s) rather than querying `PostMortemContext` directly, because no code in this
-repository yet turns `raw_event` into the `Hook`/`ToolCall` rows a real query would read — that ETL
-is a separate, not-yet-built story. `FailedToolCallsFinding`'s tests likewise build `ToolCallOutcome`
-operands directly rather than reading through `PostMortemContext`; the query that resolves
-`ToolCall` rows into that plain shape for this check is later work (S-40). The caller that
-eventually does read through `Data` for these two supplies their plain inputs from the derived
-tables once that pipeline exists.
+`HookFailureEvent`s) and `FailedToolCallsFinding.Run` takes `ToolCallOutcome` operands, rather than
+either querying `PostMortemContext` directly — both stay pure orchestration over caller-supplied
+plain shapes. `AecoPostMortem.Api.ApiHost.GetDigest` (S-36, issue #44) is the real caller that
+resolves both today: `HookFailureEvent`'s error text still cannot come from
+`Data.Execution.Hook` (no error column, by design — evidence quotes the RAW event, not the derived
+projection), so `Api.HookFailureEventLookup` reads a session's own RAW `hook.end` events for it
+instead of widening the derived layer; `ToolCallOutcome` is built straight from
+`Data.Execution.ToolCall` (`ApiHost.ToToolCallOutcomes`, S-40's own not-yet-built query, now built).
 
 `SessionTokenFigures` (issue #20) also uses the `Data` reference directly — `From` takes a
 `Session` and reads its own nullable token fields, no `Rules` call involved: there is no rate or
@@ -70,11 +71,16 @@ presence test.
 
 `PhaseChurnFinding` (issue #29) takes `Rules.DeclaredIntent` operands directly, for the same reason:
 `Data.Execution.ToolCall` carries no field for `report_intent`'s `intent` argument (only `Path`,
-added for reads), and `ToolArguments` is not yet wired into the `RawEvent`-to-`ToolCall` pipeline
-(`AecoPostMortem.Ingestion/CLAUDE.md`) — so there is no real query today that could resolve a
-`report_intent` call's phase label. `DeclaredIntent` already is the plain shape a future caller would
-supply once that ETL exists, the same way `ToolCallOutcome` is reused directly by
-`FailedToolCallsFinding` rather than wrapped in a second Findings-owned type.
+added for reads), and `ToolArguments` is still not wired into the `RawEvent`-to-`ToolCall` pipeline
+(`AecoPostMortem.Ingestion/CLAUDE.md`) — so there is still no real *query* that could resolve a
+`report_intent` call's phase label off a derived table. `AecoPostMortem.Api.DeclaredIntentLookup`
+(S-36, issue #44) is the real caller today, and it does not wait for that ETL widening: it reads a
+session's own RAW `tool.execution_start` events directly and calls `Ingestion.ToolArguments.Parse`
+itself, the same narrow-RAW-read pattern `Api.HookFailureEventLookup` uses for its own not-yet-wired
+evidence — a documented alternative to widening `ToolCall`, not the ETL this paragraph once expected.
+`DeclaredIntent.Sequence` is the call's own RAW timestamp read as Unix milliseconds rather than
+`RawEvent.Sequence`, which only orders events within one session, not across the whole corpus
+`PhaseOrdering.Derive` needs.
 
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
@@ -714,10 +720,12 @@ hand.
 
 `ProcessDigest.Build` (issue #44, S-36, FR-41 part 1) ranks whatever findings are handed to it
 by distinct sessions affected and states the masthead's designed states
-(`NotYetAnalyzed`/`Incomplete`/`Analyzed`, `RuleCoverageStatus.NotYetAnalyzed`). It takes
-`MastheadCounters` as a plain input — nothing in this repository yet writes those counters at ingest
-time, the same not-yet-wired gap `HookFailureFinding` and `FailedToolCallsFinding` document for their
-own `Data` reads. `RepositoryScope` (issue #45, S-54, FR-41 part 2) is now a required parameter too,
+(`NotYetAnalyzed`/`Incomplete`/`Analyzed`, `RuleCoverageStatus.NotYetAnalyzed`). It still takes
+`MastheadCounters` as a plain input — nothing in this repository maintains a *persisted*, ingest-time
+counter for it — but `AecoPostMortem.Api.ApiHost.GetDigest` (S-36, issue #44) is a real caller now,
+and it resolves the counters itself via a corpus-wide in-memory reduction rather than waiting on that
+persistence layer (`AecoPostMortem.Api/CLAUDE.md`'s own remarks on why that scope cut is still inside
+budget at this corpus' scale). `RepositoryScope` (issue #45, S-54, FR-41 part 2) is now a required parameter too,
 the same already-resolved-plain-input shape. Row expansion and the recurrence strip themselves needed
 no new domain type — `Finding.Evidence`, `.Provenance`, `.Recurrence` and `.Suggestion` (via
 `FindingEnvelope`/`SuggestionEnvelope` in `AecoPostMortem.Api`) already carried everything FR-41 part

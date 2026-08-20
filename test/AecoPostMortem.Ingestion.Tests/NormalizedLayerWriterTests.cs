@@ -5,10 +5,11 @@ namespace AecoPostMortem.Ingestion.Tests;
 
 /// <summary>
 /// Ties <see cref="SessionBuilder"/>, <see cref="AecoPostMortem.Ingestion.ExecutionRecordBuilder"/>,
-/// <see cref="SkillBuilder"/> and <see cref="HookBuilder"/> together into the writer <c>ingest</c>
-/// and <c>rebuild</c> both call: derive one session's NORMALIZED rows from its own RAW events,
-/// replacing whatever was there before. Before this, nothing in the repository ever wrote these six
-/// tables, so <c>AecoPostMortem.Api.ApiHost.GetSession</c> always 404'd against a real store.
+/// <see cref="SkillBuilder"/>, <see cref="HookBuilder"/> and <see cref="PermissionBuilder"/>
+/// together into the writer <c>ingest</c> and <c>rebuild</c> both call: derive one session's
+/// NORMALIZED rows from its own RAW events, replacing whatever was there before. Before the first
+/// four of these landed, nothing in the repository ever wrote their tables, so
+/// <c>AecoPostMortem.Api.ApiHost.GetSession</c> always 404'd against a real store.
 /// </summary>
 public sealed class NormalizedLayerWriterTests
 {
@@ -32,6 +33,10 @@ public sealed class NormalizedLayerWriterTests
         Event(sessionId, 4, "skill.invoked", "2026-05-07T14:16:52.000Z", "e4", new { name = "a-skill" }),
         Event(sessionId, 5, "hook.start", "2026-05-07T14:16:53.000Z", "e5", new { hookInvocationId = "inv-1", hookType = "sessionStart" }),
         Event(sessionId, 6, "hook.end", "2026-05-07T14:16:54.000Z", "e6", new { hookInvocationId = "inv-1", hookType = "sessionStart", success = true }),
+        Event(sessionId, 7, "permission.requested", "2026-05-07T14:16:55.000Z", "e7",
+            new { requestId = "req-1", permissionRequest = new { toolCallId = "tc-1" } }),
+        Event(sessionId, 8, "permission.completed", "2026-05-07T14:16:56.000Z", "e8",
+            new { requestId = "req-1", toolCallId = "tc-1", result = new { kind = "approved" } }),
     ];
 
     static void Seed(PostMortemContext context, IEnumerable<RawEvent> events)
@@ -78,6 +83,20 @@ public sealed class NormalizedLayerWriterTests
     }
 
     [Fact]
+    public void Deriving_a_session_writes_its_permissions()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        using var context = workspace.Store.Open();
+        Seed(context, AFullSession("session-1"));
+
+        NormalizedLayerWriter.Derive(context, "session-1");
+
+        var permission = Assert.Single(context.Permissions);
+        Assert.Equal("req-1", permission.EventId);
+        Assert.Equal("approved", permission.ResultKind);
+    }
+
+    [Fact]
     public void Deriving_the_same_session_twice_replaces_rather_than_duplicates()
     {
         using var workspace = new IngestionTestWorkspace();
@@ -92,6 +111,7 @@ public sealed class NormalizedLayerWriterTests
         Assert.Single(context.ToolCalls);
         Assert.Single(context.Skills);
         Assert.Single(context.Hooks);
+        Assert.Single(context.Permissions);
     }
 
     [Fact]
@@ -166,6 +186,7 @@ public sealed class NormalizedLayerWriterTests
         Assert.Empty(context.ToolCalls.Where(t => t.SessionId == "session-1"));
         Assert.Empty(context.Skills.Where(s => s.SessionId == "session-1"));
         Assert.Empty(context.Hooks.Where(h => h.SessionId == "session-1"));
+        Assert.Empty(context.Permissions.Where(p => p.SessionId == "session-1"));
 
         Assert.Single(context.Sessions.Where(s => s.SessionId == "session-2"));
     }

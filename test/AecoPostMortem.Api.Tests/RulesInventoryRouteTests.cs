@@ -59,7 +59,7 @@ public sealed class RulesInventoryRouteTests
     const string Prompt = """
         <custom_instruction>
         CLAUDE.md
-        - Always pass an explicit encoding parameter.
+        - Never commit a file larger than five megabytes.
         - Task → Read These First
         </custom_instruction>
         """;
@@ -109,7 +109,7 @@ public sealed class RulesInventoryRouteTests
             Assert.Equal(RulesInventoryState.Listed, envelope.State);
             Assert.Equal(2, envelope.Rows.Count);
 
-            var checkable = envelope.Rows.Single(row => row.Text == "Always pass an explicit encoding parameter.");
+            var checkable = envelope.Rows.Single(row => row.Text == "Never commit a file larger than five megabytes.");
             Assert.IsType<RuleStatementStatusEnvelope.CheckableNotYetBuiltStatus>(checkable.Status);
 
             var notARule = envelope.Rows.Single(row => row.Text == "Task → Read These First");

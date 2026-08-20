@@ -126,8 +126,9 @@ public static class RuleShapeCatalogue
             // the strength of a position it had already moved past.
             for (var found = entry.Pattern.Match(statement.Text); found.Success; found = found.NextMatch())
             {
-                var operandA = RuleOperandText.Normalize(found.Groups["a"].Value);
-                if (operandA.Length == 0 || !OperandSuitsShape(entry.Kind, operandA))
+                var rawOperandA = found.Groups["a"].Value;
+                var operandA = RuleOperandText.Normalize(rawOperandA);
+                if (operandA.Length == 0 || !OperandSuitsShape(entry.Kind, operandA, rawOperandA))
                 {
                     continue;
                 }
@@ -196,11 +197,23 @@ public static class RuleShapeCatalogue
     /// one to <see cref="RuleShapeKind.ToolIsBanned"/>. Failing this test does not consume the
     /// statement — it falls through to the next entry, and out to the inventory if none fits, rather
     /// than being recorded under a shape whose operand it does not have.
+    ///
+    /// <see cref="RuleShapeKind.AlwaysPassParam"/> needs two things beyond the ordinary, already-
+    /// normalized <paramref name="operandA"/>: it must not be path-shaped (a single-token file or
+    /// directory name is not a JSON argument key, the same reasoning <c>ToolIsBanned</c> gives in the
+    /// other direction), and re-normalizing the raw span with "and"/"or" excluded from clause-stripping
+    /// must <i>also</i> come out single-token — otherwise a compound phrase joined by "and" (a real
+    /// corpus statement: "always pass build and type checks...") would have been silently collapsed to
+    /// one spurious word by the ordinary clause-stripping this method's caller already applied.
     /// </summary>
-    static bool OperandSuitsShape(RuleShapeKind kind, string operandA) => kind switch
+    static bool OperandSuitsShape(RuleShapeKind kind, string operandA, string rawOperandA) => kind switch
     {
         RuleShapeKind.NeverReadPath => RuleOperandText.LooksLikePath(operandA),
         RuleShapeKind.ToolIsBanned => !RuleOperandText.LooksLikePath(operandA),
+        RuleShapeKind.AlwaysPassParam =>
+            RuleOperandText.LooksLikeParameterName(operandA)
+            && !RuleOperandText.LooksLikePath(operandA)
+            && RuleOperandText.LooksLikeParameterName(RuleOperandText.NormalizeForParameterNameShape(rawOperandA)),
         _ => true,
     };
 

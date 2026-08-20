@@ -1,4 +1,3 @@
-using System.Text.Json;
 using AecoPostMortem.Data;
 using AecoPostMortem.Data.Execution;
 using AecoPostMortem.Ingestion;
@@ -33,15 +32,29 @@ public static class ToolInvocationShapeLookup
         IReadOnlyList<Agent> agents,
         IReadOnlyList<RawEvent> rawEvents)
     {
+        ArgumentNullException.ThrowIfNull(rawEvents);
+
+        return BuildAll(toolCalls, agents, RawToolArguments.ByCall(rawEvents));
+    }
+
+    /// <summary>
+    /// Overload for a caller that already built the shared RAW-arguments dictionary — today,
+    /// <see cref="ApiHost.GetDigest"/>, which needs the identical dictionary for this lookup and for
+    /// <see cref="ParamCarryingCallLookup"/> and would otherwise parse every <c>tool.execution_start</c>
+    /// payload in scope twice.
+    /// </summary>
+    internal static IReadOnlyList<ToolInvocationShape> BuildAll(
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents,
+        IReadOnlyDictionary<(string SessionId, string ToolCallId), ToolArguments> argumentsByCall)
+    {
         ArgumentNullException.ThrowIfNull(toolCalls);
         ArgumentNullException.ThrowIfNull(agents);
-        ArgumentNullException.ThrowIfNull(rawEvents);
+        ArgumentNullException.ThrowIfNull(argumentsByCall);
 
         var spawningCallIds = agents
             .Select(agent => (agent.SessionId, agent.SpawningToolCallId))
             .ToHashSet();
-
-        var argumentsByCall = ArgumentsByCall(rawEvents);
 
         return toolCalls
             .Select(call =>
@@ -61,33 +74,6 @@ public static class ToolInvocationShapeLookup
                 };
             })
             .ToList();
-    }
-
-    static Dictionary<(string SessionId, string ToolCallId), ToolArguments> ArgumentsByCall(
-        IReadOnlyList<RawEvent> rawEvents)
-    {
-        var byCall = new Dictionary<(string, string), ToolArguments>();
-
-        foreach (var raw in rawEvents)
-        {
-            if (raw.EventType != "tool.execution_start" || !EventEnvelopeReader.TryRead(raw, out var envelope))
-            {
-                continue;
-            }
-
-            if (envelope.Data.ValueKind != JsonValueKind.Object
-                || !envelope.Data.TryGetProperty("toolCallId", out var toolCallIdProperty)
-                || toolCallIdProperty.ValueKind != JsonValueKind.String
-                || !envelope.Data.TryGetProperty("arguments", out var argumentsElement))
-            {
-                continue;
-            }
-
-            byCall[(raw.SessionId, toolCallIdProperty.GetString()!)] =
-                ToolArguments.Parse(argumentsElement.GetRawText());
-        }
-
-        return byCall;
     }
 
     static bool HasField(ToolArguments? arguments, string name) =>

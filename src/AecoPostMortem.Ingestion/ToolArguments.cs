@@ -81,6 +81,24 @@ public sealed class ToolArguments
         return objectValue!.Value.TryGetProperty(name, out value);
     }
 
+    /// <summary>Every named field an object-shaped arguments value carries, in the order the provider
+    /// wrote them.</summary>
+    /// <exception cref="InvalidOperationException"><see cref="Kind"/> is not
+    /// <see cref="ToolArgumentKind.Object"/>.</exception>
+    public IReadOnlyList<string> PropertyNames
+    {
+        get
+        {
+            if (Kind != ToolArgumentKind.Object)
+            {
+                throw new InvalidOperationException(
+                    $"Arguments is {Kind}, not Object; named fields are not available.");
+            }
+
+            return objectValue!.Value.EnumerateObject().Select(property => property.Name).ToArray();
+        }
+    }
+
     /// <summary>The whole envelope text of a string-shaped arguments value, e.g. an
     /// <c>apply_patch</c> patch.</summary>
     /// <exception cref="InvalidOperationException"><see cref="Kind"/> is not

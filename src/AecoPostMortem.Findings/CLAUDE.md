@@ -28,6 +28,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `BannedToolFinding.cs` | Piece 3's second slice: orchestrates `Rules.BannedToolCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — every `BannedToolUsage` the check returns is already a violation, so no further filtering; reads `Data.Execution.ToolCall` directly for session attribution, the same split `RepeatedFileReadFindingCheck` draws between its generic operand and its own entity read; `BannedToolFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `NeverReadPathFinding.cs` | Piece 3's third slice: orchestrates `Rules.NeverReadPathCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — no `ToolInvocationShape` corpus needed; builds `Rules.ReadEvent`s from every `Data.Execution.ToolCall` carrying a non-null `Path` except `create` calls (see below), since `NeverReadPath`'s own grammar covers read/open/access/modify/edit/list, broader than `RepeatedFileReadFindingCheck`'s narrower "view only" mapping for its own, different question; `NeverReadPathFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `UseAAfterBFinding.cs` | Piece 3's fourth slice: orchestrates `Rules.UseAAfterBCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — resolves both operands against a real `ToolInvocationShape` corpus, the same way `BannedToolFinding`'s single operand does; builds `Rules.TimedToolCall`s straight from `Data.Execution.ToolCall.StartedAt`, already a real, populated column, so ordering needs no new RAW parsing either; `UseAAfterBFinding.Result` bundles the findings and a `CheckRegistryEntry` |
+| `AlwaysPassParamFinding.cs` | Piece 3's fifth and final slice: orchestrates `Rules.AlwaysPassParamCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — a subagent-dispatch call that omitted a parameter the rule requires on every such call. Unlike every other finding in this row, `Run` takes no `Data.Execution.ToolCall` at all: `Rules.ParamCarryingCall` already carries `SessionId` (built specifically for this check, not a shared corpus), so there is no separate entity read needed for session attribution; `AlwaysPassParamFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
@@ -135,6 +136,15 @@ file draws, but builds `Rules.TimedToolCall`s from that read rather than `Rules.
 generic ordering shape `UseAAfterBCheck` needs instead of a path. `AecoPostMortem.Api.ApiHost.
 GetDigest` is its real caller today, reusing the same `ruleShapeMatches`/`invocations` pair
 `BannedToolFinding` already built (`Api/CLAUDE.md`'s own remarks).
+
+`AlwaysPassParamFinding` (piece 3's fifth and final slice) is the fourth `FindingClass.
+RuleAdherenceToolChoice` finding this project builds, and calls no `Rules.OperandResolver` at all —
+`Rules.AlwaysPassParamCheck` needs no tool-vocabulary resolution, only argument-key presence. Unlike
+every other finding in this file, it reads no `Data.Execution.ToolCall`: `Rules.ParamCarryingCall`
+(this check's own dedicated corpus shape, not a shared one) already carries `SessionId`, so there is
+no separate entity read for session attribution. `AecoPostMortem.Api.ApiHost.GetDigest` is its real
+caller today, calling the new `Api.ParamCarryingCallLookup.BuildAll` over the same three scoped reads
+`ToolInvocationShapeLookup.BuildAll` already takes (`Api/CLAUDE.md`'s own remarks).
 
 ## Non-obvious decisions
 
@@ -280,6 +290,23 @@ either has the defect or it doesn't — so `UseAAfterBFinding.ToFinding` leaves 
 carries `later_tool`, `earlier_tool` and `violation_count` as `EvidenceItem`s instead, the same "a
 count with no percentage rides in Evidence" discipline this file already documents for
 `BannedToolFinding`'s own single-operand count.
+
+### `AlwaysPassParamFinding` carries its count in Evidence, never in Resolution — the same reason `BannedToolFinding`/`UseAAfterBFinding` do
+
+An "omitted this key on N calls" fact has no percentage the way `FromTwoOperands` expects — same
+reasoning as `BannedToolFinding`'s own single-operand count and `UseAAfterBFinding`'s own ordering
+count, both documented above. `param_name` and `violation_count` ride in `Evidence` instead.
+
+### `AlwaysPassParamFinding` is the only `RuleAdherenceToolChoice` finding that reads no `Data.Execution.ToolCall`
+
+Every other finding in this class (`BannedToolFinding`, `NeverReadPathFinding`, `UseAAfterBFinding`)
+reads `ToolCall` directly for session attribution, because their own check-shape inputs
+(`ToolInvocationShape`, `ReadEvent`, `TimedToolCall`) deliberately carry no `SessionId` — the "a
+check's plain input never carries the entity that produced it" discipline `Rules/CLAUDE.md` documents.
+`Rules.ParamCarryingCall` breaks that pattern on purpose: it was built specifically for
+`AlwaysPassParamCheck`, not shared the way `ToolInvocationShape` is across four different checks, so
+there was no reason to omit `SessionId` from it the way a genuinely tool-agnostic shape would.
+`AlwaysPassParamFinding.Run` therefore takes `IReadOnlyList<Rules.ParamCarryingCall>` alone.
 
 ### `SessionTokenFigures` is not a `Finding`, deliberately
 
@@ -789,6 +816,15 @@ eleventh, the third `FindingClass.RuleAdherenceToolChoice` detection logic, reus
 source ``) that the catalogue genuinely matches, but at least one operand stays unresolved against
 this corpus' own tool vocabulary, so it produces no finding — an honest empty result, the same
 "mechanism real, corpus doesn't happen to fully exercise it" story `BannedToolFinding` already told.
+`AlwaysPassParamFinding` (piece 3's fifth and final slice, `CheckId = "always-pass-param"`) is the
+twelfth, the fourth `FindingClass.RuleAdherenceToolChoice` detection logic and the last piece-3 gap
+closed — reusing `Rules.AlwaysPassParamCheck`, which needs no `OperandResolver` at all (a parameter
+name is not a tool-vocabulary lookup). Verified against the live corpus: the one real
+`AlwaysPassParam`-shaped statement found during scoping (this repository's own rule, "always pass an
+explicit model param when dispatching a subagent") belongs to a session outside the dominant
+repository this corpus' endpoints default to, so it produces no finding in that scope either — the
+same honest-empty-result story `UseAAfterBFinding` just told, confirmed separately at the unit level
+with a synthetic corpus where a violation genuinely fires.
 No check exists in
 `AecoPostMortem.Rules` yet to bind a real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests`
 exercises the suggestion mechanism against a synthetic tool-choice check result standing in for the

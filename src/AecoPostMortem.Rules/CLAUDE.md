@@ -16,6 +16,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why `ToolVocabularyMismatchCheck` does not fit a prohibition |
 | `NeverReadPathCheck.cs` | Piece 3's `NeverReadPath` adherence check: `NeverReadPathMention` (a rule's source text and the one path it prohibits — plain input) and `NeverReadPathViolation` (the mention plus how many real `ReadEvent`s matched it and which sessions), and `NeverReadPathCheck.Run`, which matches each mention's path against the corpus on a path-segment boundary (never a bare substring) and reports only mentions with at least one match — no `OperandResolver` involved, since a path operand is not a tool-vocabulary lookup |
 | `UseAAfterBCheck.cs` | Piece 3's `UseAAfterB` adherence check: `UseAAfterBMention` (a rule's source text plus `LaterToolText`/`EarlierToolText` — plain input), `TimedToolCall` (a call's session, tool name and `StartedAt`, opaque and ordinally sortable — no `Data.Execution.ToolCall` reference), `UseAAfterBViolation` (the mention plus how many later-tool calls had no earlier prerequisite call and which sessions), and `UseAAfterBCheck.Run`, which resolves both operands via `OperandResolver.ResolveTwoOperands` (skipping a mention with either side `Unresolved`, the same "no clean case reported" shape `BannedToolCheck` follows) and orders each session's calls by `StartedAt` itself (never trusting caller order) before walking them for the ordering violation |
+| `AlwaysPassParamCheck.cs` | Piece 3's fifth and final slice, `AlwaysPassParam`'s adherence check: `AlwaysPassParamMention` (a rule's source text and the one argument key it requires — plain input), `ParamCarryingCall` (a call's session, tool call id, `SpawnsAgent`, `ArgumentsRecorded` and the opaque `ArgumentKeys` set its own RAW arguments carried), `AlwaysPassParamViolation` (the mention plus how many subagent-dispatch calls omitted the key and which sessions), and `AlwaysPassParamCheck.Run`, which filters to `SpawnsAgent && ArgumentsRecorded` calls only — the one structural, Repo-Rule-6-safe population this shape's own operand can name without guessing (see below), narrowed further to calls this project actually has a record of — and reports a mention only when at least one such call is missing the key, the same "no clean case reported" shape `BannedToolCheck`/`NeverReadPathCheck` already follow |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -34,7 +35,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RulesInventory.cs` | FR-40 (S-22, issue #35): `RuleStatementStatus` (the closed four-shape status union), `RuleRetirement` (in force / retired at a date), `RulesInventoryRow`, `RulesInventoryStatusCounts`, `RulesInventoryState`, `RulesInventory.Build`/`.MostRecentVersion`, and `UnknownRuleSetVersionException` — one rule-set version's statements, each with exactly one status, its origin, its reach, its in-force window and its retirement |
 | `RuleShape.cs` | FR-34 (S-25, issue #39): `RuleShapeKind` (the closed five-member shape enum), `RuleShapeMatch` (a statement, its shape, and the operand text lifted from it), `UnmatchedStatementDisposition`/`UnmatchedStatement` (FR-40's two middle inventory statuses, each with a reason), and `RuleShapeMatching` (the partition, with a computed `StatementCount`) |
 | `RuleShapeCatalogue.cs` | FR-34's catalogue itself: `RuleShapeCatalogue.Shapes`, `.TryMatch` and `.MatchAll` — eight phrasing patterns across five shapes, matched in precedence order, with operands read from the matched statement's own text |
-| `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only) and `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows) |
+| `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only), `.NormalizeForParameterNameShape` (the same reduction, minus "and"/"or" as a clause boundary — `AlwaysPassParam`'s own operand-shape guard uses this second reduction so a compound phrase joined by "and" is not silently collapsed to one spurious word), `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows), and `.LooksLikeParameterName` (a single-token test — a real JSON argument key is always one token, so a multi-word capture is rejected rather than matched with unearned confidence) |
 | `ContradictionCheck.cs` | FR-43 (S-38, issue #47): `ContradictionCandidate` (a pair of statements plus their shared, negation-stripped wording) and `ContradictionCheck.Run` — pairwise keyword-polarity detection over whatever statements the caller hands in, `i < j` only so no statement is ever compared against itself |
 | `RuleSetVersionAdjacency.cs` | FR-39 (S-35, issue #43): `RuleSetVersionAdjacency.RequireAdjacentPair` — confirms two `RuleSetVersionId`s are the same repository and immediately consecutive within a repository's own chronologically ordered `RuleSetVersion`s, returning both as `(Before, After)`, or throws `MixedRuleSetVersionException` (different repositories), `UnknownRuleSetVersionException` (a hash the repository never carried) or `NonAdjacentRuleSetVersionsException` (naming every intervening version) — the primitive the Monitor comparison scopes itself with before computing anything |
 
@@ -444,6 +445,56 @@ has been seen, it silently satisfies every later call to the later tool for the 
 the same "one clean case can cover many violations that never happen" shape `BannedToolCheck`'s own
 zero-violation corpus result already established for a different check.
 
+### `AlwaysPassParamCheck` scopes to `SpawnsAgent` calls because the shape's own operand cannot name a population
+
+FR-34's `AlwaysPassParam` grammar captures only a parameter name ("always pass an explicit A") — the
+qualifying clause that would say *which* calls need it ("...when dispatching a subagent") is stripped
+by `RuleOperandText.TrailingClause` as decorative, the same stripping every other shape relies on to
+keep an operand from dragging its sentence along with it. So this check cannot resolve a population
+from the statement's own text the way every other piece-3 check does (a path, a tool name, an
+ordering pair). `ParamCarryingCall.SpawnsAgent` is the one structural, Repo-Rule-6-safe population this
+corpus already exposes without guessing a tool identity — and it happens to match the one real corpus
+instance this shape was scoped against: this repository's own rule, "always pass an explicit model
+param when dispatching a subagent" (confirmed present verbatim in one real ingested session's own
+`<custom_instruction>` block during scoping, via `superpowers:brainstorming`). This was a deliberate
+choice among two considered — every call in scope was the alternative, rejected as certain to flood
+with false positives (most tools have no reason to carry an arbitrary key like `model`) — settled via
+`AskUserQuestion` before coding, the same "settle the design fork, don't guess" precedent
+`UseAAfterBCheck`'s own ordering-semantics decision set.
+
+### `ParamCarryingCall.ArgumentsRecorded` keeps "we don't know" from reading as "it violated"
+
+Also caught in code review, before merge: `ArgumentKeys` alone cannot distinguish "this call's own RAW
+arguments were never recorded at all" (no matching `tool.execution_start` event, or a non-object-shaped
+value) from "arguments were recorded, and the named key genuinely was not among them" — both produce an
+empty set. `AlwaysPassParamCheck.Run` filters its spawn-call population to `ArgumentsRecorded && SpawnsAgent`
+rather than `SpawnsAgent` alone, so an unrecorded call contributes no violation at all — the same
+"`Unresolved` is its own state, never an empty `Tools` set on a layer that claims to have matched"
+discipline `OperandResolver` already documents, applied here to argument-key presence instead of tool
+resolution.
+
+### `AlwaysPassParam`'s operand guard is two checks, not one — closed in code review
+
+`RuleOperandText.LooksLikeParameterName` alone only rejects an *already multi-word* operand — it has
+no way to notice that `TrailingClause`'s own "and" stripping had already manufactured a single word out
+of a real compound phrase before the guard ever saw it. A real ambiguity this project's own live corpus
+surfaced during scoping: "always pass build and type checks before committing" means "pass a CI check",
+not "pass an argument", but `TrailingClause` treats "and" as a subordinate-clause boundary the same way
+it treats "when" or "for", stripping " and type checks before committing" and leaving the single word
+"build" — which the parameter-name guard alone would have accepted. Code review caught this before
+merge (the deferral this entry originally recorded overstated its own fix cost: `TryMatch` already
+holds the pre-normalization span at the exact point it calls `OperandSuitsShape`). The real fix needed
+no audit of every other shape's own operand captures, only a second, `AlwaysPassParam`-only reduction:
+`RuleOperandText.NormalizeForParameterNameShape` mirrors `Normalize` but excludes "and"/"or" from its
+own clause-stripping regex (`TrailingClauseExcludingConjunctions`) — "and" coordinates two nouns in a
+compound phrase far more often than this corpus phrases a genuine qualifying clause with it.
+`OperandSuitsShape` now requires *both* the ordinary normalized operand and this second reduction of
+the raw span to pass `LooksLikeParameterName`, so a compound phrase stays multi-word under at least one
+of the two and is rejected. Also closed in the same pass: a path-shaped single-token operand
+(`` `CHANGELOG.md` ``) is not a JSON argument key either — `AlwaysPassParam` now also requires
+`!LooksLikePath(operandA)`, the same discrimination `ToolIsBanned` already makes in the other
+direction.
+
 ### `BannedToolUsage.CallCount` can never be zero for a returned result
 
 Every layer `OperandResolver.Resolve` can return (`ExactToolName`, `McpServerField`, `DerivedRole`)
@@ -737,12 +788,13 @@ through it, resolves the matched operands against that corpus's tools, or render
 that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
-ten entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+eleven entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
 `AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19),
 `ToolVocabularyMismatchCheck` (issue #40, FR-35), `BannedToolCheck` (piece 3's second slice,
 FR-35's `ToolIsBanned` counterpart), `NeverReadPathCheck` (piece 3's third slice, FR-35's
-`NeverReadPath` counterpart) and `UseAAfterBCheck` (piece 3's fourth slice, FR-35's `UseAAfterB`
+`NeverReadPath` counterpart), `UseAAfterBCheck` (piece 3's fourth slice, FR-35's `UseAAfterB`
+counterpart) and `AlwaysPassParamCheck` (piece 3's fifth and final slice, FR-35's `AlwaysPassParam`
 counterpart). The shape they establish — plain per-call/per-session/per-turn/
 per-mention input records in, structurally-required or structurally-paired results out, no branch on
 any specific tool name — is the pattern later checks in this project should follow.
@@ -784,7 +836,24 @@ resolve. Verified against the live 35-session reference corpus: the dominant rep
 operand stays `Unresolved` against this corpus' own tool vocabulary, so it renders
 `CheckableNotYetBuilt` honestly rather than `Watched`, the same "mechanism real, corpus doesn't
 happen to fully exercise it" story `PreferAOverB` and `ToolIsBanned` already told for their own real
-matches. `AlwaysPassParam` is the only piece-3 shape still with no built check.
+matches.
+
+`AlwaysPassParamCheck` (piece 3's fifth and final slice) closes the last piece-3 gap and completes
+FR-34's five shapes: it filters to `ParamCarryingCall.SpawnsAgent` calls (see this file's own remarks
+above for why no other population can be resolved from the shape's own operand) and reports a mention
+only when at least one such call omitted the named key. `RulesInventoryClassifier` now watches a
+matched `AlwaysPassParam` statement unconditionally, the same "a determinate present/absent verdict,
+no `Unresolved` state" reasoning `NeverReadPathCheck` already established for a path operand.
+`AecoPostMortem.Findings.AlwaysPassParamFinding` is the real caller, wired into `AecoPostMortem.Api.
+ApiHost.GetDigest` as a tenth check orchestrator. Verified against the live 35-session reference
+corpus: the one real `AlwaysPassParam`-shaped statement found during scoping (this repository's own
+rule, "always pass an explicit model param when dispatching") belongs to a session outside the
+dominant repository (`supahfly27/UpFront`) this corpus' endpoints default to, so the dominant repo's
+own rules-inventory and digest render unchanged — zero new findings, the same "mechanism real, corpus
+doesn't happen to exercise it in the selected scope" story `BannedToolCheck`/`UseAAfterBCheck` already
+told, confirmed via a real browser session against `/` and `/rules`, plus a synthetic corpus at the
+unit level where a violation genuinely fires (`AlwaysPassParamCheckTests`,
+`AlwaysPassParamFindingTests`, `RulesInventoryClassifierTests`).
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

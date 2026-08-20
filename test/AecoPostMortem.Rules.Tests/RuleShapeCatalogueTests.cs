@@ -218,6 +218,59 @@ public sealed class RuleShapeCatalogueTests
         Assert.NotEqual(string.Empty, match.OperandAText);
     }
 
+    /// <summary>
+    /// "Pass" is ambiguous: this project's own live corpus carries a real statement using "pass" to
+    /// mean "pass a CI check" ("always pass build and type checks..."), not "pass an argument". A
+    /// multi-word capture cannot be a JSON argument key, so it must not be read as one — the operand
+    /// is rejected and the statement falls through un-shaped, the same "a rejected operand does not
+    /// consume the statement" precedent <c>NeverReadPath</c>/<c>ToolIsBanned</c> already established.
+    /// </summary>
+    [Fact]
+    public void A_multi_word_operand_does_not_fit_the_parameter_obligation_shape()
+    {
+        var statement = Statement("Always pass full stack traces on every failure.");
+
+        var matching = RuleShapeCatalogue.MatchAll([statement]);
+
+        Assert.Empty(matching.Matches);
+        var unmatched = Assert.Single(matching.Unmatched);
+        Assert.Equal(UnmatchedStatementDisposition.CheckableNotBuilt, unmatched.Disposition);
+    }
+
+    /// <summary>
+    /// Code review caught this: the ordinary grammar-stripping path treats "and" as a subordinate-
+    /// clause boundary the same way it treats "when"/"for"/etc, so "build and type checks before
+    /// committing" collapses to the single word "build" — which would otherwise pass the parameter-name
+    /// guard as a spuriously valid single-token operand. This is the exact real statement the live
+    /// corpus carries.
+    /// </summary>
+    [Fact]
+    public void An_and_joined_compound_phrase_does_not_collapse_into_a_spurious_single_word_operand()
+    {
+        var statement = Statement("Always pass build and type checks before committing.");
+
+        var matching = RuleShapeCatalogue.MatchAll([statement]);
+
+        Assert.Empty(matching.Matches);
+        var unmatched = Assert.Single(matching.Unmatched);
+        Assert.Equal(UnmatchedStatementDisposition.CheckableNotBuilt, unmatched.Disposition);
+    }
+
+    /// <summary>Code review caught this too: a single-token operand shaped like a path is still not a
+    /// JSON argument key. <c>ToolIsBanned</c> already rejects a path-shaped operand for the identical
+    /// reason (its own name is not a path); <c>AlwaysPassParam</c> needs the same guard.</summary>
+    [Fact]
+    public void A_path_shaped_operand_does_not_fit_the_parameter_obligation_shape()
+    {
+        var statement = Statement("Always pass an explicit `CHANGELOG.md`.");
+
+        var matching = RuleShapeCatalogue.MatchAll([statement]);
+
+        Assert.Empty(matching.Matches);
+        var unmatched = Assert.Single(matching.Unmatched);
+        Assert.Equal(UnmatchedStatementDisposition.CheckableNotBuilt, unmatched.Disposition);
+    }
+
     // ---- Scenario: A rule matching no shape is not silently dropped ----
 
     [Fact]

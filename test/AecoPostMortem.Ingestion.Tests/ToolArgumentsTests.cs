@@ -47,6 +47,22 @@ public sealed class ToolArgumentsTests
         Assert.False(arguments.TryGetProperty("missing", out _));
     }
 
+    [Fact]
+    public void An_object_shaped_arguments_value_enumerates_its_own_field_names()
+    {
+        var arguments = ToolArguments.Parse("""{"path":"src/Foo.cs","offset":42}""");
+
+        Assert.Equal(["path", "offset"], arguments.PropertyNames);
+    }
+
+    [Fact]
+    public void Reading_field_names_off_a_string_shaped_value_throws_instead_of_guessing()
+    {
+        var arguments = ToolArguments.Parse(JsonSerializer.Serialize(PatchEnvelope));
+
+        Assert.Throws<InvalidOperationException>(() => arguments.PropertyNames.ToList());
+    }
+
     [Theory]
     [InlineData("42")]
     [InlineData("true")]

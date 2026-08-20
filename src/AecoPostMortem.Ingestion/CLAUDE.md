@@ -22,7 +22,7 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `ExcludedSources.cs` | FR-10: recognises Copilot's global `session-store.db` by name, and states why it is skipped |
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
 | `RewindSnapshotSource.cs` | FR-13: reads `rewind-snapshots/index.json` as one whole-file RAW event at byte offset zero |
-| `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced |
+| `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced. `TryGetProperty` reads one named field; `PropertyNames` (piece 3's fifth slice) enumerates every field name an object-shaped value carries — both throw on a non-`Object` value rather than guessing |
 | `EventEnvelope.cs` | FR-8/FR-9 (issue #7): reads `id`/`parentId`/`agentId`/`data` out of a stored `RawEvent`'s own payload — separate from `EventEnvelopeParsers`, which only reads `type`/`timestamp` at RAW ingest time |
 | `ExecutionRecordBuilder.cs` | FR-8/FR-9: rebuilds one session's `RawEvent`s into `Data.Execution.Turn`/`ToolCall`/`Agent` rows plus the causality map, pure and deterministic over `RawEvent.Sequence` order |
 | `SpawnResolutionCheck.cs` | turns an `ExecutionRecordBuilder` agent-reconstruction pass into the `unresolvable-spawn` `CheckRegistryEntry` (issue #23, PRD §3.9's name for it) |
@@ -174,6 +174,13 @@ called against the wrong `Kind`, rather than returning a default that would look
 `ToolArguments` is a standalone, self-contained parsing unit — it does not yet plug into the
 `RawEvent`-to-`ToolCall` pipeline; a later story wires `ToolArguments.Parse` in where
 `tool.execution_start.data.arguments` is read.
+
+`PropertyNames` (piece 3's fifth slice, `AecoPostMortem.Rules`' `AlwaysPassParamCheck`) exists because
+that check's operand — an arbitrary parameter name a rule statement names — is not one of a fixed,
+known-in-advance set the way `ExecutionRecordBuilder`'s own `path` read is. `TryGetProperty` answers
+"does this one named field exist"; `PropertyNames` answers "what fields does this call carry at all",
+which a caller needs when it does not yet know which key it is checking for until it resolves a rule's
+own operand text.
 
 ### The spawn resolution key is a `toolCallId`, not a separately allocated agent id
 

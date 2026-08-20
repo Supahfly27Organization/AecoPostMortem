@@ -15,8 +15,10 @@ Endpoints for the three surfaces, and the host that serves them.
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
 | `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
 | `SessionRuleSetLookup.cs` | FR-27's own not-yet-wired gap, closed: `SessionRuleSetLookup.BuildAll` resolves a whole store's `RawEvent`s into one `Rules.SessionRuleSet` per `Data.Execution.Session` row, calling `Ingestion.SessionRuleExtractor.Extract` per session — the corpus-wide walk nothing did before this landed |
-| `ToolInvocationShapeLookup.cs` | The real `Rules.ToolInvocationShape` corpus (piece 3), closed: `BuildAll` reads `HasPath`/`McpServerName` straight off `Data.Execution.ToolCall` (already real columns) and `SpawnsAgent` off `Data.Execution.Agent.SpawningToolCallId` (already structural) — no new RAW parsing for any of the three — and reads `HasPattern`/`HasReplacement`/`HasFileText`/`HasCommand` from each call's own RAW `tool.execution_start.data.arguments`, field names verified against the live 35-session reference corpus: `pattern` (`rg`/`grep`/`glob`), `old_str`/`new_str` (`edit`), `file_text` (`create`), `command` (`powershell`). `apply_patch`'s own `arguments` is a JSON string (the whole patch body), not an object — a real wrinkle the corpus check caught — so all four are `false` for a string-shaped call rather than guessed at |
-| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` match is `Watched` unconditionally, no resolution involved (piece 3's third slice); every other matched shape stays `CheckableNotYetBuilt`, and the caller-supplied `NotCheckable(reason)` stays unreachable |
+| `ToolInvocationShapeLookup.cs` | The real `Rules.ToolInvocationShape` corpus (piece 3), closed: `BuildAll` reads `HasPath`/`McpServerName` straight off `Data.Execution.ToolCall` (already real columns) and `SpawnsAgent` off `Data.Execution.Agent.SpawningToolCallId` (already structural) — no new RAW parsing for any of the three — and reads `HasPattern`/`HasReplacement`/`HasFileText`/`HasCommand` from each call's own RAW `tool.execution_start.data.arguments`, field names verified against the live 35-session reference corpus: `pattern` (`rg`/`grep`/`glob`), `old_str`/`new_str` (`edit`), `file_text` (`create`), `command` (`powershell`). `apply_patch`'s own `arguments` is a JSON string (the whole patch body), not an object — a real wrinkle the corpus check caught — so all four are `false` for a string-shaped call rather than guessed at. The public `BuildAll(rawEvents)` overload parses RAW itself; an `internal BuildAll(argumentsByCall)` overload (piece 3's fifth slice, code review) takes an already-built dictionary instead, so `GetDigest` can share one parse pass with `ParamCarryingCallLookup` rather than each lookup parsing the same payloads separately |
+| `RawToolArguments.cs` | Piece 3's fifth slice: `ByCall` — the RAW-parsing pass factored out of `ToolInvocationShapeLookup` so `ParamCarryingCallLookup` (below) can reuse the identical `tool.execution_start` → `ToolArguments` read rather than walking `rawEvents` a second time for the same question |
+| `ParamCarryingCallLookup.cs` | Piece 3's fifth and final slice: the real `Rules.ParamCarryingCall` corpus `Rules.AlwaysPassParamCheck` resolves its mentions against. `SpawnsAgent` reuses `Agent.SpawningToolCallId` the same structural way `ToolInvocationShapeLookup` does; `ArgumentKeys` reads every field name a call's own RAW arguments carried (`Ingestion.ToolArguments.PropertyNames`, new this slice) rather than one fixed set, since the parameter a rule names is arbitrary — unlike `ToolInvocationShapeLookup`'s four closed booleans. `ArgumentsRecorded` (code review) is `true` only when a call's own arguments were object-shaped, so "no record at all" never collapses into "recorded with no keys". The public `BuildAll(rawEvents)` and an `internal BuildAll(argumentsByCall)` overload mirror `ToolInvocationShapeLookup`'s own split (below) |
+| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` or `AlwaysPassParam` match is `Watched` unconditionally, no resolution involved (piece 3's third and fifth slices — neither operand is a tool name); every other matched shape stays `CheckableNotYetBuilt`, and the caller-supplied `NotCheckable(reason)` stays unreachable |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles) |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
@@ -95,6 +97,16 @@ paths, not tool names.
 Piece 3's fourth slice (`UseAAfterBFinding`) widens `GetDigest` a sixth way, reusing the identical
 `ruleShapeMatches`/`invocations`/`scopedToolCalls` triple `BannedToolFinding` already built — the
 ninth check orchestrator this method calls, needing no new read of its own.
+
+Piece 3's fifth and final slice (`AlwaysPassParamFinding`) widens `GetDigest` a seventh way: it reuses
+`ruleShapeMatches` and calls the new `ParamCarryingCallLookup.BuildAll` as `GetDigest`'s tenth and final
+piece-3 check orchestrator. Unlike every other `RuleAdherenceToolChoice` finding here,
+`AlwaysPassParamFinding.Run` takes no `ToolCall` parameter at all: `ParamCarryingCall` already carries
+`SessionId` (it was built specifically for this check, not shared the way `ToolInvocationShape` is), so
+there is no separate entity read needed for session attribution. `GetDigest` builds
+`scopedArgumentsByCall` (`RawToolArguments.ByCall(scopedRawEvents)`) once and passes it to both this
+lookup's and `ToolInvocationShapeLookup`'s own `internal` shared-dictionary overloads (code review,
+below) rather than calling either lookup's public, RAW-parsing overload twice over the same payloads.
 
 `ApiHost.GetRulesInventory` (S-22, issue #35) is what that real rule extraction at scale turned out
 to be: it reads `Session`/`RawEvent` corpus-wide (the same two tables `GetDigest` already reads a
@@ -315,8 +327,14 @@ tool-name operand has.
 `RuleShapeKind.UseAAfterB` is piece 3's fourth slice: classified in the same branch as `PreferAOverB`
 — `Rules.OperandResolver.ResolveTwoOperands` against the corpus, `Watched` only when both operands
 resolve — since both shapes ask the identical question of their operand pair ("do these tool names
-resolve"), just for a different downstream check. `AlwaysPassParam` is the only remaining shape with
-no built check at all. `RulesInventoryClassifier.BuildClassifier` therefore still classifies every other matched shape, and
+resolve"), just for a different downstream check.
+
+`RuleShapeKind.AlwaysPassParam` is piece 3's fifth and final slice: classified in the same branch as
+`NeverReadPath` — `Watched` unconditionally the moment the catalogue matches the shape, no
+`OperandResolver` involved, since a parameter-key operand (unlike a tool-name operand) always produces
+a determinate present/absent verdict against `Rules.ParamCarryingCall`'s own `ArgumentKeys`. This
+closes the last piece-3 gap: every one of FR-34's five shapes now has a real classification path.
+`RulesInventoryClassifier.BuildClassifier` therefore classifies every matched shape, and
 every unmatched statement carrying a normative marker
 (`UnmatchedStatementDisposition.CheckableNotBuilt`), as `RuleStatementStatus.CheckableNotYetBuilt`;
 an unmatched statement carrying none (`UnmatchedStatementDisposition.NotCheckable`) still classifies
@@ -666,6 +684,19 @@ shape carries timing) turned out to be overly pessimistic, the same way piece 2'
 unconfirmed fields" framing did: `Data.Execution.ToolCall.StartedAt` is already a real, populated
 ISO-8601 column, ordinally sortable, so ordering needed a second generic plain-input shape
 (`Rules.TimedToolCall`) rather than any new RAW parsing or `Ingestion` work.
+
+`AlwaysPassParamFinding`, the tenth (piece 3's fifth and final slice), closes the last piece-3 gap and
+completes FR-34's five shapes. Unlike every prior `RuleAdherenceToolChoice` finding here, it needed no
+`Data.Execution.ToolCall` read at all — `Rules.ParamCarryingCall` already carries `SessionId` (built
+specifically for this check, not shared the way `Rules.ToolInvocationShape` is) — and it filters to
+`SpawnsAgent` calls only, the one structural population its own operand can name without guessing
+which tool a rule's stripped-away qualifying clause meant (`Rules/CLAUDE.md`'s own remarks). Verified
+against the live 35-session reference corpus: the one real `AlwaysPassParam`-shaped statement found
+during scoping — this repository's own rule, "always pass an explicit model param when dispatching a
+subagent" — belongs to a session outside the dominant repository (`supahfly27/UpFront`) this corpus'
+endpoints default to, so `/api/digest` and `/api/rules-inventory` both render unchanged for that
+scope — zero new findings, an honest result, not a bug — confirmed via a real browser session and
+proven separately at the unit level with a synthetic corpus where a violation genuinely fires.
 
 FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on every shape) and
 `DigestEnvelope.InferredFindings` (served separately from `RankedFindings`, mirroring

@@ -6,10 +6,10 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding` |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
-| `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
+| `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` and `GetSession` are the same two without a listener |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording` |
@@ -65,13 +65,18 @@ that condition is the same CS9035 compile error `Adherence` gives for its own tw
 Scenario 1's "the unevaluated condition is stated" is therefore not optional prose a caller could
 forget to add.
 
-Scenario 2 ("A base rate is never ranked as a violation") is deliberately *not* enforced by excluding
-base-rate findings from `ProcessDigest`'s ranking — a base rate can still touch more sessions than a
-measured violation and rank above it (`DigestEnvelopeTests.A_base_rate_item_ranked_above_a_measured_
-violation_still_serialises_a_distinct_kind`). What FR-44 requires is that it never *renders* as one:
-the `"baseRate"` wire discriminator is the visual/structural distinction, always different from
-`"adherence"` regardless of rank — the same mechanism `DigestEnvelope.From`'s per-finding mapper
-already had to support for `Adherence` (FR-33), reused here rather than a second special case.
+Scenario 2 ("A base rate is never ranked as a violation") turned out to be satisfied more strongly
+than this story alone set out to: every `BaseRate` finding carries `Provenance.Inferred` (this
+story's own worked example), and FR-48 (issue #52, S-42, landed after this one) partitions
+`ProcessDigest.Build`'s *entire* input by provenance — every `Inferred` finding, `BaseRate` included,
+is structurally excluded from `RankedFindings` and served through `DigestEnvelope.InferredFindings`
+instead, never interleaved by rank at all. `DigestEnvelopeTests.A_base_rate_item_never_appears_in_
+ranked_findings_and_serialises_a_distinct_kind_in_inferred_findings` proves both halves together: a
+base rate is absent from `RankedFindings` and, wherever it is served, still carries the `"baseRate"`
+wire discriminator distinct from `"adherence"` — belt and suspenders, not a fallback on the
+discriminator alone. `FromBaseRate` still sets that discriminator regardless of which list a caller
+eventually serves the envelope through, since this contract has no way to know FR-48 would add a
+second list when it was written.
 
 `FromBaseRate(Finding, string unevaluatedCondition)` follows `FromAdherence`'s own precedent:
 `unevaluatedCondition` is a required parameter, not read off the `Finding` (which has no field for
@@ -82,6 +87,24 @@ rather than trusting `Finding.Resolution` alone). `SampleConditionalRuleFinding`
 assumes the unmeasured condition held, the same reasoning FR-48 gives for labelling the
 MCP-unreliability-causes-disobedience hypothesis Inferred even though its two failure rates are each
 Observed on their own.
+
+### `ProvenanceLabel` rides alongside `Provenance`, not in place of it
+
+FR-48 (issue #52, S-42) requires the three provenance levels to be distinguishable without reading
+the enum's own name, and an Inferred finding's distinguishing text to survive being quoted out of
+its original styling. `FindingEnvelope.ProvenanceLabel` is a second, `required` string field —
+`Findings.ProvenanceLabel.For(finding.Provenance)` — carried next to the existing `Provenance` enum
+member rather than replacing it: `Provenance` stays the machine-readable value a client branches on,
+`ProvenanceLabel` is the fixed human sentence a client can render or quote verbatim. Both `From` and
+`FromAdherence` set it from the same finding's `Provenance`, so the two can never disagree.
+
+`ProvenanceLabel` only supplies the *textual* half of FR-48's Scenario 2 ("distinguishable without
+reading the label"), which read literally also asks for a non-textual discriminator — an icon or
+shape a client could use without parsing the sentence at all. That half is not defined on this
+contract: `Provenance` itself is still served, so a future client can map it to a shape/icon, but no
+such mapping exists here because no rendering surface consumes this contract yet. See
+`Findings/CLAUDE.md`'s matching note under "`InferredFindings` is a separate, deliberately unranked
+field."
 
 ### `SuggestionEnvelope` makes "no suggestion" a value, not an absence
 
@@ -166,7 +189,10 @@ so a machine that has only built the .NET solution has no web shell to serve; `s
 finding maps through `FindingEnvelope.From` — an adherence finding needs `FromAdherence` with its
 resolution and rule version instead (FR-33), and only the caller (which already has the resolution)
 knows which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
-the ranking already happened in `Findings`, this only converts each entry to its wire shape.
+the ranking already happened in `Findings`, this only converts each entry to its wire shape. The
+same mapper is reused for `ProcessDigest.InferredFindings` (FR-48, issue #52, S-42) — there is no
+second, Inferred-only mapping function, because an Inferred finding needs exactly the same
+`General`/`Adherence` shape decision any other finding does.
 
 ### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
 
@@ -228,6 +254,13 @@ endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds are the first rea
 project ships: `serve` (`AecoPostMortem.Cli`) builds and runs this host, and `web/`'s
 `AppStateBanner` is the client that reads it. No finding endpoint exists yet — that arrives with the
 stories `FindingEnvelope.cs` already named.
+
+FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on every shape) and
+`DigestEnvelope.InferredFindings` (served separately from `RankedFindings`, mirroring
+`ProcessDigest`'s own split). Like the rest of this contract, neither is consumed anywhere yet —
+`web/src/routes/DigestPage.tsx` is still the S-36/S-54 `ComingSoon` placeholder, so this story
+stayed a contract change on the same two files S-36 (issue #44) already established, not a change
+to any web surface.
 
 `GET /api/sessions/{sessionId}` (`SessionEnvelope.cs`, `ApiHost.GetSession`, S-08, issue #15) is the
 second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by

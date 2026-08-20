@@ -42,6 +42,12 @@ public abstract record FindingEnvelope
 
     public required Provenance Provenance { get; init; }
 
+    /// <summary>FR-48 (issue #52, S-42): <see cref="Findings.ProvenanceLabel.For"/>'s fixed sentence
+    /// for <see cref="Provenance"/>, carried on the wire so the distinguishing text travels with the
+    /// finding itself rather than depending on how a client happens to style it — the edge case
+    /// named in that story is that styling does not survive being quoted elsewhere.</summary>
+    public required string ProvenanceLabel { get; init; }
+
     public required IReadOnlyList<EvidenceItem> Evidence { get; init; }
 
     public required Recurrence Recurrence { get; init; }
@@ -56,6 +62,7 @@ public abstract record FindingEnvelope
     {
         Class = finding.Class,
         Provenance = finding.Provenance,
+        ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),
@@ -70,6 +77,7 @@ public abstract record FindingEnvelope
     {
         Class = finding.Class,
         Provenance = finding.Provenance,
+        ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),
@@ -87,6 +95,7 @@ public abstract record FindingEnvelope
     {
         Class = finding.Class,
         Provenance = finding.Provenance,
+        ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),

@@ -189,4 +189,55 @@ public sealed class FindingEnvelopeTests
         var baseRateRoundTripped = Assert.IsType<FindingEnvelope.BaseRate>(roundTripped);
         Assert.Equal(ParallelCallAvailabilityUnevaluated, baseRateRoundTripped.UnevaluatedCondition);
     }
+
+    /// <summary>FR-48 (issue #52, S-42): the provenance label is required on every shape, exactly
+    /// the guarantee <see cref="Provenance_is_a_required_member_on_every_shape"/> gives
+    /// <c>Provenance</c> itself — a served finding cannot omit the text that distinguishes it.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(FindingEnvelope.General))]
+    [InlineData(typeof(FindingEnvelope.Adherence))]
+    public void ProvenanceLabel_is_a_required_member_on_every_shape(Type envelopeType)
+    {
+        var property = envelopeType.GetProperty(nameof(FindingEnvelope.ProvenanceLabel));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    /// <summary>The edge case named in issue #52: a hypothesis has to read as one in its own text,
+    /// since styling does not survive being quoted elsewhere — an Inferred finding's served label
+    /// names it a hypothesis, and the other two levels' labels do not.</summary>
+    [Fact]
+    public void An_inferred_findings_served_label_reads_as_a_hypothesis()
+    {
+        var finding = SampleWasteFinding() with { Provenance = Provenance.Inferred };
+
+        var envelope = FindingEnvelope.From(finding);
+
+        Assert.Contains("hypothesis", envelope.ProvenanceLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void An_observed_or_derived_findings_served_label_does_not_read_as_a_hypothesis()
+    {
+        var envelope = FindingEnvelope.From(SampleWasteFinding());
+
+        Assert.DoesNotContain("hypothesis", envelope.ProvenanceLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void The_provenance_label_survives_serialisation_independent_of_any_styling()
+    {
+        var finding = SampleWasteFinding() with { Provenance = Provenance.Inferred };
+        var envelope = FindingEnvelope.From(finding);
+
+        var json = JsonSerializer.Serialize<FindingEnvelope>(envelope);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.Contains(
+            "hypothesis",
+            document.RootElement.GetProperty("ProvenanceLabel").GetString(),
+            StringComparison.OrdinalIgnoreCase);
+    }
 }

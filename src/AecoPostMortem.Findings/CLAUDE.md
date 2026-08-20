@@ -15,7 +15,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
-| `Digest.cs` | FR-41 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking |
+| `Digest.cs` | FR-41 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking. FR-48 (issue #52, S-42) split `ProcessDigest.RankedFindings` into that (Observed/Derived only) plus `InferredFindings`, its own unranked section |
+| `ProvenanceLabel.cs` | FR-48 (issue #52, S-42): `ProvenanceLabel.For(Provenance)` — the fixed, textually distinct sentence per provenance level, served on every `FindingEnvelope` so the distinguishing signal is in the finding's own words, not only its styling |
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
@@ -232,6 +233,42 @@ a query when it runs.
 corpus that is both mid-ingest and has no check registered yet still reads `Incomplete`: the more
 urgent, more specific claim wins rather than the two states being merged or left to declare in
 whichever order a caller happens to check them.
+
+### `InferredFindings` is a separate, deliberately unranked field — not a filter a caller applies
+
+FR-48 (issue #52, S-42) says an Inferred finding is "never ranked beside" an Observed or Derived
+one — `ProcessDigest.Build` partitions its input by `Provenance` itself (`RankedFindings` excludes
+`Provenance.Inferred`; `InferredFindings` is exactly that subset) rather than publishing one mixed
+list and trusting every caller to filter it before ranking. `InferredFindings` also does not run
+through `OrderByDescending(SessionsAffected)`: `SessionsAffected` is the "how many sessions this
+touched" figure the PRD names as measured, and applying it to a hypothesis would dress the
+hypothesis up with the same measured-looking number that ranks Observed and Derived findings — the
+exact "guess laundered into a process change" the PRD's risk table (§3.8) names for this FR.
+`InferredFindings` therefore preserves whatever order its caller supplied, same as `RankedFindings`
+does for ties (`A_tie_in_sessions_affected_preserves_input_order_rather_than_reordering_arbitrarily`).
+
+**Known gap, deliberately left open:** FR-48's Scenario 2 says the three levels must be
+distinguishable "without reading the label," which most naturally asks for a non-textual
+discriminator too (icon, shape, position) — not only the wording `ProvenanceLabel` supplies. This
+story stops at the wire contract (see `ProvenanceLabel` below and `Api/CLAUDE.md`'s matching note):
+`Provenance` is still on the wire for a client to branch a shape/icon on, but no such discriminator
+is defined here, because no rendering surface exists yet to define it for (`web/DigestPage.tsx` is
+still `ComingSoon`). That non-textual half belongs to whichever story builds the real digest render
+(S-54).
+
+### `ProvenanceLabel` is text rendering of the existing enum, not a new domain concept
+
+FR-48's second scenario says the three provenance levels must be distinguishable without reading
+the label, and its edge case adds that an Inferred finding must read as a hypothesis in its own
+text, "since the styling does not survive being quoted elsewhere" — a CSS class or an icon
+disappears the moment a finding is copied into a report; wording doesn't. `ProvenanceLabel.For`
+is a `static` lookup, one fixed sentence per `Provenance` value, deliberately not a new field on
+`Finding` itself — nothing it returns isn't already derivable from the enum, only its human-readable
+form is new. It is served on every `FindingEnvelope` (`ProvenanceLabel`, `required`, alongside the
+raw `Provenance` enum) rather than left for a client to derive, so the distinguishing text travels
+with the finding on the wire. Only the Inferred sentence contains the word "hypothesis" — the other
+two do not — which is what makes `Only_the_inferred_label_reads_as_a_hypothesis` a meaningful
+assertion rather than a coincidence of wording.
 
 ### `RuleCoverageStatus` has exactly one member today, on purpose
 
@@ -460,7 +497,12 @@ by distinct sessions affected and states the masthead's designed states
 `MastheadCounters` as a plain input — nothing in this repository yet writes those counters at ingest
 time, the same not-yet-wired gap `HookFailureFinding` and `FailedToolCallsFinding` document for their
 own `Data` reads. Row expansion, the recurrence strip and the repository selector (FR-41 part 2 of 2)
-are S-54, not built here.
+are S-54, not built here. `RankedFindings` now excludes `Provenance.Inferred` and
+`InferredFindings` is its own unranked field (issue #52, S-42, FR-48) — see "`InferredFindings` is a
+separate, deliberately unranked field" above. `ProvenanceLabel.For` (same story) is the fixed,
+textually distinct sentence per provenance level, served on `Api.FindingEnvelope`; no web surface
+consumes either yet — `web/src/routes/DigestPage.tsx` is still the S-36/S-54 `ComingSoon`
+placeholder, so this story stays a contract change, the same scope S-36 itself stayed within.
 
 `SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract, now consumed by the masthead
 it was published ahead of: `SessionRecording.Build` calls `From(Session)` for

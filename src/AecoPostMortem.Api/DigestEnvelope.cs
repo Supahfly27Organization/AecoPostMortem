@@ -59,6 +59,11 @@ public sealed record DigestEnvelope
 
     public required IReadOnlyList<FindingEnvelope> RankedFindings { get; init; }
 
+    /// <summary>FR-48 (issue #52, S-42): every Inferred finding, in its own section — never inside
+    /// <see cref="RankedFindings"/>. Mirrors <see cref="ProcessDigest.InferredFindings"/> exactly;
+    /// this field only maps each entry to its wire shape.</summary>
+    public required IReadOnlyList<FindingEnvelope> InferredFindings { get; init; }
+
     /// <summary><paramref name="mapFinding"/> is supplied by the caller rather than assumed to be
     /// <see cref="FindingEnvelope.From"/>: an adherence finding must go through
     /// <see cref="FindingEnvelope.FromAdherence"/> with its resolution and rule version instead
@@ -76,6 +81,7 @@ public sealed record DigestEnvelope
             Masthead = MastheadEnvelope.From(digest.Masthead),
             State = digest.State,
             RankedFindings = digest.RankedFindings.Select(mapFinding).ToList(),
+            InferredFindings = digest.InferredFindings.Select(mapFinding).ToList(),
         };
     }
 }

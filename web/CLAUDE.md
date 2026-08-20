@@ -35,7 +35,7 @@ passing `--prefix`, for the same reason.
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
 | `src/api/monitor.ts` | FR-39's `MonitorComparisonEnvelope` shape and `fetchMonitorComparison`, hand-kept in sync with `AecoPostMortem.Api.MonitorComparisonEnvelope` (`src/AecoPostMortem.Api/MonitorComparisonEnvelope.cs`) — reuses `AdherenceFigure` from `digest.ts` and `RuleSetVersionEnvelope` from `rulesInventory.ts` rather than redeclaring either |
 | `src/digest/MonitorComparisonBlock.tsx` | FR-39 (S-35, issue #43): renders a `MonitorComparisonEnvelope` as two sides, Before and After, each an `AdherenceFigureBlock` preceded by its own session count at the identical visual weight (`adherence-figure__percentage`'s own class plus `data-emphasis="prominent"`) — Scenario 2's "as visible as the percentage" |
-| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field |
+| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field; FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.readabilityByModel` (optional, unlike the server's `required`-but-nullable field, so pre-existing test literals still type-check) |
 | `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
 | `src/api/useStepEvidence.ts` | FR-21 part 2 of 3 (S-52, issue #16): the fetch-per-`(sessionId, stepId, kind)` hook the inspector reads once a step is selected, mirroring `useSession`'s loading/error/loaded shape |
 | `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built. FR-22 (S-09, issue #18) added `AgentLanes`/`SubagentOutputPanel`: one entry per subagent, rendered between the finding chip row and the tape, each carrying the report it actually produced (or a stated "no output"/"failed" state) — renders nothing when `envelope.lanes` is empty, the same "no section at all" discipline `ComingSoon`'s sibling surfaces avoid reinventing |
@@ -273,6 +273,19 @@ keyboard (Tab, Enter/Space) the same way any other interactive control on the pa
 `aria-pressed` states which step is currently selected without a second, parallel "selected" class a
 test or a screen reader would have to infer separately.
 
+### The Thinking tab's encrypted state names its model and never averages two models' readable shares
+
+FR-23 (S-10, issue #19): `ThinkingPanel` renders `thinking.text` verbatim for the `'present'` case
+(Scenario 1) unchanged from S-52. For `'unavailable'`, it now also renders `readabilityByModel` when
+the server sent it (only for the provider-encryption reason) — a `ReadabilityByModel` list component
+with one `<li>` per model, each showing that model's own `readableSharePercent` and the counts it was
+computed from (never a bare percentage, the same "a figure never appears without what it's computed
+over" discipline `AdherenceFigureBlock` follows for its own figure). A session using two models
+therefore renders two list items, never a merged or averaged one — matching the story's own edge
+case and `AecoPostMortem.Api.CLAUDE.md`'s matching non-obvious decision for where the figure is
+computed. `readabilityByModel` is read straight off the wire with no client-side computation: this
+page derives nothing, the same discipline `Masthead` and `AdherenceFigureBlock` already follow.
+
 ### The inspector fetches only Thinking/Raw; Detail needs no request of its own
 
 `SelectedStepInspector` calls `useStepEvidence` once a step is selected, but `DetailPanel` reads
@@ -354,6 +367,13 @@ real chip row's *shape* but an empty one — nothing wires a live `Finding` list
 `ApiHost.GetSession` yet (`AecoPostMortem.Api/CLAUDE.md`'s own status note) — while the inspector's
 Thinking/Raw tabs are fully live against any ingested store, since they read `RawEvent` rows
 directly rather than a not-yet-wired derived pipeline.
+
+FR-23 (S-10, issue #19) closed the Thinking tab's own gap: the empty state for provider-encrypted
+reasoning now names the model (when the raw event carried one) and renders the session's own
+measured readable share per model (`ReadabilityByModel` in `SessionPage.tsx`, `readabilityByModel`
+in `api/session.ts`) — no new lane rendering, no subagent-lane change (that is S-09/FR-22's and
+issue #18's job, not touched here), and no client-side computation: the figure travels from
+`GET /api/sessions/{sessionId}/steps/{stepId}?kind=` already, unchanged endpoint shape otherwise.
 
 FR-25 (S-12, issue #21) added `SessionTapeStep.pluginName`/`.pluginVersion` — a `'skill'` step's
 plugin and version, rendered next to its name (`session-tape__plugin`, shown only when

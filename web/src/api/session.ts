@@ -122,11 +122,23 @@ export async function fetchSession(sessionId: string, signal?: AbortSignal): Pro
   return (await response.json()) as SessionEnvelope
 }
 
+/** FR-23 (S-10, issue #19): one model's measured readable-reasoning share for this session, mirroring
+ * `AecoPostMortem.Api.ModelReasoningReadability` — never a corpus-wide constant, and never averaged
+ * across two models a session used (the story's own edge case: two figures, not one). */
+export interface ModelReasoningReadability {
+  model: string
+  readableCount: number
+  totalCount: number
+  readableSharePercent: number
+}
+
 /** `ThinkingEnvelope`'s two closed shapes (`StepEvidenceEnvelope.cs`) — "no reasoning" is a stated
- * value, never a blank Thinking panel. */
+ * value, never a blank Thinking panel. FR-23 (S-10, issue #19) added `readabilityByModel`, present
+ * only when `reason` states the reasoning is provider-encrypted — optional here (rather than
+ * `| null` required) so existing literals that predate this field still type-check. */
 export type ThinkingEnvelope =
   | { kind: 'present'; text: string }
-  | { kind: 'unavailable'; reason: string }
+  | { kind: 'unavailable'; reason: string; readabilityByModel?: ModelReasoningReadability[] | null }
 
 /** `RawStepEventEnvelope`'s two closed shapes — the edge case's own words: a step whose raw event
  * was skipped at ingest "shows that fact rather than an empty panel." */

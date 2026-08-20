@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import type { RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
+import type { ModelReasoningReadability, RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
 import { useStepEvidence } from '../api/useStepEvidence'
 import { Tape } from '../session/Tape'
@@ -232,9 +232,36 @@ function DetailPanel({ step }: { step: SessionTapeStep }) {
   )
 }
 
+const readableSharePercentFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1 })
+
+/** FR-23 (S-10, issue #19), Scenario 2: when `reason` states the reasoning is provider-encrypted,
+ * `readabilityByModel` carries this session's own measured readable share, one row per model it
+ * actually used — a session using two models renders two rows, never an average of the two. */
+function ReadabilityByModel({ readabilityByModel }: { readabilityByModel: ModelReasoningReadability[] }) {
+  if (readabilityByModel.length === 0) {
+    return null
+  }
+
+  return (
+    <ul className="inspector__thinking-readability" aria-label="Readable reasoning share by model">
+      {readabilityByModel.map((figure) => (
+        <li key={figure.model}>
+          <b>{figure.model}</b>: {readableSharePercentFormat.format(figure.readableSharePercent)}% readable
+          ({figure.readableCount} of {figure.totalCount} reasoning-bearing messages, this session)
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function ThinkingPanel({ thinking }: { thinking: ThinkingEnvelope }) {
   if (thinking.kind === 'unavailable') {
-    return <p className="inspector__unavailable">{thinking.reason}</p>
+    return (
+      <div className="inspector__unavailable">
+        <p>{thinking.reason}</p>
+        {thinking.readabilityByModel != null && <ReadabilityByModel readabilityByModel={thinking.readabilityByModel} />}
+      </div>
+    )
   }
 
   return <p className="inspector__thinking-text">{thinking.text}</p>

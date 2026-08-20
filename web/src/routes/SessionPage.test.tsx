@@ -405,6 +405,58 @@ describe('Selecting a step shows its evidence', () => {
   })
 })
 
+/** FR-23 (S-10, issue #19): Scenario 1 — readable reasoning is shown as the Thinking tab's
+ * content. */
+describe('Readable reasoning is shown', () => {
+  it('shows the plaintext reasoning on the Thinking tab', async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
+      thinking: { kind: 'present', text: 'Checking the failing assertion before writing a fix.' },
+      raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /view/i })
+    await user.click(step)
+    await user.click(screen.getByRole('tab', { name: 'Thinking' }))
+
+    expect(await screen.findByText('Checking the failing assertion before writing a fix.')).toBeInTheDocument()
+  })
+})
+
+/** FR-23 (S-10, issue #19): Scenario 2 — encrypted reasoning is explained, not blanked, and states
+ * the measured readable share for the models this session actually used. The edge case: two models
+ * get two figures, never an average. */
+describe('Encrypted reasoning is explained, not blanked', () => {
+  it('states that reasoning is encrypted for this model and reports the per-model readable share', async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
+      thinking: {
+        kind: 'unavailable',
+        reason: "This step's reasoning is provider-encrypted for gpt-5.4 and cannot be read.",
+        readabilityByModel: [
+          { model: 'claude-sonnet-4.5', readableCount: 88, totalCount: 100, readableSharePercent: 88.2 },
+          { model: 'gpt-5.4', readableCount: 4, totalCount: 114, readableSharePercent: 3.5 },
+        ],
+      },
+      raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /view/i })
+    await user.click(step)
+    await user.click(screen.getByRole('tab', { name: 'Thinking' }))
+
+    expect(await screen.findByText(/provider-encrypted for gpt-5\.4/i)).toBeInTheDocument()
+
+    const readability = await screen.findByRole('list', { name: 'Readable reasoning share by model' })
+    expect(readability).toHaveTextContent('gpt-5.4')
+    expect(readability).toHaveTextContent('3.5%')
+    expect(readability).toHaveTextContent('claude-sonnet-4.5')
+    expect(readability).toHaveTextContent('88.2%')
+  })
+})
+
 /** Edge case: a step whose raw event was skipped at ingest shows that fact rather than an empty
  * panel — the Raw tab is "the provenance guarantee made clickable," never left blank. */
 describe('A step whose raw event was skipped at ingest', () => {

@@ -338,9 +338,12 @@ rule visible with its adherence frozen at the removal date, and states both desi
 found" states rather than rendering an empty table. `/api/rules-inventory` is now wired to real
 corpus-wide extraction (`AecoPostMortem.Api/CLAUDE.md`, `ApiHost.GetRulesInventory`) — a real browser
 today renders this repository's own `CLAUDE.md`/`AGENTS.md` rules with no change to any file in this
-directory, the same promise `DigestPage` fulfilled first. `Watched` and "Not checkable" (with a
-reason) never appear yet — every extracted statement today renders "Checkable — not yet built" or
-"Not a rule" (`AecoPostMortem.Api/CLAUDE.md`'s own remarks on `RulesInventoryClassifier` say why).
+directory, the same promise `DigestPage` fulfilled first. `Watched` can now appear for real — the
+server resolves a `PreferAOverB` statement's operands against a real `ToolInvocationShape` corpus
+(`AecoPostMortem.Api/CLAUDE.md`'s own remarks on `RulesInventoryClassifier` say what it does and does
+not attempt) — but no rule statement in the live 35-session reference corpus happens to be phrased
+narrowly enough on both sides to reach it yet; every extracted statement today still renders
+"Checkable — not yet built" or "Not a rule". "Not checkable" (with a reason) still never appears.
 
 The Process Digest (`routes/DigestPage.tsx`, `api/digest.ts`, `api/useDigest.ts`, `digest/`) has its
 real content — S-36 (issue #44) built the masthead/ranking contract and, in a follow-up, the rendered

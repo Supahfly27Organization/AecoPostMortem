@@ -14,13 +14,16 @@ passing `--prefix`, for the same reason.
 
 | File | What it holds |
 |---|---|
-| `src/App.tsx` | the three routes (`/`, `/sessions`, `/rules`), all under `AppShell`. Router-agnostic on purpose — `main.tsx` supplies `BrowserRouter`, tests supply `MemoryRouter` |
+| `src/App.tsx` | the routes (`/`, `/sessions`, `/sessions/:sessionId`, `/rules`), all under `AppShell`. Router-agnostic on purpose — `main.tsx` supplies `BrowserRouter`, tests supply `MemoryRouter` |
 | `src/AppShell.tsx` | the nav to all three surfaces (always reachable, S-48 Scenario 1) plus `AppStateBanner`, above whichever route's `<Outlet />` content is showing |
 | `src/AppStateBanner.tsx` | S-48 Scenarios 2 and 3: fetches `/api/app-state` and renders its diagnosis, distinctly per state — no-source-found, empty-store, and a fourth state (unreachable API) neither Gherkin scenario names but a real machine can hit |
 | `src/api/appState.ts` | the `AppStateReport`/`AppStateKind` shapes and `fetchAppState`, hand-kept in sync with `AecoPostMortem.Api.AppStateReport` (`src/AecoPostMortem.Api/AppStateReport.cs`) — no generated client exists yet |
 | `src/api/useAppState.ts` | the fetch-once-on-mount hook `AppStateBanner` reads; loading renders nothing rather than a message that might not apply a moment later |
-| `src/routes/ComingSoon.tsx` | the placeholder every one of the three routes renders today — none has its real content built yet — naming its own story and release rather than sharing one generic message |
-| `src/routes/DigestPage.tsx`, `SessionPage.tsx`, `RulesInventoryPage.tsx` | one `ComingSoon` each, with that surface's own story/release (S-36 / S-54, S-08, S-22 respectively) |
+| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`) |
+| `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
+| `src/routes/ComingSoon.tsx` | the placeholder a surface with no real content yet renders — naming its own story and release rather than sharing one generic message |
+| `src/routes/DigestPage.tsx`, `RulesInventoryPage.tsx` | one `ComingSoon` each, with that surface's own story/release (S-36 / S-54, S-22 respectively) |
+| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape, real as of this story. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built |
 
 ## Non-obvious decisions
 
@@ -40,6 +43,22 @@ diagnosis. `AppStateBanner` renders a distinct `role="alert"` message for it
 ("Could not reach the local API. Is `aecopostmortem serve` running?"), rather than either folding
 it into `EmptyStore` (wrong diagnosis: the store might not be empty at all) or showing nothing
 (silent from the operator's side, which is the exact failure PRD §3.1 opens this story to prevent).
+
+### `/sessions/:sessionId` is additive; bare `/sessions` states "no session selected"
+
+`App.tsx` registers `sessions` and `sessions/:sessionId` as two separate routes onto the same
+`SessionPage` component rather than one route with an optional segment — `SessionPage` branches on
+whether `useParams().sessionId` is present. Nothing yet lets an operator pick a session from a list
+(the digest's finding chips are a later story), so the bare route is real, deliberate UI — "select a
+session first" — not a leftover placeholder; only `/sessions/:sessionId` renders the masthead and
+tape.
+
+### A step's offset and elapsed time are plain numbers, not a serialised duration
+
+`session.ts`'s `SessionMasthead.elapsedMs`/`SessionTapeStep.offsetMs` are milliseconds
+(`number`/`number | null`), matching `AecoPostMortem.Api.SessionEnvelope`'s own choice to serialise
+`TimeSpan` as milliseconds rather than a duration string — one fewer format both sides would
+otherwise have to agree on by hand.
 
 ### The two Gherkin empty states are still hand-kept in sync between server and client
 
@@ -64,10 +83,15 @@ because this hand-kept contract drifted silently once already (a missing naming 
 ## Status
 
 Routing (React Router: `App.tsx`, `AppShell.tsx`), the two zero-data states plus the "API
-unreachable" state (`AppStateBanner.tsx`, `api/useAppState.ts`, `api/appState.ts`), and all three
-surfaces reachable as named placeholders (`routes/DigestPage.tsx`, `SessionPage.tsx`,
-`RulesInventoryPage.tsx`, `ComingSoon.tsx`) — S-48. None of the three surfaces has its real content
-built yet; that lands with S-36/S-54 (digest), S-08 (session view) and S-22 (Rules Inventory).
+unreachable" state (`AppStateBanner.tsx`, `api/useAppState.ts`, `api/appState.ts`), and the digest
+and Rules Inventory reachable as named placeholders (`routes/DigestPage.tsx`,
+`RulesInventoryPage.tsx`, `ComingSoon.tsx`) — S-48. Those two surfaces still have no real content;
+that lands with S-36/S-54 (digest) and S-22 (Rules Inventory).
+
+The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`) is real as of
+S-08 (FR-21, part 1 of 3, issue #15): the masthead and the time-ordered tape, reading
+`GET /api/sessions/{sessionId}`. Finding chips and the inspector (Detail/Thinking/Raw tabs) are
+S-52/S-53, not built here.
 
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there

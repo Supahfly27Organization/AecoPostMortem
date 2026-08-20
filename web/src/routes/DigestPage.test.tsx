@@ -52,6 +52,7 @@ function digestWith(overrides: Partial<DigestEnvelope> = {}): DigestEnvelope {
         operatorResponse: 'ignored',
       },
     ],
+    inferredFindings: [],
     ...overrides,
   }
 }
@@ -127,6 +128,38 @@ describe('DigestPage', () => {
     expect(await screen.findByText(/no check has run/i)).toBeInTheDocument()
   })
 
+  // Regression: `AecoPostMortem.Findings.Digest.cs` derives `DigestState.Analyzed` from whether any
+  // check ran, independent of how many findings resulted — `rankedFindings` can be empty while
+  // `inferredFindings` is not (every check that ran happened to only produce hypotheses). "Every
+  // check ran and found nothing." would be self-contradictory directly above a populated "Judgment
+  // calls" section, so that message must also require `inferredFindings` to be empty.
+  it('does not claim "found nothing" when the ranked list is empty but a judgment call exists', async () => {
+    respondWith(
+      digestWith({
+        rankedFindings: [],
+        inferredFindings: [
+          {
+            kind: 'general',
+            class: 'missingCapability',
+            provenance: 'inferred',
+            evidence: [{ field: 'data.tool', value: 'codebase-memory-mcp-search_graph' }],
+            recurrence: {
+              key: 'codebase-memory-mcp-search_graph',
+              occurrences: [{ sessionId: 'session-9', ruleSetVersion: null }],
+            },
+            sessionsAffected: 1,
+            suggestion: { state: 'absent' },
+            operatorResponse: 'ignored',
+          },
+        ],
+      }),
+    )
+    render(<DigestPage />)
+
+    expect(await screen.findByText(/judgment calls/i)).toBeInTheDocument()
+    expect(screen.queryByText(/found nothing/i)).not.toBeInTheDocument()
+  })
+
   it('reports an unreachable API distinctly, rather than showing nothing', async () => {
     vi.stubGlobal(
       'fetch',
@@ -137,5 +170,44 @@ describe('DigestPage', () => {
     render(<DigestPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('aecopostmortem serve')
+  })
+
+  // FR-48 (issue #52, S-42): `DigestEnvelope.InferredFindings` is real, served data — every
+  // hypothesis-level finding, kept out of `rankedFindings` on the server side already. This is the
+  // gap issue's own worked example: the field arrives on the wire and, before this fix, was silently
+  // dropped because `DigestEnvelope` (this file's own `../api/digest`) never declared it.
+  it('renders inferred findings in their own section, separate from the ranked list', async () => {
+    respondWith(
+      digestWith({
+        inferredFindings: [
+          {
+            kind: 'general',
+            class: 'missingCapability',
+            provenance: 'inferred',
+            evidence: [{ field: 'data.tool', value: 'codebase-memory-mcp-search_graph' }],
+            recurrence: {
+              key: 'codebase-memory-mcp-search_graph',
+              occurrences: [{ sessionId: 'session-9', ruleSetVersion: null }],
+            },
+            sessionsAffected: 1,
+            suggestion: { state: 'absent' },
+            operatorResponse: 'ignored',
+          },
+        ],
+      }),
+    )
+    render(<DigestPage />)
+
+    expect(await screen.findByText(/judgment calls/i)).toBeInTheDocument()
+    expect(screen.getByText('codebase-memory-mcp-search_graph')).toBeInTheDocument()
+  })
+
+  it('renders no "Judgment calls" section at all when there are no inferred findings', async () => {
+    respondWith(digestWith())
+    render(<DigestPage />)
+
+    await screen.findByText('src/hot.cs')
+
+    expect(screen.queryByText(/judgment calls/i)).not.toBeInTheDocument()
   })
 })

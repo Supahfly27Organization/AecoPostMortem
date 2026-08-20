@@ -7,3 +7,17 @@
   margin: 1rem 0 0;
   padding: 0;
 }
+
+/* FR-48 (issue #52, S-42): the "Judgment calls" section for `DigestEnvelope.inferredFindings` — a
+   dashed top border in the same violet used for an inferred provenance badge
+   (`digest/ProvenanceBadge.css`), so the section reads as visually distinct from the measured
+   ranked findings above it before a reader gets to any row inside it. */
+.digest-page__inferred {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--infer);
+}
+
+.digest-page__inferred h3 {
+  margin: 0 0 0.25rem;
+}

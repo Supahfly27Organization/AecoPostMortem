@@ -28,6 +28,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
 | `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
 | `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
+| `ContradictionCheck.cs` | FR-43 (S-38, issue #47): `ContradictionCandidate` (a pair of statements plus their shared, negation-stripped wording) and `ContradictionCheck.Run` — pairwise keyword-polarity detection over whatever statements the caller hands in, `i < j` only so no statement is ever compared against itself |
 
 ## The invariant
 
@@ -396,6 +397,31 @@ colliding two different block sets onto the same hash. Length-prefixing has no s
 encoding of a sequence of fields is injective regardless of what those fields contain, so it needs no
 assumption about what extracted text does or does not include.
 
+### Self-match exclusion is structural (loop bounds), not a filter applied after the fact
+
+FR-43's own edge case: a keyword-polarity first pass returned a measured 4 candidates and all 4
+were spurious — three matched a statement against itself, because a prohibition contains the
+phrase it prohibits ("do not use it" contains "use it"). `ContradictionCheck.Run` never gives
+itself the chance to make that mistake: its only loop is `for i in 0..count, for j in i+1..count`,
+so statement `i` is never compared against itself and no pair is ever visited twice in either
+order. Two statements sharing the same polarity — including two literally identical
+statements — are never flagged either: `TryGetSharedWording` requires the negation flag to
+*differ* between the pair, so agreement (even duplicated agreement) can never read as conflict.
+`ContradictionCheckTests.A_real_prohibition_alone_in_the_set_is_never_flagged_against_itself` uses
+the PRD's own worked example text as a regression test for exactly this failure mode.
+
+### Scoping to "one rule-set version" is the caller's job, matching every other check shape
+
+`ContradictionCheck` takes whatever `IReadOnlyList<RuleStatement>` it is handed and compares all of
+it — it has no concept of a session, a version or a repository, the same plain-input discipline
+`RepeatedReadCheck`/`HookFailureCheck`/every other check in this project already follows.
+`AecoPostMortem.Findings.ContradictionCheck` is the orchestrator that groups sessions by rule-set
+version before calling in, the same split `RuleSetVersionScope`'s own remarks describe for a future
+adherence figure ("this project has no adherence figure of its own yet ... the reusable primitive
+any future figure scopes itself with") — except here the scoping is per-version grouping rather
+than a single-version refusal, since FR-43 asks for contradictions to be found *within* each
+version, not for the whole run to be refused the moment more than one version is present.
+
 ### The refusal is a primitive, not wired to an adherence figure yet
 
 FR-28 says a figure spanning a rule edit "must be impossible to compute, not merely discouraged,"
@@ -442,3 +468,9 @@ scopes itself with. Nothing yet resolves a real corpus's `RawEvent`s into `Sessi
 wiring, and the adherence figure itself, are later work; this project only publishes the shapes that
 work builds against, the same way S-49 published NORMALIZED's eight shapes ahead of anything
 populating them.
+
+The contradiction check (S-38, issue #47, FR-43) has also landed: `ContradictionCheck.Run` is the
+pairwise, self-match-excluding candidate detector; `AecoPostMortem.Findings.ContradictionCheck` is
+the caller that groups sessions by rule-set version before handing each version's deduplicated
+statements in, and registers the run (`CheckId = "contradiction-check"`) on the "checks that found
+nothing" surface FR-42 (S-37) already published ahead of this story.

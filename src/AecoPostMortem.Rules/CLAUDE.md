@@ -12,6 +12,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
 | `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
+| `ToolVocabularyMismatchCheck.cs` | FR-35 (S-26, issue #40): `RuleToolMention` (a rule's source text, one named tool, and the `ToolRole` it targets — plain input), `ToolVocabularyMismatch` (sealed base) with `MinorToolNamed`/`NonExistentToolNamed`, and `ToolVocabularyMismatchCheck.Run`, which resolves each mention through `OperandResolver` and compares against the target role's `DominantTool` |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -325,6 +326,42 @@ own claim was entirely absorbed by A") from `Unresolved` ("nothing matched B in 
 and collapsing the two would make a resolution's own record of what happened lie about which one
 occurred.
 
+### `ToolVocabularyMismatch` is a sealed hierarchy, not one type with nullable fields
+
+FR-35's two scenarios carry structurally different data: a minor tool named needs the dominant tool
+and both call counts, a non-existent tool needs neither. `MinorToolNamed` and `NonExistentToolNamed`
+both derive from `ToolVocabularyMismatch` rather than being one record with nullable
+`DominantTool`/counts, the same reasoning `OperandResolutionLayer.Unresolved` gives for being its own
+enum member instead of an empty `Tools` set — there is no field here that could be null for one kind
+and required for the other, so a caller pattern-matching on the type can never observe a
+half-populated result.
+
+### `ToolVocabularyMismatchCheck` reuses `Unresolved` and `DominantTool` rather than re-deriving either
+
+`Run` calls `OperandResolver.Resolve` once per mention and checks `Layer == OperandResolutionLayer.
+Unresolved` for the non-existent case — the exact condition `OperandResolver.cs`'s own doc comment
+names S-26 as the caller of. For the minor-tool case it compares `resolved.Tools` (not the mention's
+raw text) against `ToolRoleDeriver.Derive(...).Roles[TargetRole].DominantTool.ToolName`, so an operand
+that resolved through the server or role layer to a set containing the dominant tool is not flagged
+even though its own text is not the dominant tool's literal name.
+
+### A target role with no tools at all produces no finding, even for a tool that exists
+
+`DominantTool` is `null` when a `ToolRoleSummary`'s `Tools` list is empty (its own computed-property
+contract). `Run` treats that as "nothing to compare against" and skips the mention rather than
+fabricate a mismatch against an absent dominant tool — a decision this project's own test,
+`A_target_role_with_no_tools_at_all_produces_no_finding_for_an_existing_named_tool`
+(`ToolVocabularyMismatchCheckTests`), pins down since neither Gherkin scenario in issue #40 covers it.
+
+### One `RuleToolMention` per named tool, never a list on one record
+
+Issue #40's edge case is explicit: "a rule naming several tools needs one finding per unresolved
+name, not one aggregate finding." `RuleToolMention` carries exactly one `NamedTool`, so a rule
+naming three tools is three `RuleToolMention` values fed to one `Run` call — the fan-out is a fact
+about the input shape, not a loop this check has to remember to run internally. Whatever project
+extracts several tool names from one rule statement's own phrasing (S-25's job, not this project's)
+is responsible for producing one `RuleToolMention` per name.
+
 ### A version's identity is the (repository, hash) pair, groups by hash within chronological order
 
 `RuleSetVersioning.Compute` orders each repository's sessions by `StartedAt` (ordinal, `SessionId`
@@ -399,19 +436,24 @@ makes a bare denominator uncompilable rather than merely undocumented.
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
 resolution (S-23, issue #37, FR-31/FR-32): `OperandResolver.Resolve` and `.ResolveTwoOperands` are
-the mechanism every check shape with a named operand (S-25's catalogue, S-26's "tool your agent
-does not have") builds on rather than reimplementing tool classification. Nothing yet extracts
-operand text from a rule statement's own phrasing — that is S-25's job (FR-34); this story
-publishes the resolution mechanism the way S-21 published vocabulary/role derivation ahead of
-anything calling it with real rule text.
+the mechanism every check shape with a named operand builds on rather than reimplementing tool
+classification. S-26 (issue #40, FR-35, "this rule names a tool your agent does not have") has also
+landed on top of it: `ToolVocabularyMismatchCheck.Run` takes `RuleToolMention` values (one named tool
+plus the `ToolRole` it targets) and reports `MinorToolNamed`/`NonExistentToolNamed`. Nothing yet
+extracts operand text — or which role a statement targets — from a rule statement's own phrasing;
+that is S-25's job (FR-34, issue #39), not implemented in this project yet. `RuleToolMention` is the
+plain-input shape S-25's extraction is expected to produce one of per named tool, the same way this
+project's other checks take an already-resolved plain input rather than doing their own text
+interpretation.
 
 The check-shape catalogue has
-six entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+seven entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
-`AbortedTurnCheck` (issue #28, FR-18) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
-establish — plain per-call/per-session/per-turn input records in, structurally-required or
-structurally-paired results out, no branch on any specific tool name — is the pattern later checks
-in this project should follow.
+`AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19) and
+`ToolVocabularyMismatchCheck` (issue #40, FR-35). The shape they establish — plain per-call/
+per-session/per-turn/per-mention input records in, structurally-required or structurally-paired
+results out, no branch on any specific tool name — is the pattern later checks in this project
+should follow.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

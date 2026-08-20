@@ -10,7 +10,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `FindingClassRegistry.cs` | the four finding classes, each declaring its recurrence key (FR-57) |
 | `Evidence.cs` | `EvidenceItem` — one quoted event field |
 | `Recurrence.cs` | `Recurrence`, `RecurrenceOccurrence` — FR-57's version-independent identity |
-| `Resolution.cs` | FR-33's layer-used-per-operand and call count, carried where an adherence figure has one |
+| `Resolution.cs` | FR-56's two reserved suggestion placeholders (`{OperandLayer}`, `{CallCount}`) for one operand, carried on `Finding.Resolution` where one applies — not FR-33's served figure, see `AdherenceFigure.cs` |
+| `AdherenceFigure.cs` | FR-33 (S-24, issue #38): `OperandResolution` (one operand, the S-23 layer that resolved it, the calls it produced) and `AdherenceFigure` — the percentage as a *computed* property over those call counts, plus the `RuleSetVersionId` it was scoped to. `FromTwoOperands` builds one from `Rules.OperandResolver.ResolveTwoOperands` |
 | `Suggestion.cs` | FR-56's deterministic template text |
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
@@ -146,6 +147,41 @@ in, before the read-event filter runs — so a session whose only tool call is m
 parser-defect edge case in issue #25) still counts as considered, it just contributes no read
 events. This matches `CheckRegistryEntry`'s own doc comment: population is "the candidate set the
 check considered", defined whether or not the check goes on to find anything.
+
+### FR-33's figure makes the percentage a computed property, so a bare figure is unrepresentable
+
+`AdherenceFigure` (S-24, issue #38) is the story's whole answer to "the API refuses to serve a bare
+figure." The refusal is not a validation step at the endpoint — it is that `Percentage` has no
+setter and is derived from `Adherent.CallCount` and `Divergent`'s call counts, so a percentage
+cannot be constructed apart from the operands that produced it, and cannot drift from them
+afterwards. `RuleVersion`, `Adherent` and `Divergent` are all `required` (CS9035 on omission), the
+same guarantee `Finding.Provenance` gives, and `Api.FindingEnvelope.Adherence` therefore needs
+exactly one member (`Figure`) rather than three a caller could pair wrongly. This is the same move
+`Rules.FailureRate` already makes for its own percentage, applied one level up to the figure a
+client actually reads.
+
+`Adherent` is a single `required` member rather than the first element of one operand list on
+purpose: an empty list is representable in the type system, a missing required member is not, so
+"at least one operand's layer is always stated" holds structurally rather than by a length check.
+`Operands` (adherent side first) is computed from the two, so the served list can neither be
+omitted nor disagree with them.
+
+A zero-occurrence rule yields `Percentage == null`, never `0` — PRD §5.5 tolerates zero
+occurrences, so the figure still ships with its operands and their layers and says plainly that
+there is no percentage. `0%` of nothing would read as measured disobedience. Same rule `Guardrail`
+follows for a share with no adjudicated findings behind it.
+
+`FromTwoOperands` is the bridge to S-23 (issue #37): it takes `OperandResolver.ResolveTwoOperands`'
+own result plus the corpus it was resolved against and only *counts calls* — it never re-decides
+which tools an operand owns, so FR-32's A-wins subtraction is preserved rather than reapplied here.
+An operand that resolved through `OperandResolutionLayer.Unresolved` still appears on the figure
+with a zero count; dropping it would silently shrink the denominator, which is exactly the kind of
+invisible choice the measured fivefold spread came from.
+
+`Layer` is `Rules.OperandResolutionLayer` itself, not a string: the four layers are the only answers
+FR-31 admits, and a string would let a caller invent a fifth. This is also why FR-33's figure lives
+in `Findings` and not `Rules` — it names no tool itself, but it composes `Rules`' output with call
+counts the orchestration layer resolved, which is this project's job by Repo Rule 6.
 
 ### A Waste finding carries its rate in Evidence, never in Resolution
 
@@ -526,6 +562,16 @@ textually distinct sentence per provenance level, served on `Api.FindingEnvelope
 `ProvenanceLabel`, closing the non-textual-discriminator gap FR-48 left open (see "Gap closed by
 S-54" above) — `web/src/routes/DigestPage.tsx` is no longer the `ComingSoon` placeholder either
 story left it as.
+
+`AdherenceFigure` (issue #38, S-24, FR-33) publishes the shape every adherence percentage is served
+through: the percentage computed from its per-operand call counts, each operand's S-23 resolution
+layer, and the `RuleSetVersionId` it was scoped to. `Api.FindingEnvelope.Adherence` carries it as its
+one `required` member, and `web/src/digest/AdherenceFigureBlock.tsx` renders it. No check in this
+project produces one yet — no `RuleAdherenceToolChoice` check exists (S-25/S-26 build the operand
+extraction it would need), so `FromTwoOperands` is exercised against `Rules.OperandResolver` directly
+by `AdherenceFigureTests` rather than by a real check. This is the same contract-first pattern
+`SessionTokenFigures` and `ProcessDigest.Build` used: the type makes the bare figure unrepresentable
+now, so every later producer inherits the guarantee instead of re-earning it.
 
 `SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract, now consumed by the masthead
 it was published ahead of: `SessionRecording.Build` calls `From(Session)` for

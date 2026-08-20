@@ -22,9 +22,10 @@ passing `--prefix`, for the same reason.
 | `src/routes/ComingSoon.tsx` | the placeholder a surface with no real content yet renders — naming its own story and release rather than sharing one generic message |
 | `src/routes/RulesInventoryPage.tsx` | still `ComingSoon`, its own story/release (S-22) — not yet built |
 | `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established |
-| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents |
+| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents |
 | `src/api/useDigest.ts` | the fetch-once-on-mount hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape |
 | `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock` |
+| `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone |
 | `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count |
 | `src/digest/ProvenanceBadge.tsx` | PRD §3.8's three provenance levels, rendered distinguishably — a `data-provenance` attribute drives a distinct colour per level, alongside the badge's own text label |
 | `src/digest/SuggestionBlock.tsx` | Scenario 4: renders `SuggestionEnvelope`'s `present`/`absent` states — an explicit "No suggestion is offered." for `absent`, never a blank area |
@@ -87,6 +88,28 @@ S-48 served it for real — today a real browser sees `DigestPage`'s own "Could 
 API" message; the moment a future story serves the route, this page starts rendering live data with
 no frontend change. `DigestPage.test.tsx` and `App.routing.test.tsx` mock `/api/digest`'s response
 directly rather than waiting for that wiring.
+
+### One component owns both halves of an adherence figure, so neither can render alone
+
+FR-33 (S-24, issue #38) says the layer used per operand and the resulting call counts are shown
+*with* the figure. `AdherenceFigureBlock` renders the percentage **and** the resolution table, and
+`FindingRow` delegates the whole `figure` to it rather than reading `figure.percentage` itself —
+so there is no component in this app that can put a percentage on the page without the operands
+beside it. Splitting them into a `Percentage` and a `Resolution` component would have made the
+pairing a caller's responsibility, which is the convention-not-structure failure the story's own
+edge case rules out ("a second client bypassing the UI must be equally unable to get a bare
+figure" — the server contract handles that half; this is the same discipline on this side).
+
+The collapsed row deliberately shows no figure at all. Putting the percentage in the summary and
+the resolution one click away inside the detail would technically satisfy "both are on the page",
+but the operator would read the number before ever seeing what produced it — the exact reading
+FR-33 exists to prevent. `FindingRow.test.tsx`'s `does not show the percentage until the row is
+expanded` is that decision as an assertion, not an accident of layout.
+
+A `null` percentage (PRD §5.5's zero-occurrence case) renders as a sentence — "No calls were
+observed for this rule, so it has no adherence percentage." — never `0%`, which would read as
+measured disobedience rather than absent data. The resolution table still renders, so the operator
+can see *which* operands found nothing and through which layer.
 
 ### The repository selector is a seam, not a working cross-repository switch
 

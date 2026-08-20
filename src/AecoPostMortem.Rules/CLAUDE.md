@@ -13,6 +13,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
 | `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
 | `ToolVocabularyMismatchCheck.cs` | FR-35 (S-26, issue #40): `RuleToolMention` (a rule's source text, one named tool, and the `ToolRole` it targets — plain input), `ToolVocabularyMismatch` (sealed base) with `MinorToolNamed`/`NonExistentToolNamed`, and `ToolVocabularyMismatchCheck.Run`, which resolves each mention through `OperandResolver` and compares against the target role's `DominantTool` |
+| `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why `ToolVocabularyMismatchCheck` does not fit a prohibition |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -371,6 +372,30 @@ fabricate a mismatch against an absent dominant tool — a decision this project
 `A_target_role_with_no_tools_at_all_produces_no_finding_for_an_existing_named_tool`
 (`ToolVocabularyMismatchCheckTests`), pins down since neither Gherkin scenario in issue #40 covers it.
 
+### `BannedToolCheck` exists because `ToolVocabularyMismatchCheck` does not fit a prohibition
+
+`ToolVocabularyMismatchCheck` was built for a recommendation ("prefer / always use tool X for role
+Y"), where "X is not the dominant tool for Y" is a real mismatch worth flagging. A prohibition
+("never use X") does not target a role the way a recommendation does, and neither of that check's
+two outcomes reads as a meaningful violation signal for a ban: `NonExistentToolNamed` (the tool was
+never called) would mean the ban is being *honored*, and `MinorToolNamed` (the tool, when called, is
+not the dominant tool of the role its own calls happen to classify into) would fire on nearly every
+real ban and say nothing, since a banned tool being non-dominant is true almost by definition.
+`BannedToolCheck` answers the actually adherence-worthy question instead — was the named tool called
+at all — with no `ToolRole` involved.
+
+### `BannedToolUsage.CallCount` can never be zero for a returned result
+
+Every layer `OperandResolver.Resolve` can return (`ExactToolName`, `McpServerField`, `DerivedRole`)
+is derived from calls that were actually observed in the corpus passed in — there is no layer that
+resolves a name to a tool that was never called. A banned tool that was never called is therefore
+`Unresolved`, indistinguishable from an unknown name, and `BannedToolCheck.Run` reports neither: both
+are the ban being honored (or the corpus never having the tool in the first place), not a violation.
+This is why `BannedToolCheck` cannot follow `FailedToolCallsCheck`'s "report every candidate,
+including clean ones, let the caller filter" pattern the way `ToolVocabularyMismatchCheck` does —
+there is no clean case for it to report at all; every `BannedToolUsage` returned is already a
+violation.
+
 ### One `RuleToolMention` per named tool, never a list on one record
 
 Issue #40's edge case is explicit: "a rule naming several tools needs one finding per unresolved
@@ -652,13 +677,21 @@ through it, resolves the matched operands against that corpus's tools, or render
 that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
-seven entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+eight entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
-`AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19) and
-`ToolVocabularyMismatchCheck` (issue #40, FR-35). The shape they establish — plain per-call/
-per-session/per-turn/per-mention input records in, structurally-required or structurally-paired
-results out, no branch on any specific tool name — is the pattern later checks in this project
-should follow.
+`AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19),
+`ToolVocabularyMismatchCheck` (issue #40, FR-35) and `BannedToolCheck` (piece 3's second slice,
+FR-35's `ToolIsBanned` counterpart). The shape they establish — plain per-call/per-session/per-turn/
+per-mention input records in, structurally-required or structurally-paired results out, no branch on
+any specific tool name — is the pattern later checks in this project should follow.
+
+`BannedToolCheck` (piece 3's second slice) closes the `ToolIsBanned` gap the `RulesInventoryClassifier`
+remarks (`Api/CLAUDE.md`) once left open: turning a ban into a real verdict does not need a
+`ToolRole` after all — see this file's own remarks above for why `ToolVocabularyMismatchCheck`
+does not fit a prohibition, and why `BannedToolUsage.CallCount` can never be zero for a returned
+result. `AecoPostMortem.Findings.BannedToolFinding` is the real caller, wired into
+`AecoPostMortem.Api.ApiHost.GetDigest` as a seventh check orchestrator, and
+`RulesInventoryClassifier` now also watches a `ToolIsBanned` match whose single operand resolves.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

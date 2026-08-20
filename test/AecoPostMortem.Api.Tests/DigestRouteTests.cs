@@ -279,6 +279,68 @@ public sealed class DigestRouteTests
         }
     }
 
+    static RawEvent SystemMessage(string sessionId, string content, long sequence = 0) => new(
+        sessionId,
+        sequence,
+        "system.message",
+        "2026-08-16T10:00:00Z",
+        "0.0.339",
+        $"events-{sessionId}.jsonl",
+        sequence,
+        RawPayload.ContentHashOfText(content),
+        JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["type"] = "system.message",
+            ["data"] = new Dictionary<string, string> { ["content"] = content },
+        }));
+
+    const string BannedToolPrompt = """
+        <custom_instruction>
+        CLAUDE.md
+        - Never use grep.
+        </custom_instruction>
+        """;
+
+    /// <summary>Piece 3's second slice: a banned tool actually called serves a
+    /// <see cref="FindingClass.RuleAdherenceToolChoice"/> finding, wired the same way the other six
+    /// checks already are.</summary>
+    [Fact]
+    public async Task A_banned_tool_actually_called_serves_a_rule_adherence_finding()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1"));
+            context.RawEvents.Add(SystemMessage("s1", BannedToolPrompt));
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc1",
+                ToolName = "grep",
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var finding = Assert.Single(
+                envelope!.RankedFindings, f => f.Class == FindingClass.RuleAdherenceToolChoice);
+            Assert.Contains(finding.Evidence, item => item.Field == "named_tool" && item.Value == "grep");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     static RawEvent Intent(string sessionId, long sequence, string timestamp, string intent)
     {
         var payload = JsonSerializer.Serialize(new

@@ -107,13 +107,24 @@ public sealed class RulesInventoryClassifierTests
     }
 
     [Fact]
-    public void A_tool_is_banned_match_is_never_watched_by_this_classifier()
+    public void A_tool_is_banned_match_whose_operand_resolves_against_the_real_corpus_is_watched()
     {
-        // ToolIsBanned's own remarks: turning a ban into a real verdict needs deciding which ToolRole
-        // a banned tool "targets" for ToolVocabularyMismatchCheck, which nothing in this codebase has
-        // ever decided — a real design question, not wired here.
+        // Piece 3's second slice: a ban's single operand is resolved the same way PreferAOverB's
+        // are — no ToolRole involved, since BannedToolCheck (Rules/CLAUDE.md) answers "was the named
+        // tool called at all" rather than a role comparison.
         var statement = Statement("Never use curl.");
         ToolInvocationShape[] invocations = [new() { ToolName = "curl" }];
+
+        var classify = Classify(statement, invocations);
+
+        Assert.Equal(RuleStatementStatus.Watched, classify(statement));
+    }
+
+    [Fact]
+    public void A_tool_is_banned_match_whose_operand_never_resolves_stays_checkable_not_yet_built()
+    {
+        var statement = Statement("Never use curl.");
+        ToolInvocationShape[] invocations = [new() { ToolName = "view", HasPath = true }];
 
         var classify = Classify(statement, invocations);
 

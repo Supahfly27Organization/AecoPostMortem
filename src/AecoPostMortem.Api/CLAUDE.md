@@ -13,9 +13,11 @@ Endpoints for the three surfaces, and the host that serves them.
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetSession` and `GetStepEvidence` are the same three without a listener |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
-| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles) |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope` |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
+| `SubagentOutputEnvelope.cs` | FR-22 (S-09, issue #18): the inspector's lane-output contract — `Present`/`NotRecorded`/`Failed`, a closed three-shape union so "a real report", "nothing recorded" and "the subagent failed" are each a stated value, never inferred |
+| `SubagentOutputLookup.cs` | FR-22 (S-09, issue #18): `SubagentOutputLookup.Find` — resolves one subagent's real report from the last `assistant.message` carrying its own `agentId`, reading envelopes the same way `StepEvidenceLookup` does. Never reads a `tool.execution_complete` result at all, so the parent's truncated `read_agent` stub cannot surface as a lane's output by construction |
 | `MonitorComparisonEnvelope.cs` | FR-39's served comparison (S-35, issue #43): `MonitorComparisonEnvelope` — `BeforeVersion`/`AfterVersion` reuse `RuleSetVersionEnvelope` (S-22), `Before`/`After` carry `Findings.AdherenceFigure` directly, no separate figure envelope — and `MonitorComparisonEnvelope.From(Findings.MonitorComparison)` |
 
 ## References
@@ -395,6 +397,33 @@ subagent's reasoning belongs to its own step's turn context, not its parent's. E
 recorded per assistant message" — never attempting a lookup, matching the mockup's own wording for
 selecting a non-assistant step.
 
+### `SubagentOutputLookup` never reads a `tool.execution_complete` result, so the parent's stub cannot leak through by construction
+
+The data map (`docs/product-superpowers/discovery/2026-08-16-copilot-ingestion-data-map.md`) measured
+`read_agent` completions at a median 48 characters, ending in the literal marker `"(Full response
+provided to agent)"`, against subagent reports whose own median is far longer — "the parent's log
+truncates the subagent's report... a reader that follows the parent's tool result sees a stub." A
+filter that excluded that marker string would still be a filter a future change could weaken or
+bypass. `SubagentOutputLookup.Find` instead never reads a `tool.execution_complete` event at all —
+its only event-type filter is `assistant.message` — so the stub has no path into
+`SubagentOutputEnvelope.Present.Text` to be excluded from in the first place. It takes the last
+matching message by `RawEvent.Sequence`, matching Scenario 1's own wording ("the last assistant
+message bearing that agent's id"), and never a `Turn`-scoped window the way `FindThinking` uses for
+a prompt step — a subagent's `assistant.message` stream is not divided into turns the way the main
+thread's is (`AecoPostMortem.Ingestion/CLAUDE.md`, `ExecutionRecordBuilder`'s own turn-tracking
+covers only the main thread).
+
+### A failed subagent's lane is `Failed`, unconditionally — the output lookup never runs
+
+Scenario 4's own wording ("the failure and its recorded error are shown") reads as: once
+`Data.Execution.Agent.Outcome` is `AgentOutcome.Failed`, that is the lane's whole answer.
+`SubagentOutputLookup.Find` checks `Outcome` first and returns before ever scanning `sessionEvents`
+— the same "the more urgent, more specific claim wins" ordering
+`SessionRecording.DetermineStatus` already gives its own two checks (`Findings/CLAUDE.md`). A
+missing `Agent.Error` (`subagent.failed.data.error` was not recorded on that event) still produces a
+`Failed` shape, with a fixed fallback sentence, rather than falling through to `NotRecorded` —
+Scenario 4 does not admit a fourth "failed with nothing to say" state.
+
 ### `MonitorComparisonEnvelope` reuses `RuleSetVersionEnvelope` and `AdherenceFigure` verbatim, no third figure shape
 
 FR-39 Scenario 2 ("the session count on each side is as visible as the percentage") is satisfied by
@@ -475,6 +504,15 @@ resolution of their own, the same passthrough `From` already does for `Label`. B
 every other step kind. No endpoint change: `GetSession`'s query already read `context.Skills`
 (S-08), so this story only widened the wire shape two fields, plus one row in
 `SessionTapeStepEnvelope.From`.
+
+FR-22 (S-09, issue #18) added `SessionEnvelope.Lanes`: `GetSession` resolves one
+`SessionAgentLaneEnvelope` per `Data.Execution.Agent` it already reads (S-08's own `agents` query,
+unwidened), pairing each with `SubagentOutputLookup.Find(rawEvents, agent)` over the same
+`rawEvents` list S-53 already reads for its `SpawnResolutionCheck` — a third narrow reuse of that
+one read, not a fourth RAW query. Lanes are ordered by `StartedAt` then `AgentId` so the served list
+is deterministic. `web/src/routes/SessionPage.tsx`'s `AgentLanes` is the client, rendering each
+lane's identity, outcome and `SubagentOutputEnvelope` — never falling back to a `read_agent` tool
+call's truncated result, since `SubagentOutputLookup` never reads one.
 
 `MonitorComparisonEnvelope.cs` (S-35, issue #43, FR-39) is contract-only in the same sense the
 digest and Rules Inventory contracts were before their own live endpoints landed:

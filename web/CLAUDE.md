@@ -35,11 +35,11 @@ passing `--prefix`, for the same reason.
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
 | `src/api/monitor.ts` | FR-39's `MonitorComparisonEnvelope` shape and `fetchMonitorComparison`, hand-kept in sync with `AecoPostMortem.Api.MonitorComparisonEnvelope` (`src/AecoPostMortem.Api/MonitorComparisonEnvelope.cs`) — reuses `AdherenceFigure` from `digest.ts` and `RuleSetVersionEnvelope` from `rulesInventory.ts` rather than redeclaring either |
 | `src/digest/MonitorComparisonBlock.tsx` | FR-39 (S-35, issue #43): renders a `MonitorComparisonEnvelope` as two sides, Before and After, each an `AdherenceFigureBlock` preceded by its own session count at the identical visual weight (`adherence-figure__percentage`'s own class plus `data-emphasis="prominent"`) — Scenario 2's "as visible as the percentage" |
-| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus` |
+| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field |
 | `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
 | `src/api/useStepEvidence.ts` | FR-21 part 2 of 3 (S-52, issue #16): the fetch-per-`(sessionId, stepId, kind)` hook the inspector reads once a step is selected, mirroring `useSession`'s loading/error/loaded shape |
-| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built |
-| `src/session/Tape.tsx` | FR-21, part 3 of 3 (S-53, issue #17): the tape itself, moved out of `SessionPage.tsx` — fixed-row-height virtualisation (only the scrolled-to window plus overscan is mounted, proven at the largest measured session scale, 84 turns + 764 tool calls) and full keyboard reachability (a single roving tab stop on the list itself; Arrow/Home/End/PageUp/PageDown move a `selectedIndex` that pulls its row into the mounted window before selecting it, `aria-activedescendant` names it for assistive technology). Reconciled with FR-21 part 2 of 3 (S-52, issue #16)'s step-selection contract: each row's content sits inside a `tabIndex={-1}` button — a click target, never a second tab stop — so `SessionPage`'s inspector gets the same `onSelectStep` callback from a mouse click that it already got from keyboard Enter/Space |
+| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built. FR-22 (S-09, issue #18) added `AgentLanes`/`SubagentOutputPanel`: one entry per subagent, rendered between the finding chip row and the tape, each carrying the report it actually produced (or a stated "no output"/"failed" state) — renders nothing when `envelope.lanes` is empty, the same "no section at all" discipline `ComingSoon`'s sibling surfaces avoid reinventing |
+| `src/session/Tape.tsx` | FR-21, part 3 of 3 (S-53, issue #17): the tape itself, moved out of `SessionPage.tsx` — fixed-row-height virtualisation (only the scrolled-to window plus overscan is mounted, proven at the largest measured session scale, 84 turns + 764 tool calls) and full keyboard reachability (a single roving tab stop on the list itself; Arrow/Home/End/PageUp/PageDown move a `selectedIndex` that pulls its row into the mounted window before selecting it, `aria-activedescendant` names it for assistive technology). Reconciled with FR-21 part 2 of 3 (S-52, issue #16)'s step-selection contract: each row's content sits inside a `tabIndex={-1}` button — a click target, never a second tab stop — so `SessionPage`'s inspector gets the same `onSelectStep` callback from a mouse click that it already got from keyboard Enter/Space. FR-22 (S-09, issue #18) added per-row lane markers: `data-owner-kind`/`data-agent-id`/`data-agent-lane`, the last a deterministic hash of `agentId` into one of 8 colours (`laneIndex`), rendered as a coloured left border via the `--session-tape-lane` CSS custom property |
 | `src/session/Tape.css` | `Tape.tsx`'s absolute-positioning layout (each mounted row placed by `top: index * rowHeight` inside a spacer-sized scroll container), the `aria-selected` highlight, and the `tabIndex={-1}` row button's own layout |
 
 ## Non-obvious decisions
@@ -361,8 +361,49 @@ plugin and version, rendered next to its name (`session-tape__plugin`, shown onl
 after S-53's extraction — joins the version in only when both are present). A subagent's skill
 already carried `ownerKind`/`agentId` correctly since S-08 (the
 same generic attribution every step kind gets) — this story only closed the plugin/version gap, it
-added no new lane-rendering: the tape still renders one flat, wall-clock-ordered list, and grouping
-steps visually by lane is S-09's job (FR-22), not built here.
+added no new lane-rendering: grouping steps visually by lane was S-09's job (FR-22), landed below.
+
+FR-22 (S-09, issue #18) closed that gap: subagent lanes and the report each one actually produced.
+`session/Tape.tsx` gained a per-row lane marker (`data-owner-kind`, `data-agent-id`,
+`data-agent-lane`) rather than a contiguous block per agent — see the non-obvious decision below for
+why. `SessionPage.tsx`'s new `AgentLanes` component renders one entry per `envelope.lanes`
+(`SessionAgentLane`), each showing the subagent's identity, how it finished, and
+`SubagentOutputPanel`'s rendering of its `SubagentOutputEnvelope` — the last `assistant.message`
+under that subagent's own `agentId` (`present`), an explicit "no output was recorded" state
+(`notRecorded`, never a fall-back to the parent's truncated `read_agent` stub), or the failure and
+its recorded error (`failed`) when `Data.Execution.Agent.Outcome` is `Failed`. Resolution happens
+server-side (`AecoPostMortem.Api.SubagentOutputLookup`, see `AecoPostMortem.Api/CLAUDE.md`) — this
+project only renders whichever of the three shapes the server already decided.
+
+### A subagent's lane is a per-row marker, not a contiguous block
+
+The mockup this story could have followed groups a subagent's steps under one `<div class="lane">`
+header, on the assumption that a subagent's steps arrive as one contiguous run. FR-22's own
+Scenario 5 asks for "concurrent subagents," and the tape is one flat, wall-clock-ordered list across
+every thread (`SessionRecording.Build`, `AecoPostMortem.Findings/CLAUDE.md`) — two subagents running
+at once interleave their steps in time rather than each occupying one uninterrupted block. A
+block-grouping renderer would either misattribute an interleaved row to the wrong block or have to
+detect and re-sort around the interleaving, which is not this story's job (the tape's own ordering
+is FR-21's, S-08, and stays untouched here). `session/Tape.tsx` instead marks every row
+independently: `data-owner-kind` (`'main'`/`'agent'`) distinguishes the main thread outright, and for
+an agent-owned row, `laneIndex` hashes its own `agentId` into one of 8 colours
+(`--session-tape-lane`, a CSS custom property consumed by `Tape.css`'s `hsl()` border-left rule) —
+the same colour every time that `agentId` appears, however its rows are interleaved with any other
+agent's or the main thread's. `Tape.test.tsx`'s two lane tests prove both halves: a main-thread row
+and an agent-owned row carry distinct `data-owner-kind` values, and two different concurrent
+subagents' rows carry distinct `data-agent-lane` values while the same subagent's own two
+non-contiguous rows share one.
+
+### `AgentLanes` needs no lane list to correlate against the tape's own rows
+
+`SessionAgentLane` (the lane's identity, outcome and output) and `SessionTapeStep.agentId` (which
+row belongs to which agent) are two independent reads off the same `envelope` — `Tape` never
+receives `envelope.lanes` at all, and `AgentLanes` never receives `envelope.steps`. Nothing joins
+them client-side: a lane's own `agentId` is the same string a step's `agentId` already carries, so
+a reader can already tell which rows belong to which lane by eye (matching border colour) without
+this app computing that correspondence itself. Wiring the two together into one combined view (e.g.
+scrolling the tape to a lane's rows on click) is left for a later story — this one renders both,
+distinctly, and stops there.
 
 FR-39 (S-35, issue #43) added the Monitor comparison's own block (`digest/MonitorComparisonBlock.tsx`,
 `api/monitor.ts`): a `MonitorComparisonEnvelope` renders as two `AdherenceFigureBlock`s, Before and

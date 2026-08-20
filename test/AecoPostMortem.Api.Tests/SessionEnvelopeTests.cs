@@ -282,4 +282,48 @@ public sealed class SessionEnvelopeTests
 
         Assert.Empty(envelope.Findings);
     }
+
+    /// <summary>FR-22 (S-09, issue #18): a caller that supplies no lanes argument still serialises an
+    /// empty list, never a missing field — the same "empty list is the designed state, not an
+    /// omission" discipline <see cref="SessionEnvelope.Findings"/> already documents.</summary>
+    [Fact]
+    public void No_lanes_argument_serialises_an_empty_lane_list()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        Assert.Empty(envelope.Lanes);
+    }
+
+    /// <summary>FR-22 (S-09, issue #18): supplied lanes travel onto the envelope unchanged — the
+    /// caller (<c>ApiHost.GetSession</c>) is the one that resolves each subagent's own output, this
+    /// factory only carries the result.</summary>
+    [Fact]
+    public void Supplied_lanes_are_carried_onto_the_envelope()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+        var agent = new Agent
+        {
+            SessionId = "s1",
+            AgentId = "a1",
+            SpawningToolCallId = "a1",
+            Name = "general-purpose",
+            DisplayName = "General Purpose Agent",
+            StartedAt = "2026-08-16T10:00:01Z",
+            Outcome = AgentOutcome.Completed,
+        };
+        var lane = SessionAgentLaneEnvelope.From(agent, new SubagentOutputEnvelope.Present { Text = "Done." });
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, [lane]);
+
+        var servedLane = Assert.Single(envelope.Lanes);
+        Assert.Equal("a1", servedLane.AgentId);
+        Assert.Equal("General Purpose Agent", servedLane.DisplayName);
+        Assert.Equal(AgentOutcome.Completed, servedLane.Outcome);
+        var output = Assert.IsType<SubagentOutputEnvelope.Present>(servedLane.Output);
+        Assert.Equal("Done.", output.Text);
+    }
 }

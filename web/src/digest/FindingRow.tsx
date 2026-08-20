@@ -15,8 +15,23 @@ import './FindingRow.css'
  * the key the list is ranked by, and its whole purpose is to make a finding touching one session
  * read as an anecdote beside one touching thirty. Behind an expander it could not do that, so it
  * leads the summary at display size rather than annotating it. The full session list is still the
- * expanded `RecurrenceStrip`'s job — the count ranks, the names explain. */
-export function FindingRow({ finding }: { finding: FindingEnvelope }) {
+ * expanded `RecurrenceStrip`'s job — the count ranks, the names explain.
+ *
+ * `variant` (FR-48, issue #52, S-42) defaults to `'ranked'`, unchanged from before this prop
+ * existed. The digest's own "Judgment calls" section passes `'unranked'` for a
+ * `DigestEnvelope.inferredFindings` entry: `Findings/CLAUDE.md` is explicit that an Inferred
+ * finding is never ranked by `sessionsAffected`, and this leading column exists specifically to
+ * make that number the most visually prominent thing on the row (S-36's edge case) — showing it at
+ * the same prominence on a hypothesis would visually contradict the guarantee the server went out
+ * of its way to build. Nothing is lost by omitting it: `RecurrenceStrip`, rendered on expand either
+ * way, already names every session the finding touched. */
+export function FindingRow({
+  finding,
+  variant = 'ranked',
+}: {
+  finding: FindingEnvelope
+  variant?: 'ranked' | 'unranked'
+}) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -27,12 +42,14 @@ export function FindingRow({ finding }: { finding: FindingEnvelope }) {
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        <span className="finding-row__sessions" data-rank-metric="sessions-affected">
-          <strong className="finding-row__sessions-count">{finding.sessionsAffected}</strong>
-          <span className="finding-row__sessions-unit">
-            {finding.sessionsAffected === 1 ? 'session' : 'sessions'}
+        {variant === 'ranked' && (
+          <span className="finding-row__sessions" data-rank-metric="sessions-affected">
+            <strong className="finding-row__sessions-count">{finding.sessionsAffected}</strong>
+            <span className="finding-row__sessions-unit">
+              {finding.sessionsAffected === 1 ? 'session' : 'sessions'}
+            </span>
           </span>
-        </span>
+        )}
         <span className="finding-row__key">{finding.recurrence.key}</span>
         <ProvenanceBadge provenance={finding.provenance} />
       </button>

@@ -210,4 +210,52 @@ describe('FindingRow', () => {
     expect(screen.queryByText(/no suggestion is offered/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Name `rg` instead of repeated `view` calls.')).not.toBeInTheDocument()
   })
+
+  // FR-48 (issue #52, S-42): `Findings.ProcessDigest.InferredFindings` is deliberately never ranked
+  // by `sessionsAffected` — `Findings/CLAUDE.md` says applying that figure to a hypothesis "would
+  // dress the hypothesis up with the same measured-looking number that ranks Observed and Derived
+  // findings." `variant="unranked"` is how a caller (the digest's own "Judgment calls" section) tells
+  // this row not to render the same leading rank-metric column a ranked finding gets.
+  it('an unranked-variant row omits the leading sessions-affected rank metric', () => {
+    render(
+      <ul>
+        <FindingRow
+          finding={waste({ provenance: 'inferred', sessionsAffected: 12 })}
+          variant="unranked"
+        />
+      </ul>,
+    )
+
+    const summary = screen.getByRole('button', { expanded: false })
+    expect(summary.querySelector('[data-rank-metric="sessions-affected"]')).not.toBeInTheDocument()
+    expect(summary).toHaveTextContent('src/hot.cs')
+  })
+
+  it('the default variant still shows the rank metric, unchanged from before this prop existed', () => {
+    render(
+      <ul>
+        <FindingRow finding={waste({ sessionsAffected: 12 })} />
+      </ul>,
+    )
+
+    const summary = screen.getByRole('button', { expanded: false })
+    expect(summary.querySelector('[data-rank-metric="sessions-affected"]')).toBeInTheDocument()
+  })
+
+  // Nothing is actually lost by omitting the rank metric: expanding an unranked row still shows the
+  // recurrence strip naming every session it touched (the count is just how many `<li>`s that is).
+  it('an unranked row still names every session it touched once expanded', async () => {
+    const user = userEvent.setup()
+    render(
+      <ul>
+        <FindingRow finding={waste({ provenance: 'inferred' })} variant="unranked" />
+      </ul>,
+    )
+
+    await user.click(screen.getByRole('button', { expanded: false }))
+
+    const strip = screen.getByRole('list', { name: 'Sessions touched' })
+    expect(strip).toHaveTextContent('session-1')
+    expect(strip).toHaveTextContent('session-2')
+  })
 })

@@ -74,15 +74,42 @@ export function DigestPage() {
           Analysis is incomplete — ingestion is still under way, so this ranking is not final.
         </p>
       )}
-      {digest.state === 'Analyzed' && digest.rankedFindings.length === 0 && (
-        <p className="digest-page__state">Every check ran and found nothing.</p>
-      )}
+      {digest.state === 'Analyzed' &&
+        digest.rankedFindings.length === 0 &&
+        digest.inferredFindings.length === 0 && (
+          <p className="digest-page__state">Every check ran and found nothing.</p>
+        )}
 
       <ul className="digest-page__findings">
         {digest.rankedFindings.map((finding) => (
           <FindingRow key={`${finding.class}:${finding.recurrence.key}`} finding={finding} />
         ))}
       </ul>
+
+      {/* FR-48 (issue #52, S-42): `inferredFindings` is real, served data
+          (`DigestEnvelope.InferredFindings`) — never interleaved by rank with the list above (see
+          `Findings/CLAUDE.md`'s own remarks on why a hypothesis is never ranked by sessions
+          affected). Renders no section at all when the list is empty, the same "no section at all"
+          discipline `AgentLanes` already established for an empty `envelope.lanes` (`web/CLAUDE.md`)
+          — there is nothing designed to say here beyond simply not showing the section. */}
+      {digest.inferredFindings.length > 0 && (
+        <section className="digest-page__inferred" aria-labelledby="digest-page__inferred-heading">
+          <h3 id="digest-page__inferred-heading">Judgment calls</h3>
+          <p className="digest-page__state">
+            Hypotheses inferred from the data, not measured claims — shown separately from the
+            ranked findings above and never ranked by sessions affected.
+          </p>
+          <ul className="digest-page__findings">
+            {digest.inferredFindings.map((finding) => (
+              <FindingRow
+                key={`${finding.class}:${finding.recurrence.key}`}
+                finding={finding}
+                variant="unranked"
+              />
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }

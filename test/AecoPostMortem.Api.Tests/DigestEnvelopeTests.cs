@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AecoPostMortem.Findings;
+using AecoPostMortem.Rules;
 
 namespace AecoPostMortem.Api.Tests;
 
@@ -37,6 +38,29 @@ public sealed class DigestEnvelopeTests
             Occurrences = [.. sessionIds.Select(id => new RecurrenceOccurrence { SessionId = id })],
         },
         Resolution = new Resolution { OperandLayer = "NORMALIZED", CallCount = 12 },
+    };
+
+    /// <summary>FR-33 (S-24, issue #38): the figure the adherence shape is served through — the
+    /// percentage inseparable from the layer that resolved each operand and the calls it produced.
+    /// </summary>
+    static AdherenceFigure SampleFigure() => new()
+    {
+        RuleVersion = new RuleSetVersionId { Repository = "AecoPostMortem", Hash = "b3f1c0" },
+        Adherent = new OperandResolution
+        {
+            OperandText = "rg",
+            Layer = OperandResolutionLayer.ExactToolName,
+            CallCount = 3,
+        },
+        Divergent =
+        [
+            new OperandResolution
+            {
+                OperandText = "Shell",
+                Layer = OperandResolutionLayer.DerivedRole,
+                CallCount = 1,
+            },
+        ],
     };
 
     // FR-44's worked example, mirroring FindingEnvelopeTests: the parallel-tool-calling rule's
@@ -290,7 +314,7 @@ public sealed class DigestEnvelopeTests
 
         FindingEnvelope MapFinding(Finding finding) => finding.Provenance == Provenance.Inferred
             ? FindingEnvelope.FromBaseRate(finding, ParallelCallAvailabilityUnevaluated)
-            : FindingEnvelope.FromAdherence(finding, finding.Resolution!, ruleVersion: "v3");
+            : FindingEnvelope.FromAdherence(finding, SampleFigure());
 
         var envelope = DigestEnvelope.From(digest, MapFinding);
 

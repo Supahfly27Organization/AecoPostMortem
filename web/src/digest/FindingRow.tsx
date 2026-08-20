@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { FindingEnvelope } from '../api/digest'
+import { AdherenceFigureBlock } from './AdherenceFigureBlock'
 import { ProvenanceBadge } from './ProvenanceBadge'
 import { RecurrenceStrip } from './RecurrenceStrip'
 import { SuggestionBlock } from './SuggestionBlock'
@@ -38,6 +39,13 @@ export function FindingRow({ finding }: { finding: FindingEnvelope }) {
 
       {expanded && (
         <div className="finding-row__detail">
+          {/* FR-33 (S-24, issue #38): an adherence finding's figure is rendered by
+              `AdherenceFigureBlock`, which owns the percentage and the per-operand resolution
+              together. This row never reads `figure.percentage` itself, so there is no path here
+              that could show the number without the layers that produced it. The collapsed summary
+              above deliberately shows no figure at all for the same reason. */}
+          {finding.kind === 'adherence' && <AdherenceFigureBlock figure={finding.figure} />}
+
           <RecurrenceStrip recurrence={finding.recurrence} />
 
           <dl className="finding-row__evidence">

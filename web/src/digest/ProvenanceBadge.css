@@ -1,7 +1,9 @@
 .provenance-badge {
   display: inline-block;
   padding: 0.1rem 0.5rem;
+  border: 1px solid transparent;
   border-radius: 4px;
+  font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -9,16 +11,20 @@
 }
 
 .provenance-badge[data-provenance='observed'] {
-  background: #dff3e3;
-  color: #1e6b34;
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
 }
 
 .provenance-badge[data-provenance='derived'] {
-  background: #dde8fb;
-  color: #1c4d9c;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .provenance-badge[data-provenance='inferred'] {
-  background: #fbe8d6;
-  color: #9c5a1c;
+  background: var(--infer-soft);
+  border-color: var(--infer);
+  border-style: dashed;
+  color: var(--infer);
 }

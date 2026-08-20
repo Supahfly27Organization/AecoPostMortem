@@ -17,7 +17,7 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #5a626e;
+  color: var(--ink-3);
 }
 
 .monitor-comparison__sample-size {

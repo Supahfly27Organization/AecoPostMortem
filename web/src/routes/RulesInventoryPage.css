@@ -10,9 +10,9 @@
   align-items: baseline;
   gap: 0.75rem 1.5rem;
   padding: 0.75rem 1rem;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--rule);
   border-radius: 6px;
-  background: #f6f8fa;
+  background: var(--sunk);
 }
 
 .rules-inventory__scope-statement {
@@ -27,7 +27,7 @@
 
 .rules-inventory__scope-picker-label {
   font-size: 0.85rem;
-  color: #57606a;
+  color: var(--ink-2);
 }
 
 /* Every status count is styled identically. "Not a rule" is the largest bucket on the reference
@@ -42,23 +42,23 @@
 
 .rules-inventory__count {
   padding: 0.2rem 0.6rem;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--rule);
   border-radius: 999px;
-  background: #ffffff;
-  color: #24292f;
+  background: var(--surface);
+  color: var(--ink);
   font-size: 0.9rem;
 }
 
 .rules-inventory__count-total {
-  color: #57606a;
+  color: var(--ink-2);
   font-size: 0.9rem;
 }
 
 .rules-inventory__empty {
   padding: 1rem;
-  border: 1px dashed #d0d7de;
+  border: 1px dashed var(--rule-2);
   border-radius: 6px;
-  color: #57606a;
+  color: var(--ink-2);
 }
 
 .rules-inventory__table {
@@ -70,7 +70,7 @@
 .rules-inventory__table th,
 .rules-inventory__table td {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #d0d7de;
+  border-bottom: 1px solid var(--rule);
   vertical-align: top;
 }
 
@@ -78,7 +78,7 @@
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #57606a;
+  color: var(--ink-3);
 }
 
 .rules-inventory__text {
@@ -88,22 +88,22 @@
 .rules-inventory__sessions,
 .rules-inventory__window,
 .rules-inventory__retirement {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 0.85rem;
-  color: #57606a;
+  color: var(--ink-2);
 }
 
 /* A retired rule stays visible and legible — dimmed would read as "less true", and its adherence
    figure is frozen, not withdrawn (FR-40, Scenario 5). Marked with a rule on the leading edge rather
    than with reduced contrast, so it is distinguishable at a glance without being de-emphasised. */
 .rules-inventory__table tr[data-retired='true'] td:first-child {
-  box-shadow: inset 3px 0 0 #8c959f;
+  box-shadow: inset 3px 0 0 var(--ink-3);
 }
 
 .rules-inventory__status {
   display: inline-block;
   padding: 0.15rem 0.5rem;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--rule-2);
   border-radius: 4px;
   font-size: 0.8rem;
   white-space: nowrap;
@@ -112,6 +112,6 @@
 .rules-inventory__reason {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;
-  color: #57606a;
+  color: var(--ink-2);
   max-width: 22rem;
 }

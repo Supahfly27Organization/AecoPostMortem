@@ -335,9 +335,12 @@ surfaces still rendering `ComingSoon`. It shows exactly one rule-set version at 
 lists every extracted statement with exactly one of the four statuses (a reason travelling with
 "Not checkable"), its source file, its carrying sessions and its in-force window, keeps a retired
 rule visible with its adherence frozen at the removal date, and states both designed "no rules
-found" states rather than rendering an empty table. `/api/rules-inventory` is not served yet
-(`api/rulesInventory.ts` documents why), so a real browser sees this route's own
-"could not reach the local API" message today — the same seam `DigestPage` uses.
+found" states rather than rendering an empty table. `/api/rules-inventory` is now wired to real
+corpus-wide extraction (`AecoPostMortem.Api/CLAUDE.md`, `ApiHost.GetRulesInventory`) — a real browser
+today renders this repository's own `CLAUDE.md`/`AGENTS.md` rules with no change to any file in this
+directory, the same promise `DigestPage` fulfilled first. `Watched` and "Not checkable" (with a
+reason) never appear yet — every extracted statement today renders "Checkable — not yet built" or
+"Not a rule" (`AecoPostMortem.Api/CLAUDE.md`'s own remarks on `RulesInventoryClassifier` say why).
 
 The Process Digest (`routes/DigestPage.tsx`, `api/digest.ts`, `api/useDigest.ts`, `digest/`) has its
 real content — S-36 (issue #44) built the masthead/ranking contract and, in a follow-up, the rendered

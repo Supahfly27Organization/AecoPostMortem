@@ -2,10 +2,10 @@
 // and the Rules-layer shapes it wraps (src/AecoPostMortem.Rules/RulesInventory.cs). Hand-kept in sync
 // until a generated client exists — the same gap `web/src/api/appState.ts` and `digest.ts` document.
 //
-// `/api/rules-inventory` is not served by `ApiHost` yet: resolving a whole store's RawEvents into
-// SessionRuleSets at scale (FR-26's extraction run over every session) is wiring no story has done.
-// `fetchRulesInventory`/`useRulesInventory` target the route ahead of it, the same seam
-// `fetchDigest`/`useDigest` established for `/api/digest`.
+// `/api/rules-inventory` is served for real by `ApiHost.GetRulesInventory`: SessionRuleSetLookup
+// resolves a whole store's RawEvents into SessionRuleSets at scale, and RulesInventoryClassifier
+// classifies every statement (see AecoPostMortem.Api/CLAUDE.md for what it does and does not
+// classify yet).
 
 export const RulesInventoryRoute = '/api/rules-inventory'
 

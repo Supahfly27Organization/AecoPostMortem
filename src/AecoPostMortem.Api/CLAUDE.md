@@ -11,9 +11,11 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetSession` and `GetStepEvidence` are the same four without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
 | `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
+| `SessionRuleSetLookup.cs` | FR-27's own not-yet-wired gap, closed: `SessionRuleSetLookup.BuildAll` resolves a whole store's `RawEvent`s into one `Rules.SessionRuleSet` per `Data.Execution.Session` row, calling `Ingestion.SessionRuleExtractor.Extract` per session — the corpus-wide walk nothing did before this landed |
+| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract), consumed for real for the first time here: `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus` — narrower than the domain's full four shapes; see this file's own remarks below for why `Watched`/`NotCheckable(reason)` stay unreachable |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles) |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
@@ -75,6 +77,16 @@ and `Ingestion.ToolArguments` the same way `StepEvidenceLookup` reuses the reade
 second real caller here too: `ToToolCallOutcomes` builds `Rules.ToolCallOutcome` from `ToolCall`
 directly, the query S-14's own remarks named as later work. `ToolFailureClusterFinding` is not run —
 it needs a mandating rule, which real rule extraction at scale (S-20) does not populate yet.
+
+`ApiHost.GetRulesInventory` (S-22, issue #35) is what that real rule extraction at scale turned out
+to be: it reads `Session`/`RawEvent` corpus-wide (the same two tables `GetDigest` already reads a
+superset of) and calls `SessionRuleSetLookup.BuildAll`, which reuses the existing `Ingestion.
+SessionRuleExtractor` reference rather than adding a new one — the same "reuse an existing narrow
+reader, add the corpus-wide walk" shape `HookFailureEventLookup`/`DeclaredIntentLookup` established.
+`Rules` gains its third real caller: `RuleShapeCatalogue.MatchAll` and `RulesInventory.Build`/
+`.MostRecentVersion` are called directly, and `RulesInventoryClassifier` (this project) is the
+caller-supplied classify function `RulesInventory.Build` requires — see this file's own remarks below
+for what it does and does not classify.
 
 ## Non-obvious decisions
 
@@ -231,6 +243,50 @@ the served counts cannot disagree with the served rows.
 `RuleStatementStatusEnvelope.Of` and `RuleRetirementEnvelope.Of` switch over the domain's own closed
 unions with no catch-all arm that could serialise an unrecognised shape as something plausible — a
 fifth domain status would fail to compile here rather than reach a client mislabelled.
+
+### `RulesInventoryClassifier` deliberately never produces `Watched` or `NotCheckable(reason)`
+
+Turning a shape-matched statement into a real `Watched` verdict needs `Rules.OperandResolver` to
+resolve its operand against the corpus's real tool vocabulary, which needs a `Rules.
+ToolInvocationShape` corpus built from RAW `tool.execution_start.data.arguments` parsing
+(`HasPath`/`HasPattern`/`HasReplacement`/`HasFileText`/`HasCommand`/`SpawnsAgent`/`McpServerName`).
+Nothing in this codebase has ever built that shape from real payloads — only `path` extraction is
+confirmed against the real corpus (`Ingestion.ExecutionRecordBuilder`); the other five field names
+have never been checked, and this project has its own cautionary tale for guessing one
+(`Ingestion/CLAUDE.md`'s own remarks on `EventEnvelopeParserV1` reading `ts` instead of `timestamp`
+and silently losing 100% of the corpus, caught only by corpus-verification tests). `Rules
+InventoryClassifier.BuildClassifier` therefore reads only `RuleShapeCatalogue.MatchAll`'s output: a
+match, or an unmatched statement carrying a normative marker (`UnmatchedStatementDisposition.
+CheckableNotBuilt`), both classify as `RuleStatementStatus.CheckableNotYetBuilt`; an unmatched
+statement carrying none (`UnmatchedStatementDisposition.NotCheckable`) classifies as `RuleStatement
+Status.NotARule`. `Watched` and the caller-supplied `NotCheckable(reason)` variant are never
+constructed anywhere in this file — turning a matched shape's operand into a real verdict is later
+work, alongside wiring `ToolVocabularyMismatchCheck` into `GetDigest` (both are blocked on the same
+missing `ToolInvocationShape` corpus).
+
+### `GetRulesInventory` classifies every statement in the corpus, not only the selected version's
+
+`RuleShapeCatalogue.MatchAll` runs once over every distinct statement across every `SessionRuleSet`
+in the store — every repository, not only `repositoryScope.SelectedRepository` — before `RulesInventory.
+Build` ever narrows to one version. This is a strict superset of what `Build` will actually
+deduplicate over (only the selected version's carrying sessions, all in one repository), which is
+what guarantees `RulesInventoryClassifier`'s dictionary lookup never misses: every `occurrence.
+Statement` `Build` looks up is provably present, so the classifier's own defensive
+`InvalidOperationException` never fires on this call path. Harmless at this corpus' scale (a
+measured 17 statements) — matching the same "read the whole table, reduce in memory" discipline
+`GetDigest` already established as acceptable here (`Api/CLAUDE.md`'s "no aggregate scan" note
+below).
+
+### A missing rule-set version answers 404, the same as a missing session
+
+`GetRulesInventory` returns `null` — mapped to 404 by the route handler, the same shape `GetSession`
+already uses for a session id the store carries no row for — both when the store is empty
+(`RulesInventory.MostRecentVersion` finds no session for the selected repository at all) and when a
+requested `version` hash names one no session in that repository ever carried
+(`RulesInventory.Build` throws `UnknownRuleSetVersionException`, caught here). Neither is a designed
+empty state the way `RulesInventoryState.NoInstructionBlocks` is — that state only exists once a
+version has actually been selected; "there is no version to select" is a different, earlier failure
+this surface reports the same way `GetSession` reports "there is no session."
 
 ### `ApiHost.Build` returns an unstarted `WebApplication`
 
@@ -509,12 +565,19 @@ from its operands and the envelope member is `required`, the endpoint that event
 `web/src/digest/AdherenceFigureBlock.tsx` is the real rendering consumer, reached through `FindingRow`
 once a check produces one.
 
-`RulesInventoryEnvelope.cs` (S-22, issue #35, FR-40) is contract-only in the same sense the digest
-contract was before S-54: `web/src/routes/RulesInventoryPage.tsx` is a real consumer of the shape,
-but `ApiHost.Build` does not `MapGet` `/api/rules-inventory` — resolving a whole store's `RawEvent`s
-into `SessionRuleSet`s at scale (FR-26's extraction run over every session, then FR-27's versioning
-over the result) is wiring no story has done yet, the same gap `ProcessDigest`'s masthead counters
-document. The web page targets the route ahead of it.
+`GET /api/rules-inventory` (`RulesInventoryEnvelope.cs`, `ApiHost.GetRulesInventory`, S-22, issue
+#35, FR-40) is now served for real: `SessionRuleSetLookup.BuildAll` resolves the whole store's
+`RawEvent`s into `SessionRuleSet`s (the corpus-wide extraction run `Ingestion/CLAUDE.md`'s own status
+note names as still missing), `RulesInventoryClassifier` classifies every distinct statement once,
+and the selected repository defaults the same way `GetDigest`'s `BuildRepositoryScope` already does
+— this surface has no repository selector of its own (`web/CLAUDE.md`). Verified end to end against
+the live 35-session reference corpus: this repository's own `CLAUDE.md`/`AGENTS.md` rules render as
+17 statements (0 watched, 7 checkable — not yet built, 0 not checkable, 10 not a rule), and a real
+browser renders `web/`'s `RulesInventoryPage` against it with no frontend change — the same promise
+`web/CLAUDE.md` recorded ahead of this wiring. `Watched` and `NotCheckable(reason)` are structurally
+unreachable from this classifier today — see the two non-obvious decisions above for why, and what
+would need to land first (a real `ToolInvocationShape` corpus, then `ToolVocabularyMismatchCheck`
+wired into a check orchestrator the way `GetDigest`'s other six checks are).
 
 `GET /api/sessions/{sessionId}` (`SessionEnvelope.cs`, `ApiHost.GetSession`, S-08, issue #15) is the
 second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by
@@ -569,9 +632,9 @@ call's truncated result, since `SubagentOutputLookup` never reads one.
 `MonitorComparisonEnvelope.cs` (S-35, issue #43, FR-39) is contract-only in the same sense the
 digest and Rules Inventory contracts were before their own live endpoints landed:
 `web/src/digest/MonitorComparisonBlock.tsx` and `web/src/api/monitor.ts` are real consumers of the
-shape, but `ApiHost.Build` does not `MapGet` `/api/monitor-comparison` — resolving a whole store's
-`RawEvent`s into `SessionRuleSet`s, picking the two adjacent versions and the operand pair to
-compare, and running `Findings.MonitorComparison.Compare` against the live store is wiring no story
-has done yet, the same not-yet-wired gap `/api/digest` and `/api/rules-inventory` document. The web
-component is built ahead of that wiring, the same seam `AdherenceFigureBlock.tsx` established
-before any digest endpoint served a real `AdherenceFigure`.
+shape, but `ApiHost.Build` does not `MapGet` `/api/monitor-comparison` — picking the two adjacent
+versions and the operand pair to compare, and running `Findings.MonitorComparison.Compare` against
+the live store, is wiring no story has done yet, though `SessionRuleSetLookup` (added for
+`/api/rules-inventory`, above) already supplies the corpus-wide `SessionRuleSet` resolution this
+endpoint would also need. The web component is built ahead of that wiring, the same seam
+`AdherenceFigureBlock.tsx` established before any digest endpoint served a real `AdherenceFigure`.

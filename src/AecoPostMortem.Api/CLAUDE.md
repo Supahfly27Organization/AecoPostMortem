@@ -295,20 +295,18 @@ stay serialisation-agnostic, the same separation `FindingEnvelope`/`SuggestionEn
 rather than an opaque integer for a state whose entire point (S-36's Gherkin) is to be stated in
 words.
 
-### `GetSession` reads the derived tables as they are today — empty — rather than re-deriving from RAW here
+### `GetSession` reads the derived tables directly, rather than re-deriving from RAW here
 
-`AecoPostMortem.Ingestion.ExecutionRecordBuilder` can rebuild `Turn`/`ToolCall`/`Agent` (not
-`Skill`/`Hook`, which it does not parse) from a session's `RawEvent`s, but nothing in this
-repository yet writes any of the six shapes `GetSession` needs into the store at ingest time
-(`AecoPostMortem.Ingestion/CLAUDE.md`, "not yet wired into the store"). Two options existed: have
-this endpoint replay RAW through `ExecutionRecordBuilder` itself, or read the already-mapped but
-still-empty `Data.Execution` tables and let a later story's writer populate them. This project took
-the second path — `GetSession` queries `context.Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks`
-exactly the way it would once a writer exists, rather than duplicating a second, partial (no
+Two options existed when this story landed: have this endpoint replay RAW through
+`ExecutionRecordBuilder` itself, or read the `Data.Execution` tables and let a later story's writer
+populate them. This project took the second path — `GetSession` queries `context.Sessions`/`Turns`/
+`ToolCalls`/`Agents`/`Skills`/`Hooks` directly, rather than duplicating a second, partial (no
 `Skill`/`Hook`) reconstruction path inside `Api` that the eventual ETL story would have to reconcile
-with or replace. `SessionRouteTests` seeds those tables directly through `PostMortemContext` — the
-same stand-in `OwnershipTests` (`AecoPostMortem.Data.Tests`) already uses — to exercise the read path
-ahead of the writer that will populate it for real.
+with or replace. That writer has since landed —
+`AecoPostMortem.Ingestion.NormalizedLayerWriter`, called by both `ingest` and `rebuild`
+(`AecoPostMortem.Ingestion/CLAUDE.md`) — so this read path is live against a real store today, not
+only against `SessionRouteTests`' own seeded fixtures (which still exist, and still exercise the read
+path independently of the writer, the same stand-in `OwnershipTests` uses).
 
 ### `SessionTokenFiguresEnvelope` closes the same gap `SuggestionEnvelope` closed for FR-56
 

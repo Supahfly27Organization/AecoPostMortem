@@ -71,6 +71,7 @@ public static class ExecutionRecordBuilder
         var turns = new List<Turn>();
         var turnAtSequence = new Dictionary<long, string?>();
 
+        string? openEventId = null;
         string? openTurnId = null;
         string? openStartedAt = null;
         long outputTokens = 0;
@@ -83,13 +84,14 @@ public static class ExecutionRecordBuilder
             switch (raw.EventType)
             {
                 case "assistant.turn_start":
-                    if (openTurnId is not null)
+                    if (openEventId is not null)
                     {
                         // A turn was still open when the next one started; close it as unfinished
                         // rather than let it silently vanish.
-                        turns.Add(CloseTurn(sessionId, openTurnId, openStartedAt!, null, TurnOutcome.Unfinished, null, ReadTokens()));
+                        turns.Add(CloseTurn(sessionId, openEventId, openTurnId!, openStartedAt!, null, TurnOutcome.Unfinished, null, ReadTokens()));
                     }
 
+                    openEventId = envelope.Id;
                     openTurnId = GetString(envelope.Data, "turnId");
                     openStartedAt = raw.Timestamp;
                     outputTokens = 0;
@@ -98,9 +100,10 @@ public static class ExecutionRecordBuilder
 
                 case "assistant.turn_end":
                     var endTurnId = GetString(envelope.Data, "turnId");
-                    if (openTurnId is not null && (endTurnId is null || endTurnId == openTurnId))
+                    if (openEventId is not null && (endTurnId is null || endTurnId == openTurnId))
                     {
-                        turns.Add(CloseTurn(sessionId, openTurnId, openStartedAt!, raw.Timestamp, TurnOutcome.Completed, null, ReadTokens()));
+                        turns.Add(CloseTurn(sessionId, openEventId, openTurnId!, openStartedAt!, raw.Timestamp, TurnOutcome.Completed, null, ReadTokens()));
+                        openEventId = null;
                         openTurnId = null;
                         openStartedAt = null;
                     }
@@ -113,10 +116,11 @@ public static class ExecutionRecordBuilder
                     break;
 
                 case "abort":
-                    if (openTurnId is not null)
+                    if (openEventId is not null)
                     {
                         var reason = GetString(envelope.Data, "reason");
-                        turns.Add(CloseTurn(sessionId, openTurnId, openStartedAt!, raw.Timestamp, TurnOutcome.Aborted, reason, ReadTokens()));
+                        turns.Add(CloseTurn(sessionId, openEventId, openTurnId!, openStartedAt!, raw.Timestamp, TurnOutcome.Aborted, reason, ReadTokens()));
+                        openEventId = null;
                         openTurnId = null;
                         openStartedAt = null;
                     }
@@ -124,7 +128,7 @@ public static class ExecutionRecordBuilder
                     break;
 
                 case "assistant.message":
-                    if (openTurnId is not null && envelope.AgentId is null && GetLong(envelope.Data, "outputTokens") is { } tokens)
+                    if (openEventId is not null && envelope.AgentId is null && GetLong(envelope.Data, "outputTokens") is { } tokens)
                     {
                         outputTokens += tokens;
                         hasOutputTokens = true;
@@ -134,9 +138,9 @@ public static class ExecutionRecordBuilder
             }
         }
 
-        if (openTurnId is not null)
+        if (openEventId is not null)
         {
-            turns.Add(CloseTurn(sessionId, openTurnId, openStartedAt!, null, TurnOutcome.Unfinished, null, ReadTokens()));
+            turns.Add(CloseTurn(sessionId, openEventId, openTurnId!, openStartedAt!, null, TurnOutcome.Unfinished, null, ReadTokens()));
         }
 
         return (turns, turnAtSequence);
@@ -146,6 +150,7 @@ public static class ExecutionRecordBuilder
 
     static Turn CloseTurn(
         string sessionId,
+        string eventId,
         string turnId,
         string startedAt,
         string? endedAt,
@@ -155,6 +160,7 @@ public static class ExecutionRecordBuilder
         new()
         {
             SessionId = sessionId,
+            EventId = eventId,
             TurnId = turnId,
             StartedAt = startedAt,
             EndedAt = endedAt,

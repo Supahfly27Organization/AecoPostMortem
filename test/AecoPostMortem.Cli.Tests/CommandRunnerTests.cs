@@ -350,7 +350,13 @@ public sealed class CommandRunnerTests
 
         using var reopened = temporary.Store.Open();
         Assert.Single(reopened.RawEvents);
-        Assert.Empty(reopened.Sessions);
+
+        // The hand-seeded Session (Cwd = C:\repo) is gone — rebuild re-derives from RAW alone, and
+        // RAW's own payload here ("{}") carries no context at all, so the freshly derived row picks
+        // up SessionBuilder's own defaults rather than the stale hand-seeded value.
+        var session = Assert.Single(reopened.Sessions);
+        Assert.Equal("session-1", session.SessionId);
+        Assert.Equal(string.Empty, session.Cwd);
     }
 
     /// <summary>Rebuild's <see cref="CommandSpec"/> takes no arguments (see

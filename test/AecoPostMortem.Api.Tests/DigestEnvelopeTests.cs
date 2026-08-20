@@ -22,6 +22,44 @@ public sealed class DigestEnvelopeTests
         },
     };
 
+    // FR-33's measured violation: an adherence figure with its resolution, contrasted below
+    // against FR-44's base rate over more sessions — the ranking (by sessions affected) would put
+    // the base rate first, which is exactly why its wire shape has to stay visually distinct from
+    // an actual violation regardless of rank.
+    static Finding AdherenceFinding(string ruleStatement, params string[] sessionIds) => new()
+    {
+        Class = FindingClass.RuleAdherenceToolChoice,
+        Provenance = Provenance.Derived,
+        Evidence = [new EvidenceItem { Field = "data.toolName", Value = "grep" }],
+        Recurrence = new Recurrence
+        {
+            Key = ruleStatement,
+            Occurrences = [.. sessionIds.Select(id => new RecurrenceOccurrence { SessionId = id })],
+        },
+        Resolution = new Resolution { OperandLayer = "NORMALIZED", CallCount = 12 },
+    };
+
+    // FR-44's worked example, mirroring FindingEnvelopeTests: the parallel-tool-calling rule's
+    // 43.6% single-call rate depends on an unmeasured condition, so it is Inferred, not Observed.
+    static Finding ConditionalRuleFinding(params string[] sessionIds) => new()
+    {
+        Class = FindingClass.RuleAdherenceToolChoice,
+        Provenance = Provenance.Inferred,
+        Evidence =
+        [
+            new EvidenceItem { Field = "single_call_messages", Value = "3249" },
+            new EvidenceItem { Field = "tool_issuing_messages", Value = "7449" },
+        ],
+        Recurrence = new Recurrence
+        {
+            Key = "USE PARALLEL TOOL CALLING — when you need to perform multiple independent operations, make ALL tool calls in a SINGLE response",
+            Occurrences = [.. sessionIds.Select(id => new RecurrenceOccurrence { SessionId = id })],
+        },
+    };
+
+    const string ParallelCallAvailabilityUnevaluated =
+        "whether a second independent call was available at each point was never measured";
+
     static MastheadCounters Counters() => new()
     {
         SessionCount = 35,
@@ -118,5 +156,40 @@ public sealed class DigestEnvelopeTests
 
         Assert.Equal(DigestState.NotYetAnalyzed, envelope.State);
         Assert.Empty(envelope.RankedFindings);
+    }
+
+    // FR-44, Scenario 2 ("A base rate is never ranked as a violation"): the conditional-rule
+    // finding touches more sessions than the measured adherence finding, so it ranks first — and
+    // still has to render with a wire shape a client can never mistake for the measured violation
+    // beside it.
+    [Fact]
+    public void A_base_rate_item_ranked_above_a_measured_violation_still_serialises_a_distinct_kind()
+    {
+        var digest = ProcessDigest.Build(
+            Counters(),
+            RanCleanRegistry(),
+            [
+                AdherenceFinding("prefer rg over grep", "session-1"),
+                ConditionalRuleFinding("session-1", "session-2", "session-3"),
+            ]);
+
+        FindingEnvelope MapFinding(Finding finding) => finding.Provenance == Provenance.Inferred
+            ? FindingEnvelope.FromBaseRate(finding, ParallelCallAvailabilityUnevaluated)
+            : FindingEnvelope.FromAdherence(finding, finding.Resolution!, ruleVersion: "v3");
+
+        var envelope = DigestEnvelope.From(digest, MapFinding);
+
+        Assert.Equal(2, envelope.RankedFindings.Count);
+        var baseRate = Assert.IsType<FindingEnvelope.BaseRate>(envelope.RankedFindings[0]);
+        var adherence = Assert.IsType<FindingEnvelope.Adherence>(envelope.RankedFindings[1]);
+        Assert.Equal(ParallelCallAvailabilityUnevaluated, baseRate.UnevaluatedCondition);
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+        var kinds = document.RootElement.GetProperty("RankedFindings").EnumerateArray()
+            .Select(item => item.GetProperty("kind").GetString())
+            .ToList();
+
+        Assert.Equal(["baseRate", "adherence"], kinds);
     }
 }

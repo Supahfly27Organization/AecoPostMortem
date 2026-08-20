@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AecoPostMortem.Data;
+using AecoPostMortem.Findings;
 using AecoPostMortem.Ingestion;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -18,6 +19,10 @@ namespace AecoPostMortem.Api;
 public static class ApiHost
 {
     public const string AppStateRoute = "/api/app-state";
+
+    /// <summary>The route template <see cref="Build"/> registers for FR-21's session endpoint
+    /// (S-08). Use <see cref="SessionRoute"/> to build the concrete request path for one session.</summary>
+    public const string SessionRouteTemplate = "/api/sessions/{sessionId}";
 
     /// <summary>
     /// Builds the host without starting it — the caller decides when and how to run it, which is
@@ -65,6 +70,12 @@ public static class ApiHost
 
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
 
+        app.MapGet(SessionRouteTemplate, (string sessionId) =>
+        {
+            var envelope = GetSession(store, sessionId);
+            return envelope is null ? Results.NotFound() : Results.Ok(envelope);
+        });
+
         if (resolvedWebRoot is not null)
         {
             app.UseDefaultFiles();
@@ -89,6 +100,48 @@ public static class ApiHost
         var storeHasBeenIngested = StoreHasBeenIngested(store);
 
         return AppStateReport.Diagnose(copilotSourceFound, storeHasBeenIngested);
+    }
+
+    /// <summary>Builds the concrete request path for one session's <see cref="SessionRouteTemplate"/>
+    /// endpoint, escaping the id the same way any other path segment would need to be.</summary>
+    public static string SessionRoute(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        return $"/api/sessions/{Uri.EscapeDataString(sessionId)}";
+    }
+
+    /// <summary>
+    /// FR-21's masthead and tape (S-08, issue #15), read through <c>Data.Execution</c> — the
+    /// minimal read path this story needs. Nothing in this repository yet writes
+    /// <c>Turn</c>/<c>ToolCall</c>/<c>Agent</c>/<c>Skill</c>/<c>Hook</c> rows at ingest time
+    /// (`AecoPostMortem.Ingestion/CLAUDE.md`, "not yet wired into the store"), so today this reads
+    /// whatever those tables carry — nothing, on a store no writer has populated yet — rather than
+    /// re-deriving them from RAW in this project, which would duplicate the ETL wiring a later
+    /// story owns. <see langword="null"/> when <paramref name="sessionId"/> names no session at
+    /// all, distinct from a session that exists but recorded no steps (Scenario 3).
+    /// </summary>
+    public static SessionEnvelope? GetSession(LocalStore store, string sessionId)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        using var context = store.Open();
+
+        var session = context.Sessions.SingleOrDefault(s => s.SessionId == sessionId);
+        if (session is null)
+        {
+            return null;
+        }
+
+        var turns = context.Turns.Where(t => t.SessionId == sessionId).ToList();
+        var toolCalls = context.ToolCalls.Where(t => t.SessionId == sessionId).ToList();
+        var agents = context.Agents.Where(a => a.SessionId == sessionId).ToList();
+        var skills = context.Skills.Where(s => s.SessionId == sessionId).ToList();
+        var hooks = context.Hooks.Where(h => h.SessionId == sessionId).ToList();
+
+        var recording = SessionRecording.Build(session, turns, toolCalls, agents, skills, hooks);
+        return SessionEnvelope.From(recording);
     }
 
     /// <summary>

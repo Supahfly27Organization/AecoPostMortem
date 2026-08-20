@@ -1,0 +1,77 @@
+.session-masthead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #f7f7f7;
+}
+
+.session-masthead__field {
+  display: flex;
+  flex-direction: column;
+  min-width: 6rem;
+}
+
+.session-masthead__field dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+}
+
+.session-masthead__field dd {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.session-tape {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.session-tape__step {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+}
+
+.session-tape__offset {
+  font-variant-numeric: tabular-nums;
+  color: #666;
+  min-width: 4.5rem;
+}
+
+.session-tape__kind {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  color: #888;
+  min-width: 4.5rem;
+}
+
+.session-tape__empty {
+  color: #666;
+}
+
+.session-page__alert {
+  border: 1px solid #c0392b;
+  background: #fdecea;
+  color: #7b241c;
+  padding: 0.85rem 1.1rem;
+  border-radius: 6px;
+}
+
+.session-page__no-selection {
+  color: #666;
+}

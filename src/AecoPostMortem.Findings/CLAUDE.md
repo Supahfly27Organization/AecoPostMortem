@@ -26,6 +26,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
+| `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
 
 ## References
 
@@ -172,10 +173,41 @@ event. No property on either shape may be named after cost, price, currency or s
 prove there is nothing on this type a masthead could accidentally render as a price (Scenario 3);
 FR-24 forbids the figure entirely because Copilot prices in premium requests and nano-AIU and no
 local file states a conversion rate, so apportioning a total into a price is Inferred and this
-product does not compute one anywhere. No `AecoPostMortem.Api` envelope wraps it yet — S-08's
-masthead (FR-21) is the story that will call `From` and render its two states; this one only
-publishes the shape and the presence rule, the same contract-first pattern `FindingEnvelope` and
-`SuggestionEnvelope` used for S-50.
+product does not compute one anywhere. `SessionRecording.Build` (S-08, below) is the first caller of
+`From`, wrapped by `Api.SessionTokenFiguresEnvelope` as `SessionMasthead.ContextSize` — "context
+size at end" reuses this shape verbatim rather than inventing a second token-totals contract.
+
+### `SessionRecording` takes plain `Data.Execution` rows, the same reason `AbortedTurnFinding` does
+
+FR-21's masthead and tape (S-08, issue #15) is not a `Finding` — no rule adherence or waste is being
+judged, so `SessionRecording.Build` takes a `Session` plus `Turn`/`ToolCall`/`Agent`/`Skill`/`Hook`
+lists as plain inputs and returns `SessionMasthead`/`SessionTape` directly, never reading through
+`PostMortemContext` itself. This project cannot query the store on its own by design (see
+`References`, above); the caller — `AecoPostMortem.Api`'s session endpoint — is the one that reads
+`Data.Execution` and decides where its rows come from. That matters here specifically because
+nothing in this repository yet *writes* those rows at ingest time
+(`AecoPostMortem.Ingestion/CLAUDE.md`, "not yet wired into the store"): the derived tables exist and
+are queryable (`DerivedSchema.EnsureCurrent` creates them on open), they are simply empty until a
+later story's ETL populates them, so `Api.ApiHost.GetSession` reads them today exactly as it would
+once that writer exists — no separate code path.
+
+`SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": Copilot's event
+log carries no separate prompt entity, and `Turn` itself carries no message text
+(`AecoPostMortem.Data/CLAUDE.md` — "messages are read from RAW"), so a prompt step's `Label` is the
+turn's own `Outcome` (`"Completed"`/`"Aborted"`/`"Unfinished"`) rather than a transcript excerpt this
+layer cannot see. `SessionTapeStepKind.McpCall` is a `ToolCall` whose `McpServerName` is not null,
+kept a distinct tape-step kind from a plain `ToolCall` rather than folded into it, matching the
+Gherkin's own five-way step vocabulary ("hooks, prompts, skills, tool calls and MCP calls").
+`SessionMasthead.ModelCount` reuses `Session.ModelCount` verbatim rather than deriving a second
+"models" figure from `Agent.Model`: NORMALIZED carries no main-thread model field today, only a
+subagent-scoped one, so the count already summed into `ContextSize`'s totals is the one figure this
+layer can state honestly as "models" — a documented scope note, not an oversight.
+
+Steps are ordered by wall-clock timestamp (Scenario 2), ties broken by step kind then the step's own
+id (`StringComparer.Ordinal`) for the same determinism reasoning `AbortedTurnCheck` gives its own
+tie-break (PRD §3.8) — two entities can share a timestamp, never a `(kind, id)` pair within one
+session. `SessionTape.HasSteps` is computed from `Steps.Count`, never a second stored flag: an empty
+list already states Scenario 3's "no steps were recorded" on its own.
 
 ### `ProcessDigest.Build` takes plain, already-resolved inputs — the same reason it can prove it never scans
 
@@ -430,10 +462,9 @@ time, the same not-yet-wired gap `HookFailureFinding` and `FailedToolCallsFindin
 own `Data` reads. Row expansion, the recurrence strip and the repository selector (FR-41 part 2 of 2)
 are S-54, not built here.
 
-`SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract published ahead of the masthead
-that will consume it — S-08 (FR-21) is Must Have, not yet built, and this story only depended on the
-`Session` contract (S-49), not on S-08. `From(Session)` is exercised directly by
-`SessionTokenFiguresTests` rather than through any UI or API surface.
+`SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract, now consumed by the masthead
+it was published ahead of: `SessionRecording.Build` calls `From(Session)` for
+`SessionMasthead.ContextSize`.
 
 `OperatorResponseLog` and `Guardrail` (issue #49, S-39, FR-45) publish FR-45's recording and PRD
 §5.4's guardrail computation as plain, already-resolved-input types, the same contract-first pattern
@@ -441,3 +472,11 @@ that will consume it — S-08 (FR-21) is Must Have, not yet built, and this stor
 `OperatorResponseLogTests` and `GuardrailTests`; no CLI command records a real operator action yet,
 no store persists a log across runs, and no `AecoPostMortem.Api` envelope serves a `Guardrail` —
 those are later work this story only makes possible.
+
+`SessionRecording` (issue #15, S-08, FR-21 part 1 of 3) — the masthead and time-ordered tape — has
+landed: `SessionMasthead` states identity, repository, branch, CLI version, elapsed time and the
+five step-population counts; `SessionTape` orders every `Prompt`/`Hook`/`Skill`/`ToolCall`/`McpCall`
+step by wall-clock time with its offset from session start, and states plainly when it carries none.
+Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
+`web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
+path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.

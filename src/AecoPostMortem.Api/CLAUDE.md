@@ -6,7 +6,7 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
@@ -44,16 +44,31 @@ re-deriving them from RAW in this project.
 
 ## Non-obvious decisions
 
-### `FindingEnvelope` is three closed shapes, not one type with a nullable resolution
+### `FindingEnvelope` is three closed shapes, not one type with a nullable figure
 
-`Finding.Resolution` is nullable because only adherence classes carry one (FR-33). The response
-envelope makes that distinction structural rather than repeating the nullable field: `General` has no
-`Resolution` or `RuleVersion` members at all, and `Adherence` is the only shape that has them — both
-`required`. Assembling an `Adherence` envelope without a resolution and rule version is a compile
-error (CS9035), the same guarantee `Finding.Provenance` already gives (issue #23). `FR-33`'s refusal
-therefore lives here, structurally, at build time; `S-24` is the story that exercises the resulting
-behaviour at the API boundary — this contract only has to make the bare figure unrepresentable, not
-implement the refusal itself.
+Only adherence classes carry an adherence figure (FR-33). The response envelope makes that
+distinction structural rather than a nullable field: `General` and `BaseRate` have no `Figure`
+member at all, and `Adherence` is the only shape that has one — `required`. Assembling an
+`Adherence` envelope without it is a compile error (CS9035), the same guarantee
+`Finding.Provenance` already gives (issue #23).
+
+S-24 (issue #38) is the story that closed FR-33's refusal, and it replaced this shape's original
+`Resolution` + `RuleVersion` pair with a single `required AdherenceFigure Figure`. Two separate
+members were the weak point: they let a caller supply a resolution that did not produce the
+percentage it was served beside, and the wire carried a single `operandLayer` string where FR-33
+asks for the layer used *per operand*. `AdherenceFigure` (`AecoPostMortem.Findings`) fixes both —
+the percentage is a computed property over the per-operand call counts, so there is no bare figure
+to refuse at run time because none can be constructed, and `RuleVersion` is
+`Rules.RuleSetVersionId` (repository + content hash, S-20) rather than a display string, so S-35's
+Monitor comparison can tell whether two figures were even scoped to the same rule set before
+comparing them.
+
+`FromAdherence(Finding, AdherenceFigure)` is the only producer of this shape in this project, and
+the figure is a non-optional parameter — `FindingEnvelopeTests.The_only_way_to_produce_an_adherence_
+envelope_takes_the_figure_as_a_required_parameter` proves by reflection that no second factory has
+appeared, and `No_constructor_opts_out_of_required_member_enforcement` proves no constructor carries
+`[SetsRequiredMembers]`, the one attribute that would switch CS9035 back off and make the refusal a
+convention again.
 
 All three shapes derive from `FindingEnvelope` through a private constructor, so nothing outside this
 file can add a fourth shape — the same closed-hierarchy trick `SuggestionEnvelope` uses.
@@ -217,8 +232,8 @@ so a machine that has only built the .NET solution has no web shell to serve; `s
 
 `DigestEnvelope.From(ProcessDigest, Func<Finding, FindingEnvelope>)` cannot assume every ranked
 finding maps through `FindingEnvelope.From` — an adherence finding needs `FromAdherence` with its
-resolution and rule version instead (FR-33), and only the caller (which already has the resolution)
-knows which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
+`AdherenceFigure` instead (FR-33), and only the caller (which already resolved the operands) knows
+which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
 the ranking already happened in `Findings`, this only converts each entry to its wire shape. The
 same mapper is reused for `ProcessDigest.InferredFindings` (FR-48, issue #52, S-42) — there is no
 second, Inferred-only mapping function, because an Inferred finding needs exactly the same
@@ -295,6 +310,15 @@ FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on eve
 either through a live store — but `web/src/digest/ProvenanceBadge.tsx` (S-54, issue #45) is a real
 consumer of the shape once `DigestPage` does have data to render, closing the gap that was still
 open when S-42 alone had landed.
+
+FR-33 (issue #38, S-24) made the adherence shape carry one `required AdherenceFigure Figure`. It is
+contract-only from this project's side for the same reason FR-48's additions were: `ApiHost` still
+serves no finding endpoint, so there is no live route to wire a figure into — the "wherever figures
+are currently served" this story asks about is, today, this contract and nothing else. That is not a
+gap in the refusal: because the figure's percentage is computed from its operands and the envelope
+member is `required`, any endpoint added later (including S-35's Monitor comparison) inherits the
+guarantee without opting into it. `web/src/digest/AdherenceFigureBlock.tsx` is the real rendering
+consumer, reached through `FindingRow` once `/api/digest` has data.
 
 `RulesInventoryEnvelope.cs` (S-22, issue #35, FR-40) is contract-only in the same sense the digest
 contract was before S-54: `web/src/routes/RulesInventoryPage.tsx` is a real consumer of the shape,

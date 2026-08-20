@@ -49,9 +49,47 @@ export interface Recurrence {
   occurrences: RecurrenceOccurrence[]
 }
 
-export interface Resolution {
-  operandLayer: string
+/** `AecoPostMortem.Rules.OperandResolutionLayer` — FR-31's four layers, most confident first,
+ * camelCase for the same reason as `FindingClass`. `unresolved` is a real member, not an absence:
+ * an operand nothing matched is still reported. */
+export type OperandResolutionLayer =
+  | 'exactToolName'
+  | 'mcpServerField'
+  | 'derivedRole'
+  | 'unresolved'
+
+/** `AecoPostMortem.Findings.OperandResolution` — one rule operand, the layer that resolved it, and
+ * the calls that resolution produced. */
+export interface OperandResolution {
+  operandText: string
+  layer: OperandResolutionLayer
   callCount: number
+}
+
+/** `AecoPostMortem.Rules.RuleSetVersionId` (S-20) — a rule set's identity: the repository it was in
+ * force for plus the content hash of its block set. */
+export interface RuleSetVersionId {
+  repository: string | null
+  hash: string
+}
+
+/**
+ * `AecoPostMortem.Findings.AdherenceFigure` (S-24, issue #38, FR-33). `percentage`, `adherentCalls`
+ * and `totalCalls` are computed server-side from `adherent`/`divergent`, so they always agree with
+ * the operands and can never arrive without them — the same guarantee the .NET type makes at compile
+ * time, which is why this client has no code path that could render a bare figure.
+ *
+ * `percentage` is `null`, never `0`, when the rule had no calls either way (PRD §5.5 tolerates zero
+ * occurrences): the figure still states its resolution and says plainly that there is no percentage.
+ */
+export interface AdherenceFigure {
+  ruleVersion: RuleSetVersionId
+  adherent: OperandResolution
+  divergent: OperandResolution[]
+  operands: OperandResolution[]
+  adherentCalls: number
+  totalCalls: number
+  percentage: number | null
 }
 
 /** `SuggestionEnvelope`'s two explicit states (S-50, issue #13) — "no suggestion template" is a
@@ -67,11 +105,13 @@ interface FindingEnvelopeBase {
   operatorResponse: OperatorResponse
 }
 
-/** `FindingEnvelope`'s two closed shapes (`kind: "general"` / `"adherence"`) — only the adherence
- * shape carries a `resolution` and `ruleVersion` (FR-33). */
+/** `FindingEnvelope`'s closed shapes (`kind: "general"` / `"adherence"`) — only the adherence shape
+ * carries a `figure`, and it always does (FR-33, S-24). The percentage, the per-operand resolution
+ * and the rule version all ride on that one member, so the union has no variant in which a client
+ * could receive a percentage on its own. */
 export type FindingEnvelope =
   | (FindingEnvelopeBase & { kind: 'general' })
-  | (FindingEnvelopeBase & { kind: 'adherence'; resolution: Resolution; ruleVersion: string })
+  | (FindingEnvelopeBase & { kind: 'adherence'; figure: AdherenceFigure })
 
 /** `RepositoryScopeEnvelope` (FR-41 part 2, S-54): PRD Part 8 Q5's default-one-repository,
  * selectable decision — `availableRepositories` is the seam a later cross-repository view switches

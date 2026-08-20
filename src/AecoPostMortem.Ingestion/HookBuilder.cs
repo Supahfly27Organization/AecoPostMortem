@@ -33,7 +33,7 @@ public static class HookBuilder
                 continue;
             }
 
-            var invocationId = StringOrNull(envelope.Data, "hookInvocationId");
+            var invocationId = JsonElementReading.StringOrNull(envelope.Data, "hookInvocationId");
             if (invocationId is null)
             {
                 continue;
@@ -53,7 +53,7 @@ public static class HookBuilder
             {
                 SessionId = sessionId,
                 EventId = invocationId,
-                Name = StringOrEmpty(startEnvelope.Data, "hookType"),
+                Name = JsonElementReading.StringOrEmpty(startEnvelope.Data, "hookType"),
                 StartedAt = startRaw.Timestamp,
                 EndedAt = hasEnd ? end.Raw.Timestamp : null,
                 Success = hasEnd ? BoolOrNull(end.Envelope.Data, "success") : null,
@@ -64,15 +64,6 @@ public static class HookBuilder
 
         return hooks;
     }
-
-    static string StringOrEmpty(JsonElement data, string property) => StringOrNull(data, property) ?? string.Empty;
-
-    static string? StringOrNull(JsonElement data, string property) =>
-        data.ValueKind == JsonValueKind.Object
-        && data.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
 
     static bool? BoolOrNull(JsonElement data, string property) =>
         data.ValueKind == JsonValueKind.Object

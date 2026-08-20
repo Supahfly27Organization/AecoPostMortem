@@ -92,7 +92,11 @@ public static class ExecutionRecordBuilder
                     }
 
                     openEventId = envelope.Id;
-                    openTurnId = GetString(envelope.Data, "turnId");
+                    // Required and non-nullable on Turn (a display field, not this entity's key
+                    // since the real-corpus fix — AecoPostMortem.Data/CLAUDE.md). RAW never discards
+                    // absent JSON, so a turn_start missing its own turnId must still close and
+                    // persist, empty rather than null.
+                    openTurnId = GetString(envelope.Data, "turnId") ?? string.Empty;
                     openStartedAt = raw.Timestamp;
                     outputTokens = 0;
                     hasOutputTokens = false;

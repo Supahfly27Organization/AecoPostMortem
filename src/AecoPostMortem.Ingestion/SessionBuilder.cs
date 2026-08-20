@@ -57,13 +57,13 @@ public static class SessionBuilder
             CopilotVersion = start.ProviderVersion,
             EventSchemaVersion = RawTextOrEmpty(startData, "version"),
             SourceFile = start.SourceFile,
-            Cwd = StringOrEmpty(context, "cwd"),
-            GitRoot = StringOrNull(context, "gitRoot"),
-            Branch = StringOrNull(context, "branch"),
-            HeadCommit = StringOrNull(context, "headCommit"),
-            Repository = StringOrNull(context, "repository"),
-            HostType = StringOrNull(context, "hostType"),
-            BaseCommit = StringOrNull(context, "baseCommit"),
+            Cwd = JsonElementReading.StringOrEmpty(context, "cwd"),
+            GitRoot = JsonElementReading.StringOrNull(context, "gitRoot"),
+            Branch = JsonElementReading.StringOrNull(context, "branch"),
+            HeadCommit = JsonElementReading.StringOrNull(context, "headCommit"),
+            Repository = JsonElementReading.StringOrNull(context, "repository"),
+            HostType = JsonElementReading.StringOrNull(context, "hostType"),
+            BaseCommit = JsonElementReading.StringOrNull(context, "baseCommit"),
             InputTokens = tokens?.InputTokens,
             OutputTokens = tokens?.OutputTokens,
             CacheReadTokens = tokens?.CacheReadTokens,
@@ -119,20 +119,10 @@ public static class SessionBuilder
             : new TokenTotals(input, output, cacheRead, cacheWrite, reasoning, modelCount);
     }
 
-    static string StringOrEmpty(JsonElement element, string property) =>
-        StringOrNull(element, property) ?? string.Empty;
-
     static string RawTextOrEmpty(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value)
             ? value.GetRawText()
             : string.Empty;
-
-    static string? StringOrNull(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
 
     static long LongOrZero(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number

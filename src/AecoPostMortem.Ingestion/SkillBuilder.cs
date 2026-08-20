@@ -1,4 +1,3 @@
-using System.Text.Json;
 using AecoPostMortem.Data;
 using AecoPostMortem.Data.Execution;
 
@@ -29,11 +28,11 @@ public static class SkillBuilder
             {
                 SessionId = sessionId,
                 EventId = envelope.Id,
-                Name = StringOrEmpty(envelope.Data, "name"),
-                Path = StringOrNull(envelope.Data, "path"),
-                Description = StringOrNull(envelope.Data, "description"),
-                PluginName = StringOrNull(envelope.Data, "pluginName"),
-                PluginVersion = StringOrNull(envelope.Data, "pluginVersion"),
+                Name = JsonElementReading.StringOrEmpty(envelope.Data, "name"),
+                Path = JsonElementReading.StringOrNull(envelope.Data, "path"),
+                Description = JsonElementReading.StringOrNull(envelope.Data, "description"),
+                PluginName = JsonElementReading.StringOrNull(envelope.Data, "pluginName"),
+                PluginVersion = JsonElementReading.StringOrNull(envelope.Data, "pluginVersion"),
                 InvokedAt = raw.Timestamp,
                 OwnerKind = envelope.AgentId is null ? OwnerKind.Main : OwnerKind.Agent,
                 AgentId = envelope.AgentId,
@@ -42,13 +41,4 @@ public static class SkillBuilder
 
         return skills;
     }
-
-    static string StringOrEmpty(JsonElement data, string property) => StringOrNull(data, property) ?? string.Empty;
-
-    static string? StringOrNull(JsonElement data, string property) =>
-        data.ValueKind == JsonValueKind.Object
-        && data.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
 }

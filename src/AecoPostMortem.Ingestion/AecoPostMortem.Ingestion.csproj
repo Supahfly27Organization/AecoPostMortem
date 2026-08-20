@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AecoPostMortem.Data\AecoPostMortem.Data.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
+    <ProjectReference Include="..\AecoPostMortem.Rules\AecoPostMortem.Rules.csproj" />
   </ItemGroup>
 
 </Project>

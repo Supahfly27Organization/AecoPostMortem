@@ -1,31 +1,49 @@
 # AecoPostMortem.Ingestion
 
 Path discovery, event-line reader, RAW store, session/turn/agent reconstruction, self-exclusion,
-volume control (FR-10, FR-12, FR-13).
+volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (FR-26).
 
 ## Structure
 
 | File | What it holds |
 |---|---|
 | `SourceFiles.cs` | the only door onto `~/.copilot/`; refuses `ExcludedSources`-excluded paths before any OS-level open |
+| `CopilotSourceLocation.cs` | S-48: the default per-user Copilot session-state root (`~/.copilot/session-state`), resolved the same way `AecoPostMortem.Data.StoreLocation` resolves the store's own path. Names the path only — `SessionDiscovery` is what asks whether it is really there |
 | `SessionDiscovery.cs` | FR-1: finds every session directory under the session-state root and classifies its files (`events.jsonl`, `session.db`, `rewind-snapshots/index.json`, `workspace.yaml`) without reading any of them; a missing root is reported, not thrown |
 | `SessionEventReader.cs` | FR-3/FR-6: reads one `events.jsonl` line by line into `RawEvent`s — provider version and event-schema version from line 1 only, malformed lines skipped and counted, a trailing unterminated line stops the read and reports the high-water offset |
 | `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`ts`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
-| `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append` |
+| `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append`; FR-5 (issue #5): runs `RawEventBatch.DetectRewrites` first and refuses the append — reporting the mismatch on `SessionIngestResult.RewriteMismatches`/`RewriteDetected` instead — the moment a rewrite is found |
 | `MalformedLineCheck.cs` | turns one or more `SessionReadResult`s into the malformed-line `CheckRegistryEntry` (issue #23) |
 | `ExcludedSources.cs` | FR-10: recognises Copilot's global `session-store.db` by name, and states why it is skipped |
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
 | `RewindSnapshotSource.cs` | FR-13: reads `rewind-snapshots/index.json` as one whole-file RAW event at byte offset zero |
 | `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced |
+| `EventEnvelope.cs` | FR-8/FR-9 (issue #7): reads `id`/`parentId`/`agentId`/`data` out of a stored `RawEvent`'s own payload — separate from `EventEnvelopeParsers`, which only reads `type`/`ts` at RAW ingest time |
+| `ExecutionRecordBuilder.cs` | FR-8/FR-9: rebuilds one session's `RawEvent`s into `Data.Execution.Turn`/`ToolCall`/`Agent` rows plus the causality map, pure and deterministic over `RawEvent.Sequence` order |
+| `SpawnResolutionCheck.cs` | turns an `ExecutionRecordBuilder` agent-reconstruction pass into the `unresolvable-spawn` `CheckRegistryEntry` (issue #23, PRD §3.9's name for it) |
+| `SessionRuleExtractor.cs` | FR-26 (S-19, issue #32): resolves a session's `<custom_instruction>` blocks from its own `system.message` `RawEvent`s — the only caller that supplies `Rules.RuleStatementExtractor` its prompt text from the ingested store rather than from a file |
 
 ## References
 
-`Data` — it writes through the RAW store `Data` owns.
+`Data` — it writes through the RAW store `Data` owns, and `ExecutionRecordBuilder` returns
+`Data.Execution.Turn`/`ToolCall`/`Agent` records built from it.
 
-`Findings` — for exactly one purpose: `MalformedLineCheck` builds a `Findings.CheckRegistryEntry`
-so the malformed-line check registers itself (this story's own acceptance scenario). Ingestion does
-not call into `Rules` and does not read any other check or finding shape; reconstructing sessions
-from raw events still needs nothing from either.
+`Findings` — for two purposes: `MalformedLineCheck` builds a `Findings.CheckRegistryEntry` so the
+malformed-line check registers itself (S-02's own acceptance scenario), and `SpawnResolutionCheck`
+does the same for FR-9's spawn-resolution check (this story's Scenario 4). Ingestion does not read
+any other check or finding shape beyond those two.
+
+`Rules` — since S-19 (issue #32), for `SessionRuleExtractor` alone: it calls
+`RuleStatementExtractor.ExtractBlocks` with the text `SystemPromptExtractor.Extract` already
+resolved from a `RawEvent`, so `<custom_instruction>` parsing itself stays in `Rules` (this
+project's own CLAUDE.md, "Rule-set extraction and the check-shape catalogue") while the RAW-reading
+half of the job — which events to feed it, and unioning a session's own blocks across all of
+them — stays here, the same split `Findings` uses for every other check shape.
+
+`AecoPostMortem.Api` references this project the other way, for `CopilotSourceLocation` and
+`SessionDiscovery` — S-48's app-state diagnosis needs to know whether the Copilot session-state
+root exists, and reuses FR-1's own discovery rather than a second, parallel `Directory.Exists`
+check. See `AecoPostMortem.Api/CLAUDE.md`.
 
 ## Non-obvious decisions
 
@@ -67,6 +85,20 @@ than by a mechanism that has to be kept correct: a line that was malformed on on
 again on the next, and if it has since completed (the file is live-written), it parses. RAW's own
 identity index (`ux_raw_identity`) is what keeps a re-ingested line that already succeeded from being
 inserted twice — `SessionIngestor` supplies no extra idempotency of its own.
+
+### A detected rewrite refuses the whole read, not just the mismatched lines
+
+`SessionIngestor.Ingest` calls `RawEventBatch.DetectRewrites` before `RawEventBatch.Append`, over
+every event the current read produced. If even one event's byte offset disagrees with what RAW
+already stores there, `Ingest` appends nothing from that read at all and returns the mismatches on
+`SessionIngestResult.RewriteMismatches` (`RewriteDetected` is `true` and `EventsInserted` is `0`).
+It does not append the events that don't collide and skip only the mismatched ones: once a file's
+bytes at a previously-seen offset no longer match, the byte-offset identity assumption FR-5 rests
+on (growth is append-only) is broken for that file, and nothing later in the same read can be
+trusted as a genuine continuation rather than a coincidence. This is a refuse-and-report outcome,
+not an exception — the same "reported, not thrown" shape `SessionDiscovery` uses for a missing
+root — because a rewritten file is an operator-visible condition to investigate, not a defect in
+this code path.
 
 ### A trailing line with no newline is unfinished, not malformed
 
@@ -126,6 +158,81 @@ called against the wrong `Kind`, rather than returning a default that would look
 `RawEvent`-to-`ToolCall` pipeline; a later story wires `ToolArguments.Parse` in where
 `tool.execution_start.data.arguments` is read.
 
+### The spawn resolution key is a `toolCallId`, not a separately allocated agent id
+
+The data map's non-circular derivation (Appendix) measured that Copilot reuses one value for both
+roles: the spawning `task` call's own `toolCallId` *is* the value `subagent.started.data.toolCallId`
+later reports for the agent it produced. `ExecutionRecordBuilder` resolves a spawn by looking that
+same id up in a map keyed by every `task` `tool.execution_start`'s own `toolCallId` — not by any
+other correlation — and nesting falls out of the same lookup: the value stored is the `agentId` that
+task call itself carried, `null` for a spawn from the main thread. A `subagent.started` whose
+`toolCallId` never appears as a `task` call's `toolCallId` is excluded from the returned agents
+(`Agent.SpawningToolCallId` is `required`, so an unresolved spawn cannot honestly populate it) and
+counted instead in `SpawnResolutionCheck` — reported, never silently dropped (Scenario 3).
+
+### `Agent.Outcome` reads `subagent.completed`'s four cost fields as one unit
+
+If none of `totalTokens`, `totalToolCalls`, `durationMs` and `model` are present, the outcome is
+`CompletedCostUnknown`, not `Completed` with zeroes — zero is a number a surface would print, and
+the measured 247 of 462 completions that carry none of the four would otherwise be priced at
+nothing. Any one of the four present is enough to call it `Completed`; the constraint that only
+`Completed` may carry non-null cost columns (`ck_agent_cost`, `NORMALIZED_MODEL.md`) does not require
+all four together, only that the other three outcomes carry none. `subagent.failed` takes priority
+over a `subagent.completed` for the same agent if both are somehow present in one session — not
+measured in the reference corpus, so this is a documented judgment call, not an observed rule.
+
+### A turn's tool calls are found by "what was open when", not by a field on the call
+
+Neither `tool.execution_start` nor `_complete` names a `turnId` — only `assistant.turn_start`/
+`turn_end` do. `ExecutionRecordBuilder` tracks the currently open turn while walking a session's
+events in `Sequence` order and records it per event; `ToolCall.TurnId` is that snapshot, and only
+for a main-thread call — the data map measured zero `agentId` on every turn boundary event, so a
+subagent's own tool calls have no turn to belong to and its `TurnId` is always `null`. An `abort`
+event closes the currently open turn as `Aborted`: the measured 9-event gap between 2,384 turn
+starts and 2,375 ends equals the measured 9 `abort` events one-for-one, which is why `abort` is read
+as "this turn's real end", not as an unrelated event.
+
+### `ResultSizeBytes` reads only `result.content`, not the `toolTelemetry` fallback
+
+The data map names two sources for a tool call's result size: `result.content` length (measured 98%
+coverage) and `toolTelemetry.metrics.resultLength` (measured 39%). `ExecutionRecordBuilder` reads
+only the first — a deliberate scope cut for this story, not an oversight, since no acceptance
+scenario needs the last few percent. A future story that needs `ResultSizeBytes` on a call missing
+`result.content` should add the `toolTelemetry` fallback to `GetResultSizeBytes` rather than treating
+its absence as a gap in this one.
+
+### `ExecutionRecordBuilder` is a pure in-memory builder, not yet wired into the store
+
+It takes `RawEvent`s and returns `Data.Execution` records plus a `CheckRegistryEntry` — nothing here
+opens a `PostMortemContext` or writes a derived table. None of this story's acceptance scenarios ask
+for persistence, and `DerivedSchema.Rebuild`/`EnsureCurrent` (`AecoPostMortem.Data/CLAUDE.md`)
+already leave the derived tables empty on purpose, pending a reader. Wiring this builder's output
+into those tables — the actual `rebuild`-populates-rows step — is left for whichever later story
+does that wiring; keeping the two concerns separate mirrors `SessionIngestor` staying RAW-only.
+
+### `SessionRuleExtractor` never opens a file — its only input is `RawEvent`
+
+Scenario 3 (issue #32) requires rule extraction to read only the ingested store, never a markdown
+file on disk. `SessionRuleExtractor.Extract` takes `(string sessionId, IEnumerable<RawEvent>
+sessionEvents)` — there is no path parameter for it to read a file from even if it wanted to. It
+delegates prompt-text resolution to the already-existing `SystemPromptExtractor.Extract` (one RAW
+event in, text or nothing out) and hands that text to `Rules.RuleStatementExtractor.ExtractBlocks`,
+which is itself proven never to touch disk by
+`test/AecoPostMortem.Containment.Tests/RuleExtractionNeverReadsDiskTests.cs` (a textual scan of
+`AecoPostMortem.Rules`, the same technique `DeterminismInvariantTests` uses for the clock/chance/model
+invariant). `SessionRuleExtractorTests` proves the behavioural half: extraction succeeds against
+`RawEvent`s built entirely in memory, with no session-state directory ever created by the test.
+
+### A session's blocks are unioned across its own `system.message` events, not deduplicated within it
+
+A session can carry 1–3 distinct system-prompt texts (data map Part 6) — a mid-session context reset
+can change the surrounding prompt while repeating the same injected files. `SessionRuleExtractor.Extract`
+therefore calls `RuleStatementExtractor.ExtractBlocks` once per `system.message` event and
+concatenates every block it returns, rather than picking "the" prompt text for the session. A
+statement repeated across two of a session's own events still counts as one occurrence for that
+session — that collapse is `RuleStatementDeduplication.Deduplicate`'s job (`AecoPostMortem.Rules`),
+which tracks session ids in a set, not this method's.
+
 ### The corpus round-trip is a build gate, not a unit test
 
 `test/AecoPostMortem.Ingestion.Tests/ApplyPatchCorpusRoundTripTests.cs` parses and re-serialises
@@ -140,12 +247,18 @@ and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check
 
 ## Status
 
-Path discovery (`SessionDiscovery`), the event-line reader (`SessionEventReader`,
-`EventEnvelopeParsers`), RAW persistence (`SessionIngestor`), the malformed-line check
-(`MalformedLineCheck`), volume control (`ExcludedSources`, `SystemPromptExtractor`,
-`RewindSnapshotSource`) and the polymorphic `arguments` parser (`ToolArguments`) exist as composable
-building blocks (FR-1, FR-3, FR-4, FR-6, FR-10, FR-12, FR-13). `ToolArguments` is not yet wired into
-the event-line reader's `RawEvent`-to-`ToolCall` reconstruction. The `ingest` CLI command still
-reports "not implemented" (`AecoPostMortem.Cli`) — wiring these into an actual directory walk is a
-later story. The coverage report and self-exclusion (FR-7/FR-14) and execution-record reconstruction
-(FR-8/FR-9) land with the stories that follow.
+`EventEnvelopeParsers`), RAW persistence and idempotent, rewrite-safe re-ingest (`SessionIngestor`,
+FR-5, issue #5), the malformed-line check (`MalformedLineCheck`), volume control (`ExcludedSources`,
+`SystemPromptExtractor`, `RewindSnapshotSource`), the polymorphic `arguments` parser
+(`ToolArguments`), execution-record reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`,
+`SpawnResolutionCheck`) and rule-statement resolution (`SessionRuleExtractor`, S-19, issue #32)
+exist as composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-8, FR-9, FR-10, FR-12, FR-13,
+FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses it to pull `path`
+out of an object-shaped `arguments` value. The `ingest` CLI command still reports "not implemented"
+(`AecoPostMortem.Cli`) — wiring path discovery, the event reader, `SessionIngestor` and
+`ExecutionRecordBuilder` into an actual directory walk that also populates the derived tables is a
+later story. `SessionRuleExtractor` likewise resolves one session's own `RawEvent`s, already in
+hand — nothing yet walks the whole store calling it per session and feeding the results into
+`Rules.RuleStatementDeduplication.Deduplicate`; that corpus-wide wiring, and rule-set versioning by
+content hash (FR-27), are S-20's job. The coverage report and self-exclusion (FR-7/FR-14) land with
+the story that follows.

@@ -853,6 +853,11 @@ SessionCount` the identical visual prominence its `AdherenceFigureBlock`'s own p
 published figures — the frozen corpus's raw session bytes are not committed
 (`fixtures/README.md`), so this is the same "shape that produced the published numbers, not a
 replay of the original files" every other test in this repository that reproduces a measured PRD
-figure already does. No CLI command or `AecoPostMortem.Api` endpoint wires a real store's rule-set
-versions and invocations into `Compare` yet — like every check-shape story in this project, it
-publishes the contract the eventual analysis-run orchestrator will call.
+figure already does. Piece 4 wired a real caller: `AecoPostMortem.Api.ApiHost.GetMonitorComparison`
+(`GET /api/monitor-comparison`, `Api/CLAUDE.md`) picks a real `PreferAOverB` statement and a real
+`ToolInvocationShape` corpus per side and calls `Compare` against the live store — verified against
+the live 35-session reference corpus with real hashes, both directions: a real adjacent pair answers
+200 (its rule's operands honestly `unresolved`, a null percentage on each side) and a real
+non-adjacent pair answers 404 via the same `NonAdjacentRuleSetVersionsException` this file's own
+`Compare` remarks already describe. No CLI command reads a served comparison yet — that, and
+mounting `web/src/digest/MonitorComparisonBlock.tsx` on a route, are still later work.

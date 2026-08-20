@@ -723,12 +723,35 @@ is deterministic. `web/src/routes/SessionPage.tsx`'s `AgentLanes` is the client,
 lane's identity, outcome and `SubagentOutputEnvelope` — never falling back to a `read_agent` tool
 call's truncated result, since `SubagentOutputLookup` never reads one.
 
-`MonitorComparisonEnvelope.cs` (S-35, issue #43, FR-39) is contract-only in the same sense the
-digest and Rules Inventory contracts were before their own live endpoints landed:
-`web/src/digest/MonitorComparisonBlock.tsx` and `web/src/api/monitor.ts` are real consumers of the
-shape, but `ApiHost.Build` does not `MapGet` `/api/monitor-comparison` — picking the two adjacent
-versions and the operand pair to compare, and running `Findings.MonitorComparison.Compare` against
-the live store, is wiring no story has done yet, though `SessionRuleSetLookup` (added for
-`/api/rules-inventory`, above) already supplies the corpus-wide `SessionRuleSet` resolution this
-endpoint would also need. The web component is built ahead of that wiring, the same seam
-`AdherenceFigureBlock.tsx` established before any digest endpoint served a real `AdherenceFigure`.
+`MonitorComparisonEnvelope.cs` (S-35, issue #43, FR-39) is now served for real (piece 4):
+`GET /api/monitor-comparison?before=&after=` (`ApiHost.GetMonitorComparison`) resolves the same
+default repository `GetDigest`/`GetRulesInventory` already default to (`BuildRepositoryScope`), since
+the wire contract carries only bare version hashes — no repository, no rule. It picks the first
+`Rules.RuleShapeKind.PreferAOverB` match among the statements the `after` version's own carrying
+sessions carried (the only shape `Findings.MonitorComparison.Compare` takes two operands for), scopes
+a real `ToolInvocationShape` corpus to each side's own sessions separately (a new `SessionIdsCarrying`
+helper, since neither `RuleSetVersioning.Compute` nor `RuleSetVersion` carries a version's full member
+list, only its first/last session), and calls `Compare`. `null` (404) for no repository, no such
+adjacent pair (`UnknownRuleSetVersionException`/`NonAdjacentRuleSetVersionsException`, caught), or no
+`PreferAOverB` statement to compare — `MixedRuleSetVersionException` is not caught here because it is
+unreachable through this caller: both ids are always constructed against the same selected repository.
+`web/src/digest/MonitorComparisonBlock.tsx` and `web/src/api/monitor.ts` are the real consumers,
+unchanged — no frontend edit was needed, the same "endpoint lands, contract already there" pattern
+`GetDigest`/`GetRulesInventory` established. No route in `web/src/App.tsx` mounts the block yet
+either, a separate, still-open gap (`web/CLAUDE.md`).
+
+Verified against the live 35-session reference corpus, real hashes end to end: a real adjacent pair
+(`2851DBD3…`/`7B9F2536…`, `supahfly27/UpFront`) answers 200 for real, its `PreferAOverB` statement
+("prefer specific files over entire directories") both operands `unresolved` — a null percentage on
+each side, honestly, since neither operand names anything `OperandResolver` can match against a real
+tool. A non-adjacent real pair (one version apart) answers 404, matching
+`NonAdjacentRuleSetVersionsException`'s own refusal. **A real defect surfaced by this exercise, not
+introduced by it**: `RuleSetVersionAdjacency.RequireAdjacentPair`'s own ordering — `FirstSessionId`
+under ordinal string comparison — has no relationship to chronological order once session ids are
+random UUIDs (this corpus' own shape), so "adjacent" per that primitive is not the same as
+"chronologically next" in practice; querying the corpus' own `availableVersions` (chronologically
+ordered) two entries apart in that list answered 404 (non-adjacent per the ordinal check) even though
+they are chronological neighbours. This is pre-existing behaviour from S-35/issue #43, unrelated to
+and unmodified by this wiring — flagged to the user as a follow-up to scope separately, not fixed
+here without going through this repo's own brainstorming/approval step for a change to already-shipped,
+tested code.

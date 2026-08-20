@@ -436,12 +436,12 @@ FR-39 (S-35, issue #43) added the Monitor comparison's own block (`digest/Monito
 `api/monitor.ts`): a `MonitorComparisonEnvelope` renders as two `AdherenceFigureBlock`s, Before and
 After, each preceded by its own session count sharing the percentage's own CSS class and
 `data-emphasis` marker (see "The Monitor comparison's session count..." above). `/api/monitor-
-comparison` is not served yet — `AecoPostMortem.Api/CLAUDE.md`'s own status note documents the same
-not-yet-wired gap `/api/digest` and `/api/rules-inventory` carry — and no route in `App.tsx` mounts
-this block yet either: it is a reusable renderer, the same "built ahead of the page that will place
-it" pattern `AdherenceFigureBlock` followed before `FindingRow` existed to call it. `MonitorComparison
-Block.test.tsx` exercises it directly against the reference corpus's own measured 41.8% → 71.7% edit
-(3 sessions, then 4).
+comparison` is now served for real (piece 4, `AecoPostMortem.Api/CLAUDE.md`'s own status note) — but
+no route in `App.tsx` mounts this block yet, still: it remains a reusable renderer with no page
+calling `fetchMonitorComparison`, the same "built ahead of the page that will place it" pattern
+`AdherenceFigureBlock` followed before `FindingRow` existed to call it, now on the server side of
+that same gap instead of both sides. `MonitorComparisonBlock.test.tsx` exercises it directly against
+the reference corpus's own measured 41.8% → 71.7% edit (3 sessions, then 4).
 
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there

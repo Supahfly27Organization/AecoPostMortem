@@ -34,6 +34,18 @@ public static class ApiHost
     /// version in the selected repository is served.</summary>
     public const string VersionParameter = "version";
 
+    /// <summary>FR-39's Monitor comparison route (S-35, issue #43), first served for real here —
+    /// piece 4. Matches <c>web/src/api/monitor.ts</c>'s own <c>MonitorComparisonRoute</c>.</summary>
+    public const string MonitorComparisonRoute = "/api/monitor-comparison";
+
+    /// <summary>The two query parameters naming which adjacent rule-set-version hashes to compare —
+    /// bare hashes, disambiguated within the selected repository only, the same convention
+    /// <see cref="VersionParameter"/> already established for <see cref="RulesInventoryRoute"/>.
+    /// Matches <c>web/src/api/monitor.ts</c>'s own <c>fetchMonitorComparison</c> query string.</summary>
+    public const string BeforeParameter = "before";
+
+    public const string AfterParameter = "after";
+
     /// <summary>The route template <see cref="Build"/> registers for FR-21's session endpoint
     /// (S-08). Use <see cref="SessionRoute"/> to build the concrete request path for one session.</summary>
     public const string SessionRouteTemplate = "/api/sessions/{sessionId}";
@@ -94,6 +106,18 @@ public static class ApiHost
         app.MapGet(RulesInventoryRoute, (string? version) =>
         {
             var envelope = GetRulesInventory(store, version);
+            return envelope is null ? Results.NotFound() : Results.Ok(envelope);
+        });
+
+        app.MapGet(MonitorComparisonRoute, (string? before, string? after) =>
+        {
+            if (before is null || after is null)
+            {
+                return Results.BadRequest(
+                    $"Both '{BeforeParameter}' and '{AfterParameter}' query parameters are required.");
+            }
+
+            var envelope = GetMonitorComparison(store, before, after);
             return envelope is null ? Results.NotFound() : Results.Ok(envelope);
         });
 
@@ -398,6 +422,107 @@ public static class ApiHost
             return null;
         }
     }
+
+    /// <summary>
+    /// FR-39's real orchestration (S-35, issue #43): the not-yet-wired gap
+    /// <see cref="Findings.MonitorComparison"/>'s own remarks name. The wire contract carries only
+    /// bare version hashes (<paramref name="beforeHash"/>/<paramref name="afterHash"/>) — no
+    /// repository, no rule — so this resolves both the same way <see cref="GetRulesInventory"/>
+    /// resolves its own <c>version</c> parameter: within <see cref="BuildRepositoryScope"/>'s default
+    /// repository only. It picks the first <see cref="RuleShapeKind.PreferAOverB"/> match among the
+    /// statements the <paramref name="afterHash"/> version's own carrying sessions carried — the only
+    /// shape <see cref="Findings.MonitorComparison.Compare"/> takes two operands for — and scopes a
+    /// real <see cref="ToolInvocationShape"/> corpus to each side's own sessions separately, so the
+    /// two figures are never built from calls the other side made. <see langword="null"/> (404) when
+    /// there is no repository, no such adjacent pair, or no <see cref="RuleShapeKind.PreferAOverB"/>
+    /// statement to compare — the same "answers 404, the same as a missing session" precedent
+    /// <see cref="GetRulesInventory"/> already documents for a version hash no session carried.
+    /// </summary>
+    public static MonitorComparisonEnvelope? GetMonitorComparison(
+        LocalStore store, string beforeHash, string afterHash)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(beforeHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(afterHash);
+
+        using var context = store.Open();
+
+        var sessions = context.Sessions.ToList();
+        var rawEvents = context.RawEvents.ToList();
+        var toolCalls = context.ToolCalls.ToList();
+        var agents = context.Agents.ToList();
+
+        var repositoryScope = BuildRepositoryScope(sessions);
+        if (repositoryScope.SelectedRepository is null)
+        {
+            return null;
+        }
+
+        var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
+        var versions = RuleSetVersioning.Compute(ruleSets);
+
+        var beforeId = new RuleSetVersionId { Repository = repositoryScope.SelectedRepository, Hash = beforeHash };
+        var afterId = new RuleSetVersionId { Repository = repositoryScope.SelectedRepository, Hash = afterHash };
+
+        var afterSessionIds = SessionIdsCarrying(ruleSets, afterId);
+        var afterStatements = ruleSets
+            .Where(set => afterSessionIds.Contains(set.SessionId))
+            .SelectMany(set => set.Blocks)
+            .SelectMany(block => block.Statements)
+            .Distinct()
+            .ToList();
+
+        var preferAOverB = RuleShapeCatalogue.MatchAll(afterStatements).Matches
+            .FirstOrDefault(match => match.Kind == RuleShapeKind.PreferAOverB);
+        if (preferAOverB is null)
+        {
+            return null;
+        }
+
+        var beforeSessionIds = SessionIdsCarrying(ruleSets, beforeId);
+        var beforeInvocations = InvocationsFor(beforeSessionIds, toolCalls, agents, rawEvents);
+        var afterInvocations = InvocationsFor(afterSessionIds, toolCalls, agents, rawEvents);
+
+        try
+        {
+            var comparison = Findings.MonitorComparison.Compare(
+                versions,
+                beforeId,
+                afterId,
+                preferAOverB.OperandAText,
+                preferAOverB.OperandBText!,
+                beforeInvocations,
+                afterInvocations);
+
+            return MonitorComparisonEnvelope.From(comparison);
+        }
+        catch (Exception ex) when (ex is UnknownRuleSetVersionException or NonAdjacentRuleSetVersionsException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The session ids whose own block set hashes to <paramref name="versionId"/>, within its
+    /// own repository — the same content-hash match <see cref="RuleSetVersioning.Compute"/> groups by,
+    /// exposed here because neither it nor <see cref="RuleSetVersion"/> carries the full member list,
+    /// only the window's first and last session.</summary>
+    static HashSet<string> SessionIdsCarrying(IReadOnlyList<SessionRuleSet> ruleSets, RuleSetVersionId versionId) =>
+        ruleSets
+            .Where(set => string.Equals(set.Repository, versionId.Repository, StringComparison.Ordinal))
+            .Where(set => string.Equals(
+                RuleSetVersionHasher.ComputeHash(set.Blocks), versionId.Hash, StringComparison.Ordinal))
+            .Select(set => set.SessionId)
+            .ToHashSet(StringComparer.Ordinal);
+
+    static IReadOnlyList<ToolInvocationShape> InvocationsFor(
+        IReadOnlySet<string> sessionIds,
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents,
+        IReadOnlyList<RawEvent> rawEvents) =>
+        ToolInvocationShapeLookup.BuildAll(
+            toolCalls.Where(call => sessionIds.Contains(call.SessionId)).ToList(),
+            agents.Where(agent => sessionIds.Contains(agent.SessionId)).ToList(),
+            rawEvents.Where(e => sessionIds.Contains(e.SessionId)).ToList());
 
     /// <summary>Builds the concrete request path for one session's <see cref="SessionRouteTemplate"/>
     /// endpoint, escaping the id the same way any other path segment would need to be.</summary>

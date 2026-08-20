@@ -11,7 +11,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `RawPayload.cs` | strict UTF-8 decode, and FR-2's content hash |
 | `PostMortemContext.cs` | the model, its column mapping and its indexes |
 | `StoreMetadata.cs` | the store's own key/value state — migrated, not derived; holds `DerivedSchemaVersionKey` |
-| `RawEventBatch.cs` | the batched raw-SQL append, plus `DetectRewrites` (FR-5, issue #5): read-only rewrite detection — a different content hash at an already-stored `(source_file, byte_offset)` — and `RawRewriteMismatch`, its result row |
+| `RawEventBatch.cs` | the batched raw-SQL append, plus `DetectRewrites` (FR-5, issue #5): read-only rewrite detection — a different content hash at an already-stored `(source_file, byte_offset)` — and `RawRewriteMismatch`, its result row; and `DeleteBySession` (FR-7, issue #6): the bulk removal `Ingestion.SessionIngestor` calls when a session already in RAW is retroactively excluded |
 | `SystemPromptText.cs` | FR-12's dedup row: system-prompt text keyed by its own content hash — migrated, not derived, for the same reason as `StoreMetadata` |
 | `SystemPromptTextSchema.cs` | the physical table and column names for the dedup table, stated once |
 | `SystemPromptTextBatch.cs` | the batched raw-SQL append for dedup rows (Repo Rule 5) |
@@ -66,6 +66,17 @@ re-ingest case `Append`'s own conflict target already treats as a no-op. `AecoPo
 SessionIngestor.Ingest` is the caller: it runs `DetectRewrites` before `Append` and skips the append
 entirely — reporting the mismatch on its own result instead — the moment any mismatch turns up
 (issue #5, FR-5's edge case: byte offsets are safe identity only because growth is append-only).
+
+### `DeleteBySession` is a bulk `ExecuteDelete`, not a tracked remove
+
+FR-7's exclusion has to work retroactively over a store that already holds a session ingested
+before its cwd was added to the exclusion list, not only prospectively over one not yet ingested
+(issue #6's edge case). `RawEventBatch.DeleteBySession` issues `context.RawEvents.Where(row =>
+row.SessionId == sessionId).ExecuteDelete()` — one `DELETE` statement, never loaded into the change
+tracker first — for the same reason `Append` bypasses it in the other direction: there is no
+per-entity cost worth paying for either side of RAW's append/remove pair. Unlike `Append`,
+`DeleteBySession` is not part of Repo Rule 5's batched-raw-SQL append path; it is EF Core's own bulk
+API, which needs no hand-written SQL or parameter binding to stay correct.
 
 ### Only RAW carries a migration
 

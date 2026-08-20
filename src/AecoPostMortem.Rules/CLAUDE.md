@@ -12,6 +12,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
 | `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
+| `ToolVocabularyMismatchCheck.cs` | FR-35 (S-26, issue #40): `RuleToolMention` (a rule's source text, one named tool, and the `ToolRole` it targets — plain input), `ToolVocabularyMismatch` (sealed base) with `MinorToolNamed`/`NonExistentToolNamed`, and `ToolVocabularyMismatchCheck.Run`, which resolves each mention through `OperandResolver` and compares against the target role's `DominantTool` |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -27,6 +28,11 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
 | `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
 | `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
+| `RulesInventory.cs` | FR-40 (S-22, issue #35): `RuleStatementStatus` (the closed four-shape status union), `RuleRetirement` (in force / retired at a date), `RulesInventoryRow`, `RulesInventoryStatusCounts`, `RulesInventoryState`, `RulesInventory.Build`/`.MostRecentVersion`, and `UnknownRuleSetVersionException` — one rule-set version's statements, each with exactly one status, its origin, its reach, its in-force window and its retirement |
+| `RuleShape.cs` | FR-34 (S-25, issue #39): `RuleShapeKind` (the closed five-member shape enum), `RuleShapeMatch` (a statement, its shape, and the operand text lifted from it), `UnmatchedStatementDisposition`/`UnmatchedStatement` (FR-40's two middle inventory statuses, each with a reason), and `RuleShapeMatching` (the partition, with a computed `StatementCount`) |
+| `RuleShapeCatalogue.cs` | FR-34's catalogue itself: `RuleShapeCatalogue.Shapes`, `.TryMatch` and `.MatchAll` — eight phrasing patterns across five shapes, matched in precedence order, with operands read from the matched statement's own text |
+| `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only) and `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows) |
+| `ContradictionCheck.cs` | FR-43 (S-38, issue #47): `ContradictionCandidate` (a pair of statements plus their shared, negation-stripped wording) and `ContradictionCheck.Run` — pairwise keyword-polarity detection over whatever statements the caller hands in, `i < j` only so no statement is ever compared against itself |
 
 ## The invariant
 
@@ -42,6 +48,19 @@ assertion into a test: a project with no dependencies has a very small surface i
 could hide.
 `The_rules_project_references_no_persistence_assembly` in `test/AecoPostMortem.Containment.Tests`
 enforces it, so adding a reference here fails the build.
+
+**And no name may appear in a literal here** (S-25's second scenario).
+`RulesProjectNamesNothingTests.The_rules_project_uses_only_a_reviewed_vocabulary_in_its_literals`
+extracts every string and character literal in this project and requires every word in them to be on
+`PermittedVocabulary` — an allowlist of English grammar, FR-30's permitted argument field names, and
+regex group names. This is an allowlist for the same reason the reference rule is: a blocklist of
+tool names can only reject the tools this author happened to know, which is the exact assumption
+FR-34 exists to remove. A tool, MCP server or repository name introduces a word that is not grammar,
+and the build fails. Adding a word to that list is the reviewable act the test exists to force.
+`The_rules_project_names_no_repository_the_frozen_corpus_names` is the second half: it reads the
+frozen corpus manifest's own `repository` fields and asserts none appears anywhere in this project's
+source — comments and identifiers included, which the literal scan does not reach. Both were checked
+by mutation: injecting a tool name, an MCP server name and a repository name here fails them.
 
 It takes plain inputs — rule statements as text, the discovered tool vocabulary as a list, call
 counts as numbers — and returns results. `AecoPostMortem.Findings` does the orchestration, reading
@@ -324,6 +343,100 @@ own claim was entirely absorbed by A") from `Unresolved` ("nothing matched B in 
 and collapsing the two would make a resolution's own record of what happened lie about which one
 occurred.
 
+### `ToolVocabularyMismatch` is a sealed hierarchy, not one type with nullable fields
+
+FR-35's two scenarios carry structurally different data: a minor tool named needs the dominant tool
+and both call counts, a non-existent tool needs neither. `MinorToolNamed` and `NonExistentToolNamed`
+both derive from `ToolVocabularyMismatch` rather than being one record with nullable
+`DominantTool`/counts, the same reasoning `OperandResolutionLayer.Unresolved` gives for being its own
+enum member instead of an empty `Tools` set — there is no field here that could be null for one kind
+and required for the other, so a caller pattern-matching on the type can never observe a
+half-populated result.
+
+### `ToolVocabularyMismatchCheck` reuses `Unresolved` and `DominantTool` rather than re-deriving either
+
+`Run` calls `OperandResolver.Resolve` once per mention and checks `Layer == OperandResolutionLayer.
+Unresolved` for the non-existent case — the exact condition `OperandResolver.cs`'s own doc comment
+names S-26 as the caller of. For the minor-tool case it compares `resolved.Tools` (not the mention's
+raw text) against `ToolRoleDeriver.Derive(...).Roles[TargetRole].DominantTool.ToolName`, so an operand
+that resolved through the server or role layer to a set containing the dominant tool is not flagged
+even though its own text is not the dominant tool's literal name.
+
+### A target role with no tools at all produces no finding, even for a tool that exists
+
+`DominantTool` is `null` when a `ToolRoleSummary`'s `Tools` list is empty (its own computed-property
+contract). `Run` treats that as "nothing to compare against" and skips the mention rather than
+fabricate a mismatch against an absent dominant tool — a decision this project's own test,
+`A_target_role_with_no_tools_at_all_produces_no_finding_for_an_existing_named_tool`
+(`ToolVocabularyMismatchCheckTests`), pins down since neither Gherkin scenario in issue #40 covers it.
+
+### One `RuleToolMention` per named tool, never a list on one record
+
+Issue #40's edge case is explicit: "a rule naming several tools needs one finding per unresolved
+name, not one aggregate finding." `RuleToolMention` carries exactly one `NamedTool`, so a rule
+naming three tools is three `RuleToolMention` values fed to one `Run` call — the fan-out is a fact
+about the input shape, not a loop this check has to remember to run internally. Whatever project
+extracts several tool names from one rule statement's own phrasing (S-25's job, not this project's)
+is responsible for producing one `RuleToolMention` per name.
+
+### The catalogue holds shapes, and a shape is grammar — the operands come from the statement
+
+`RuleShapeCatalogue` matches on eight regular expressions across five shapes (`NeverReadPath`,
+`PreferAOverB`, `ToolIsBanned`, `UseAAfterB`, `AlwaysPassParam` — the five FR-34 measured firing).
+Every token in those patterns is an English verb, modal or particle: `never`, `prefer`, `over`,
+`instead of`, `after`, `before`, `always pass`. Nothing in them is a tool, a server or a repository,
+which is why the vocabulary test above can be an allowlist of grammar and still pass. The operand is
+whatever text the statement itself put between the pattern's keywords, so a repository whose rules
+this author never saw is matched by the same five shapes as one they did — that is the whole point
+of FR-34, and `The_catalogue_reproduces_the_measured_floor_of_eight_rules_across_five_shapes` proves
+it against a fictional repository whose tool names did not exist until that test was written.
+
+### Precedence runs most specific to least, and a rejected operand does not consume the statement
+
+Entries are tried in order: path prohibition, explicit comparison, bare prohibition, ordering,
+argument obligation. A statement can satisfy two shapes at once — "do not use A instead of B" is both
+a prohibition and a comparison — and reading it as the comparison it spells out loses less than
+reading it as a ban on the whole phrase. The two `PreferAOverB` entries carry negative lookbehinds
+(`(?<!\bnot\s)`, `(?<!\bnever\s)`) for the opposite case: without them, "do not use A instead of B"
+would be read as recommending A, the exact inverse of what it says.
+
+When an entry's pattern matches but the operand fails the shape's own test — `NeverReadPath` requires
+a path-shaped operand, `ToolIsBanned` requires one that is not — matching moves to that pattern's
+*next* match before moving to the next entry, and out to the inventory only if nothing fits. A
+rejected operand therefore never silently converts a rule into an unmatched statement on the strength
+of a position the statement had already moved past.
+
+### An operand's own full stop is not the sentence's
+
+The operand capture is lazy and bounded by a sentence terminator, and that terminator requires
+whitespace or end-of-input after it (`[.;](?=\s|$)`). Without the lookahead,
+``Never read `src/AecoPostMortem.Data/Migrations/` …`` bounds the operand at the dot inside
+`AecoPostMortem.Data` and yields `src/AecoPostMortem` — a *confident wrong operand*, which S-25's
+edge case names as the failure mode this project must catch by construction rather than by review
+(a wrong operand mapping produces a wrong number, not an obvious failure).
+`An_operand_is_not_truncated_at_a_full_stop_inside_it` covers both a dotted path segment and a
+dotfile; this defect was real and was caught by that test, not by reading the regex.
+
+### A statement matching no shape is dispositioned, never dropped
+
+`MatchAll` partitions rather than filters: every statement handed in leaves as either a
+`RuleShapeMatch` or an `UnmatchedStatement`, and `RuleShapeMatching.StatementCount` is computed from
+the two so it cannot disagree with them. The disposition is FR-40's two middle statuses — a statement
+carrying a normative marker (`never`, `must`, `only`, `required`, …) but matching no shape is
+`CheckableNotBuilt`, one carrying none is `NotCheckable` — and `Reason` is `required`, so there is no
+constructor path that records an unmatched statement without saying why. The marker list is English
+modals, not a list of rules; FR-34's own text permits ordinary grammar and forbids only the three
+kinds of name.
+
+### The catalogue resolves nothing itself
+
+`RuleShapeMatch` carries operand *text*, not tools. Turning that text into tools is
+`OperandResolver.Resolve`/`.ResolveTwoOperands`, against whatever corpus the caller passes in — so
+the two-operand shapes get FR-32's A-wins subtraction for free, and S-26 (FR-35, "this rule names a
+tool your agent does not have") is `Layer == Unresolved` on a matched operand with nothing further
+built here. Keeping resolution out of the catalogue is what lets both stories share one mechanism
+instead of the catalogue growing a second, parallel one.
+
 ### A version's identity is the (repository, hash) pair, groups by hash within chronological order
 
 `RuleSetVersioning.Compute` orders each repository's sessions by `StartedAt` (ordinal, `SessionId`
@@ -359,6 +472,31 @@ colliding two different block sets onto the same hash. Length-prefixing has no s
 encoding of a sequence of fields is injective regardless of what those fields contain, so it needs no
 assumption about what extracted text does or does not include.
 
+### Self-match exclusion is structural (loop bounds), not a filter applied after the fact
+
+FR-43's own edge case: a keyword-polarity first pass returned a measured 4 candidates and all 4
+were spurious — three matched a statement against itself, because a prohibition contains the
+phrase it prohibits ("do not use it" contains "use it"). `ContradictionCheck.Run` never gives
+itself the chance to make that mistake: its only loop is `for i in 0..count, for j in i+1..count`,
+so statement `i` is never compared against itself and no pair is ever visited twice in either
+order. Two statements sharing the same polarity — including two literally identical
+statements — are never flagged either: `TryGetSharedWording` requires the negation flag to
+*differ* between the pair, so agreement (even duplicated agreement) can never read as conflict.
+`ContradictionCheckTests.A_real_prohibition_alone_in_the_set_is_never_flagged_against_itself` uses
+the PRD's own worked example text as a regression test for exactly this failure mode.
+
+### Scoping to "one rule-set version" is the caller's job, matching every other check shape
+
+`ContradictionCheck` takes whatever `IReadOnlyList<RuleStatement>` it is handed and compares all of
+it — it has no concept of a session, a version or a repository, the same plain-input discipline
+`RepeatedReadCheck`/`HookFailureCheck`/every other check in this project already follows.
+`AecoPostMortem.Findings.ContradictionCheck` is the orchestrator that groups sessions by rule-set
+version before calling in, the same split `RuleSetVersionScope`'s own remarks describe for a future
+adherence figure ("this project has no adherence figure of its own yet ... the reusable primitive
+any future figure scopes itself with") — except here the scoping is per-version grouping rather
+than a single-version refusal, since FR-43 asks for contradictions to be found *within* each
+version, not for the whole run to be refused the moment more than one version is present.
+
 ### The refusal is a primitive, not wired to an adherence figure yet
 
 FR-28 says a figure spanning a rule edit "must be impossible to compute, not merely discouraged,"
@@ -369,28 +507,135 @@ and one hash — the same `RuleSetVersionId` `RuleSetVersioning` produces — so
 first and cannot construct a figure across an edit even by accident, mirroring how `HookFailureCounts`
 makes a bare denominator uncompilable rather than merely undocumented.
 
+### A statement's status is supplied by the caller, not decided here
+
+`RulesInventory.Build` takes a `Func<RuleStatement, RuleStatementStatus>` rather than classifying
+statements itself, the same shape `Api.DigestEnvelope.From` takes its finding mapper. Deciding
+whether a statement matches a built check shape is S-25's catalogue work (FR-34, issue #39), which
+this project does not carry yet — and the boundary between *Checkable — not yet built* and *Not
+checkable* is exactly the thing that catalogue defines: the first means "a shape could express this,
+none exists"; the second means "no shape can express it, because the logs do not record what it
+talks about", which is why FR-40 requires it to state a reason. Baking a classifier in here would
+have meant guessing that boundary and then having to un-guess it when S-25 lands. When it does, only
+the function passed in changes; every scenario this file's inventory implements is unaffected.
+
+### Retirement is positional in the repository's own session order, never a computed date
+
+FR-40's "adherence frozen at the date it was removed" needs a date, and the corpus has no removal
+event — a rule vanishes by simply not appearing in the next session's prompt. `RetirementOf` takes
+the repository's chronologically ordered sessions, finds the last one whose **own block set** carried
+the statement, and reports the *next* session's own `StartedAt`: the first moment the log shows the
+statement gone.
+
+The search is over each session's block set, not over the row's `SessionIds`, and the difference is
+a real bug that was caught in review rather than a stylistic preference. `SessionIds` holds only the
+*selected* version's sessions, and because sessions share a version precisely when their block sets
+are identical, it is **the same list for every row in that version**. Searching it dates every
+statement's removal to the end of the selected version — so a statement that a later version went on
+carrying for weeks is reported as removed at the wrong date, and `AdherenceFrozenAt` inherits it.
+`A_statement_a_later_version_kept_is_retired_at_that_later_removal_not_at_this_versions_end` is the
+three-version fixture that pins this; a two-version corpus cannot tell the two derivations apart,
+which is why the original suite passed.
+Nothing here reads a clock (the determinism contract, PRD §3.8), and nothing derives a date
+independently of the sessions themselves. A statement present in the repository's most recent
+version is never retired, so the default view — the most recent version, `MostRecentVersion` — is
+the one in which nothing is frozen.
+
+### Exactly one version, and no shape here can hold two
+
+`Build` takes one `RuleSetVersionId` and produces rows only from sessions carrying that hash;
+`AvailableVersions` carries other versions' *identities and windows*, never their statements. This
+is FR-40's Scenario 6 made structural rather than conventional, and it matters more than the wording
+suggests: a measured 34 of 43 statements are absent from the most recent session, so the
+union-of-all-versions table the digest mockup showed would render three quarters of its rows as
+though they were still in force (PRD Part 4).
+
+### Three empty states, not one
+
+`RulesInventoryState` distinguishes `NoInstructionBlocks` from `BlocksCarriedNoStatements` even
+though Scenario 4 asks only that "no rules were found" be stated. FR-26's own fourth scenario already
+established that these are different facts — `SessionInstructionBlocks.HasInstructionBlocks` exists
+for exactly this — and they have different fixes: the first says this repository has no written
+rules, the second says it has them and the list-item extraction unit found nothing in them, which
+would be an extraction defect rather than an empty repository.
+
+### Known seams the inventory inherits rather than fixes
+
+Three things a reader of `RulesInventory.cs` will notice. All three are pre-existing and none is
+changed by S-22, because changing any of them changes a merged story's semantics:
+
+- **A null `Repository` is one bucket, not "unknown".** `RuleSetVersioning.Compute` groups by
+  `session.Repository`, and `null == null`, so every session whose repository could not be resolved
+  shares a scope. `RulesInventory.Build` follows the same rule (`string.Equals(..., Ordinal)`), which
+  means under a null scope the "most recent session" driving retirement can belong to an unrelated
+  project. The web surface labels this scope "no recorded repository" rather than naming a project,
+  so it is at least not mislabelled — but a removal date computed under it is only as meaningful as
+  the grouping. Fixing it means giving S-20 a real "repository unknown" identity, which is its story.
+- **Every row in a version shares one carrying-session list and one in-force window.** By
+  construction: sessions share a version precisely because their block sets are identical, so a
+  statement in that version was carried by all of them. The per-row `SessionIds`/`InForceFrom`/
+  `InForceUntil` therefore vary across *versions*, not across rows within one. That is correct for
+  Scenarios 2 and 3 under version scoping, and it is exactly why retirement could **not** be derived
+  from `SessionIds` — see the note above.
+- **`RuleSetVersionHasher` canonicalises `block.SourceFile` + `statement.Text`, while
+  `RuleStatementDeduplication` keys on `statement.SourceFile` + `Text`.** `RuleStatementExtractor`
+  always sets the statement's source file from its block's, so the two agree on any extracted corpus;
+  a hand-built `RuleStatement` with a mismatched `SourceFile` could make two sessions share a hash
+  yet yield different rows, which would break the one-version-one-statement-set assumption `Build`
+  leans on. Worth knowing before hand-constructing fixtures.
+
+### `UnknownRuleSetVersionException` is not the empty state
+
+Asking for a version no session carried is an error; a version whose sessions carried no rules is a
+designed, renderable state. Collapsing the two would make "this repository has no rules" and "you
+passed a hash that never existed" indistinguishable to a caller — the same reasoning
+`MixedRuleSetVersionException` gives for being its own type rather than a bare `ArgumentException`.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
 resolution (S-23, issue #37, FR-31/FR-32): `OperandResolver.Resolve` and `.ResolveTwoOperands` are
-the mechanism every check shape with a named operand (S-25's catalogue, S-26's "tool your agent
-does not have") builds on rather than reimplementing tool classification. Nothing yet extracts
-operand text from a rule statement's own phrasing — that is S-25's job (FR-34); this story
-publishes the resolution mechanism the way S-21 published vocabulary/role derivation ahead of
-anything calling it with real rule text.
+the mechanism every check shape with a named operand builds on rather than reimplementing tool
+classification. S-26 (issue #40, FR-35, "this rule names a tool your agent does not have") has also
+landed on top of it: `ToolVocabularyMismatchCheck.Run` takes `RuleToolMention` values (one named tool
+plus the `ToolRole` it targets) and reports `MinorToolNamed`/`NonExistentToolNamed`. Nothing yet
+extracts operand text — or which role a statement targets — from a rule statement's own phrasing;
+that is S-25's job (FR-34, issue #39), not implemented in this project yet. `RuleToolMention` is the
+plain-input shape S-25's extraction is expected to produce one of per named tool, the same way this
+project's other checks take an already-resolved plain input rather than doing their own text
+interpretation.
+
+The check-shape catalogue itself (S-25, issue #39, FR-34) has now landed and closes that gap:
+`RuleShapeCatalogue.MatchAll` takes `RuleStatement`s — what `RuleStatementExtractor` already
+produces — and returns the shape each one matched with its operands read from its own text, plus a
+dispositioned entry for every statement that matched none. It is the last piece the invariant needed
+to be *tested* rather than reviewed, because it is the only part of this project that reads rule
+prose at all, and it does so with grammar. Nothing yet feeds a real corpus's extracted statements
+through it, resolves the matched operands against that corpus's tools, or renders FR-40's inventory —
+that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
-six entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+seven entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
-`AbortedTurnCheck` (issue #28, FR-18) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
-establish — plain per-call/per-session/per-turn input records in, structurally-required or
-structurally-paired results out, no branch on any specific tool name — is the pattern later checks
-in this project should follow.
+`AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19) and
+`ToolVocabularyMismatchCheck` (issue #40, FR-35). The shape they establish — plain per-call/
+per-session/per-turn/per-mention input records in, structurally-required or structurally-paired
+results out, no branch on any specific tool name — is the pattern later checks in this project
+should follow.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and
 `RuleStatementDeduplication.Deduplicate` collapses identical statements across sessions while
 preserving which sessions carried each one.
+
+FR-40's inventory (S-22, issue #35) has landed on top of both: `RulesInventory.Build` reduces a
+corpus of `SessionRuleSet`s to one version's statements, each with exactly one
+`RuleStatementStatus`, its source file, its carrying sessions, its in-force window and its
+`RuleRetirement`. It is the first consumer of `RuleStatementDeduplication` and `RuleSetVersioning`
+together. It still classifies nothing itself (see the non-obvious decision above) — the caller
+supplies each status, and S-25's catalogue is what will supply it for real. `AecoPostMortem.Api.
+RulesInventoryEnvelope` is the wire shape, and `web/src/routes/RulesInventoryPage.tsx` renders it;
+no endpoint serves it from a live store yet, the same not-yet-wired gap `ProcessDigest` documents.
 
 Rule-set versioning (S-20, issue #33, FR-27/FR-28) has also landed: `RuleSetVersioning.Compute` turns
 a corpus of `SessionRuleSet`s into `RuleSetVersion`s (identity, window, sample size) per repository,
@@ -400,3 +645,9 @@ scopes itself with. Nothing yet resolves a real corpus's `RawEvent`s into `Sessi
 wiring, and the adherence figure itself, are later work; this project only publishes the shapes that
 work builds against, the same way S-49 published NORMALIZED's eight shapes ahead of anything
 populating them.
+
+The contradiction check (S-38, issue #47, FR-43) has also landed: `ContradictionCheck.Run` is the
+pairwise, self-match-excluding candidate detector; `AecoPostMortem.Findings.ContradictionCheck` is
+the caller that groups sessions by rule-set version before handing each version's deduplicated
+statements in, and registers the run (`CheckId = "contradiction-check"`) on the "checks that found
+nothing" surface FR-42 (S-37) already published ahead of this story.

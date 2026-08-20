@@ -1,0 +1,77 @@
+.adherence-figure {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #e2e5ea;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.adherence-figure__headline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.6rem;
+}
+
+.adherence-figure__percentage {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.adherence-figure__counts {
+  font-size: 0.85rem;
+  color: #5a626e;
+}
+
+/* PRD §5.5 tolerates zero occurrences: the figure still shows its resolution and says so in words,
+   rather than rendering a 0% that reads as measured disobedience. */
+.adherence-figure__no-percentage {
+  font-size: 0.95rem;
+  font-style: italic;
+  color: #5a626e;
+}
+
+.adherence-figure__resolution {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.adherence-figure__resolution caption {
+  margin-bottom: 0.35rem;
+  text-align: left;
+  font-size: 0.75rem;
+  color: #5a626e;
+}
+
+.adherence-figure__resolution th,
+.adherence-figure__resolution td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid #eceef1;
+  text-align: left;
+}
+
+.adherence-figure__resolution thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #5a626e;
+}
+
+/* FR-31's fourth layer is reported, never dropped — an operand nothing matched is visibly distinct
+   from one that resolved, so a short denominator is readable rather than silent. */
+.adherence-figure__resolution tr[data-layer='unresolved'] td,
+.adherence-figure__resolution tr[data-layer='unresolved'] th {
+  color: #9c5a1c;
+}
+
+.adherence-figure__rule-version {
+  margin: 0.6rem 0 0;
+  font-size: 0.75rem;
+  color: #5a626e;
+}
+
+.adherence-figure__rule-version-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

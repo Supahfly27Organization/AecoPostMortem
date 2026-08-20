@@ -1,7 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using AecoPostMortem.Findings;
+using AecoPostMortem.Rules;
 
 namespace AecoPostMortem.Api.Tests;
 
@@ -36,6 +38,28 @@ public sealed class FindingEnvelopeTests
             Occurrences = [new RecurrenceOccurrence { SessionId = "session-1", RuleSetVersion = "v3" }],
         },
         Resolution = new Resolution { OperandLayer = "NORMALIZED", CallCount = 12 },
+    };
+
+    /// <summary>FR-33's worked shape (S-24, issue #38): "prefer `rg` over shell search", resolved
+    /// through two different layers — 3 adherent calls against 1 divergent, so 75%.</summary>
+    static AdherenceFigure SampleFigure() => new()
+    {
+        RuleVersion = new RuleSetVersionId { Repository = "AecoPostMortem", Hash = "b3f1c0" },
+        Adherent = new OperandResolution
+        {
+            OperandText = "rg",
+            Layer = OperandResolutionLayer.ExactToolName,
+            CallCount = 3,
+        },
+        Divergent =
+        [
+            new OperandResolution
+            {
+                OperandText = "Shell",
+                Layer = OperandResolutionLayer.DerivedRole,
+                CallCount = 1,
+            },
+        ],
     };
 
     // FR-44's worked example: the parallel-tool-calling rule measured a 43.6% single-call rate
@@ -76,23 +100,77 @@ public sealed class FindingEnvelopeTests
     }
 
     [Fact]
-    public void The_general_shape_has_no_resolution_or_rule_version_members()
+    public void The_general_shape_has_no_figure_resolution_or_rule_version_members()
     {
         // A finding that is not an adherence figure is served through this shape, which structurally
-        // cannot carry a resolution or rule version at all — there is no field to leave null.
+        // cannot carry a figure, resolution or rule version at all — there is no field to leave null.
+        Assert.Null(typeof(FindingEnvelope.General).GetProperty("Figure"));
         Assert.Null(typeof(FindingEnvelope.General).GetProperty("Resolution"));
         Assert.Null(typeof(FindingEnvelope.General).GetProperty("RuleVersion"));
     }
 
-    [Theory]
-    [InlineData("Resolution")]
-    [InlineData("RuleVersion")]
-    public void Resolution_and_rule_version_are_required_members_on_the_adherence_shape(string propertyName)
+    /// <summary>S-24 / FR-33, Scenario 2: the adherence shape carries exactly one member — the
+    /// figure — and it is <c>required</c>, so assembling one without it is CS9035. The figure itself
+    /// (<see cref="AdherenceFigure"/>) is what makes the percentage inseparable from the resolution
+    /// and rule version, rather than the envelope repeating three fields a caller could pair
+    /// wrongly.</summary>
+    [Fact]
+    public void The_figure_is_a_required_member_on_the_adherence_shape()
     {
-        var property = typeof(FindingEnvelope.Adherence).GetProperty(propertyName);
+        var property = typeof(FindingEnvelope.Adherence).GetProperty(nameof(FindingEnvelope.Adherence.Figure));
 
         Assert.NotNull(property);
         Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    /// <summary>The refusal has to be structural rather than a runtime check a second client could
+    /// bypass (issue #38's edge case). <c>FromAdherence</c> is the only producer of this shape, and
+    /// it takes the figure as a required parameter — there is no overload, no parameterless
+    /// constructor and no other public factory that could yield an adherence envelope without
+    /// one.</summary>
+    [Fact]
+    public void The_only_way_to_produce_an_adherence_envelope_takes_the_figure_as_a_required_parameter()
+    {
+        var producers = typeof(FindingEnvelope)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Where(method => typeof(FindingEnvelope.Adherence).IsAssignableFrom(method.ReturnType))
+            .ToArray();
+
+        var producer = Assert.Single(producers);
+        Assert.Equal(nameof(FindingEnvelope.FromAdherence), producer.Name);
+        Assert.Contains(
+            producer.GetParameters(),
+            parameter => parameter.ParameterType == typeof(AdherenceFigure) && !parameter.IsOptional);
+
+    }
+
+    /// <summary>The one escape hatch that would let <c>new FindingEnvelope.Adherence()</c> compile
+    /// despite a <c>required</c> member is a constructor marked <c>[SetsRequiredMembers]</c>, which
+    /// tells the compiler to stop enforcing CS9035. No constructor on the adherence shape — or on
+    /// the figure it carries — may claim it, or the refusal stops being structural and becomes a
+    /// convention a second client could walk past. A record's own synthesized copy constructor
+    /// (the one taking the record type itself, behind every <c>with</c> expression) carries the
+    /// attribute by design — it copies members that are already set — so it is excluded here; every
+    /// other constructor is the kind that could hand out an unset figure.</summary>
+    [Theory]
+    [InlineData(typeof(FindingEnvelope.Adherence))]
+    [InlineData(typeof(AdherenceFigure))]
+    [InlineData(typeof(OperandResolution))]
+    public void No_constructor_opts_out_of_required_member_enforcement(Type type)
+    {
+        var constructors = type
+            .GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .Where(constructor =>
+            {
+                var parameters = constructor.GetParameters();
+                return parameters.Length != 1 || !parameters[0].ParameterType.IsAssignableFrom(type);
+            })
+            .ToArray();
+
+        Assert.NotEmpty(constructors);
+        Assert.All(
+            constructors,
+            constructor => Assert.Null(constructor.GetCustomAttribute<SetsRequiredMembersAttribute>()));
     }
 
     [Fact]
@@ -107,22 +185,20 @@ public sealed class FindingEnvelopeTests
     }
 
     [Fact]
-    public void FromAdherence_assembles_the_adherence_shape_only_given_resolution_and_rule_version()
+    public void FromAdherence_assembles_the_adherence_shape_only_given_a_figure()
     {
-        var finding = SampleAdherenceFinding();
-
-        var envelope = FindingEnvelope.FromAdherence(finding, finding.Resolution!, ruleVersion: "v3");
+        var envelope = FindingEnvelope.FromAdherence(SampleAdherenceFinding(), SampleFigure());
 
         Assert.Equal(FindingClass.RuleAdherenceToolChoice, envelope.Class);
-        Assert.Equal(12, envelope.Resolution.CallCount);
-        Assert.Equal("v3", envelope.RuleVersion);
+        Assert.Equal(75d, envelope.Figure.Percentage);
+        Assert.Equal("b3f1c0", envelope.Figure.RuleVersion.Hash);
+        Assert.Equal(2, envelope.Figure.Operands.Count);
     }
 
     [Fact]
     public void FindingEnvelope_serialises_with_a_kind_discriminator_distinguishing_the_two_shapes()
     {
-        FindingEnvelope adherence = FindingEnvelope.FromAdherence(
-            SampleAdherenceFinding(), new Resolution { OperandLayer = "NORMALIZED", CallCount = 12 }, "v3");
+        FindingEnvelope adherence = FindingEnvelope.FromAdherence(SampleAdherenceFinding(), SampleFigure());
 
         var json = JsonSerializer.Serialize(adherence);
         using var document = JsonDocument.Parse(json);
@@ -132,7 +208,34 @@ public sealed class FindingEnvelopeTests
 
         var roundTripped = JsonSerializer.Deserialize<FindingEnvelope>(json);
         var adherenceRoundTripped = Assert.IsType<FindingEnvelope.Adherence>(roundTripped);
-        Assert.Equal("v3", adherenceRoundTripped.RuleVersion);
+        Assert.Equal("b3f1c0", adherenceRoundTripped.Figure.RuleVersion.Hash);
+    }
+
+    /// <summary>S-24 / FR-33, Scenario 2 read at the wire rather than at the type: whenever a served
+    /// adherence figure states a percentage, the same JSON object states every operand's layer, that
+    /// operand's call count, and the rule version. There is no serialised form of this shape in
+    /// which the percentage appears alone, because all three ride on one required member.</summary>
+    [Fact]
+    public void A_served_adherence_figure_never_states_a_percentage_without_its_operands_and_rule_version()
+    {
+        FindingEnvelope adherence = FindingEnvelope.FromAdherence(SampleAdherenceFinding(), SampleFigure());
+
+        var json = JsonSerializer.Serialize(adherence);
+        using var document = JsonDocument.Parse(json);
+
+        var figure = document.RootElement.GetProperty("Figure");
+
+        Assert.Equal(75d, figure.GetProperty("Percentage").GetDouble());
+        Assert.Equal("b3f1c0", figure.GetProperty("RuleVersion").GetProperty("Hash").GetString());
+
+        var operands = figure.GetProperty("Operands").EnumerateArray().ToArray();
+        Assert.Equal(2, operands.Length);
+        Assert.All(operands, operand =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(operand.GetProperty("OperandText").GetString()));
+            Assert.True(operand.TryGetProperty("Layer", out _));
+            Assert.True(operand.GetProperty("CallCount").GetInt32() >= 0);
+        });
     }
 
     // FR-44, Scenario 1 ("A conditional rule is labelled as a base rate"): the base-rate shape has

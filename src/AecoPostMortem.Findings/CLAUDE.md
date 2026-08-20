@@ -23,6 +23,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SessionTokenFigures.cs` | FR-24 (S-11, issue #20): reads `Session`'s own token fields into the masthead's token-totals contract — not a `Finding`, no rule adherence involved — closed to `Observed` and `SessionTotalsNotRecorded` |
 | `AbortedTurnFinding.cs` | FR-18 (S-16, issue #28): reads `AecoPostMortem.Data.Execution.Turn` rows, calls `AecoPostMortem.Rules.AbortedTurnCheck`, and writes one `Finding` per aborted turn — never grouped — plus a `CheckRegistryEntry` |
 | `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
+| `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
+| `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 
 ## References
 
@@ -299,6 +301,48 @@ match it is contrasted against. This is also what makes the edge case hold witho
 it — an unresolved prompt (`ResultKind` is `null`) renders as its own literal group,
 `"no outcome recorded"`, and can never be merged into a resolved outcome's count by construction.
 
+### `OperatorResponseLog` is append-only, and the guardrail reads its current state, not its full history
+
+`Finding.OperatorResponse` (S-44, issue #23) is the field that already exists for "the operator's
+response" — this story does not add a second, competing response field. What it adds is the piece
+that field alone cannot express: FR-45's edge case says changing a verdict later must not lose the
+earlier one, and a single mutable `OperatorResponse` property has no way to keep both. `Finding`
+itself is also re-derived from RAW on every run (Repo Rule 4) and carries no id, so there is nowhere
+on the domain type to persist a history against even if the field weren't overwritable. The response
+history therefore lives beside `Finding`, keyed by its own `(Class, RecurrenceKey)` identity
+(FR-57): `OperatorResponseLog.Record` only ever appends to `Entries`, `CurrentResponses()` reduces
+that history to the latest entry per finding identity, and `Apply(Finding)` is what makes
+`Finding.OperatorResponse` "meaningfully populated" — it copies the current response onto a finding,
+leaving the field's own default (`Ignored`) alone when the log has no entry for that identity.
+
+`OperatorResponseRecord` captures `Provenance` at the moment of recording rather than reading it back
+off a `Finding` later — Scenario 1 of issue #49 says the outcome is stored "against the finding **and
+its provenance level**", so the level travels with the response, not with a later re-derivation of
+the finding that produced it. `RecordedAt` is a caller-supplied `DateTimeOffset`, not read from a
+clock inside this type, for the same determinism reason `SuggestionRenderer` reads no clock — the
+log's ordering has to be reproducible from its own data, not from when the code happened to run.
+
+`Guardrail.Compute` takes the whole `OperatorResponseLog` and reduces it through
+`CurrentResponses()` before counting — never the raw `Entries` — so a finding whose verdict flipped
+from Rejected to Accepted counts once, as Accepted, toward both figures. Counting every historical
+entry instead would let one operator's indecision on one finding inflate the sample the same way a
+repeated tool-name string match would inflate `FailedToolCallsFinding`'s rate; the guardrail is
+about current judgment, not edit history. "Adjudicated" (PRD §5.4's own word) means
+`Accepted`-or-`Rejected`; `Ignored` — the default for a finding nobody has acted on — is excluded
+from both shares, and both `RejectionShare` and `InferredShare` are `null`, not `0`, when
+`AdjudicatedCount` is zero, matching this project's existing rule that a percentage never appears
+without the count that produced it. `Guardrail.MinimumSampleTarget` (20, PRD §5.4) is carried as a
+fact on the type but not enforced by `Compute` — whether to actually *read* a share below that
+sample is a rendering-layer decision no story has built yet, the same way `RuleCoverageStatus`
+carries only the state Release 1 can populate and leaves the decision about a later state to the
+story that adds it.
+
+No persistence or CLI/API surface is wired to `OperatorResponseLog` yet — like `SessionTokenFigures`
+and `ProcessDigest.Build`, this story publishes the contract the operator-facing "accept/reject/
+ignore" action and the guardrail's rendering will build against; nothing in this repository yet
+writes an `OperatorResponseRecord` from a real operator action or persists `OperatorResponseLog`
+across runs.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
@@ -329,3 +373,10 @@ are S-54, not built here.
 that will consume it — S-08 (FR-21) is Must Have, not yet built, and this story only depended on the
 `Session` contract (S-49), not on S-08. `From(Session)` is exercised directly by
 `SessionTokenFiguresTests` rather than through any UI or API surface.
+
+`OperatorResponseLog` and `Guardrail` (issue #49, S-39, FR-45) publish FR-45's recording and PRD
+§5.4's guardrail computation as plain, already-resolved-input types, the same contract-first pattern
+`SessionTokenFigures` and `ProcessDigest.Build` used for their own stories. Exercised directly by
+`OperatorResponseLogTests` and `GuardrailTests`; no CLI command records a real operator action yet,
+no store persists a log across runs, and no `AecoPostMortem.Api` envelope serves a `Guardrail` —
+those are later work this story only makes possible.

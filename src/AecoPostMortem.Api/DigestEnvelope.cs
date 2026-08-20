@@ -98,6 +98,13 @@ public sealed record DigestEnvelope
     /// this field only maps each entry to its wire shape.</summary>
     public required IReadOnlyList<FindingEnvelope> InferredFindings { get; init; }
 
+    /// <summary>FR-42's "checks that found nothing" surface (issue #46), threaded through the digest
+    /// so a client reads it from the same fetch as the ranked and inferred findings.
+    /// <see cref="SilentCheckEnvelope.From"/> applied to <see cref="ProcessDigest.CheckRegistry"/> —
+    /// the exact registry <see cref="ProcessDigest.Build"/> already received, never re-filtered here.
+    /// </summary>
+    public required IReadOnlyList<SilentCheckEnvelope> SilentChecks { get; init; }
+
     /// <summary><paramref name="mapFinding"/> is supplied by the caller rather than assumed to be
     /// <see cref="FindingEnvelope.From"/>: an adherence finding must go through
     /// <see cref="FindingEnvelope.FromAdherence"/> with its resolution and rule version instead
@@ -116,6 +123,7 @@ public sealed record DigestEnvelope
             State = digest.State,
             RankedFindings = digest.RankedFindings.Select(mapFinding).ToList(),
             InferredFindings = digest.InferredFindings.Select(mapFinding).ToList(),
+            SilentChecks = SilentCheckEnvelope.From(digest.CheckRegistry),
         };
     }
 }

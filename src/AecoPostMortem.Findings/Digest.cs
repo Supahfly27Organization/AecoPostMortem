@@ -127,6 +127,14 @@ public sealed record ProcessDigest
 
     public required DigestState State { get; init; }
 
+    /// <summary>FR-42's "checks that found nothing" surface (issue #46): the exact
+    /// <see cref="CheckRegistry"/> <see cref="Build"/> already received — used there to compute
+    /// <see cref="State"/> and carried through here unchanged, the same already-resolved-plain-input
+    /// pattern <see cref="Masthead.Counters"/> and <see cref="RepositoryScope"/> follow. A caller
+    /// (<c>AecoPostMortem.Api.SilentCheckEnvelope.From</c>) filters this down to the clean entries;
+    /// nothing here re-filters it.</summary>
+    public required CheckRegistry CheckRegistry { get; init; }
+
     /// <summary>Observed and Derived findings only, ranked by <see cref="SessionsAffected"/>
     /// descending. Never contains a <see cref="Provenance.Inferred"/> finding — see
     /// <see cref="InferredFindings"/>.</summary>
@@ -179,6 +187,7 @@ public sealed record ProcessDigest
             State = state,
             RankedFindings = ranked,
             InferredFindings = inferred,
+            CheckRegistry = checkRegistry,
         };
     }
 

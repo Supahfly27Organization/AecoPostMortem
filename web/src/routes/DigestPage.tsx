@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useDigest } from '../api/useDigest'
+import { CleanChecks } from '../digest/CleanChecks'
 import { FindingRow } from '../digest/FindingRow'
 import { Masthead } from '../digest/Masthead'
 import { RepositorySelector } from '../digest/RepositorySelector'
@@ -115,6 +116,8 @@ export function DigestPage() {
           </ul>
         </section>
       )}
+
+      <CleanChecks checks={digest.silentChecks} />
     </div>
   )
 }

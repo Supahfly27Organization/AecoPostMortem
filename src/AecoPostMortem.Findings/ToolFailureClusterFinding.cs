@@ -62,6 +62,7 @@ public static class ToolFailureClusterFinding
             Status = CheckRunStatus.Ran,
             Population = outcomes.Count,
             FindingCount = findings.Length,
+            Provenance = Provenance.Inferred,
         };
 
         return new ToolFailureClusterResult

@@ -35,6 +35,18 @@ public sealed record SilentCheckEnvelope
     /// it found nothing instead of asking the reader to infer it from appearing here at all.</summary>
     public required int FindingCount { get; init; }
 
+    /// <summary>Mockup parity item #6's provenance badge (`docs/product-superpowers/discovery/
+    /// mockups/digest.html`'s `.ck` card): the provenance the check would have produced, projected
+    /// straight from <see cref="CheckRegistryEntry.Provenance"/> — a fixed, caller-stated fact, never
+    /// derived here.</summary>
+    public required Provenance Provenance { get; init; }
+
+    /// <summary>The same fixed sentence per level <see cref="FindingEnvelope.ProvenanceLabel"/> already
+    /// serves (FR-48) — reused verbatim via <see cref="Findings.ProvenanceLabel.For"/> rather than a
+    /// second wording table, so a clean check's badge and a finding's badge never disagree on the words.
+    /// </summary>
+    public required string ProvenanceLabel { get; init; }
+
     public static IReadOnlyList<SilentCheckEnvelope> From(CheckRegistry registry) =>
         registry.Entries
             .Where(entry => entry.Status == CheckRunStatus.Ran && entry.FindingCount == 0)
@@ -43,6 +55,8 @@ public sealed record SilentCheckEnvelope
                 CheckId = entry.CheckId,
                 Population = entry.Population,
                 FindingCount = entry.FindingCount!.Value,
+                Provenance = entry.Provenance,
+                ProvenanceLabel = Findings.ProvenanceLabel.For(entry.Provenance),
             })
             .ToList();
 }

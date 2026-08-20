@@ -27,6 +27,7 @@ public static class SpawnResolutionCheck
             Status = CheckRunStatus.Ran,
             Population = examined,
             FindingCount = unresolved,
+            Provenance = Provenance.Observed,
         };
     }
 }

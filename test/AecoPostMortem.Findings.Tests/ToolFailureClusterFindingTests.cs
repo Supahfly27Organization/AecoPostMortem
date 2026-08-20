@@ -163,6 +163,7 @@ public sealed class ToolFailureClusterFindingTests
         Assert.Equal(CheckRunStatus.Ran, result.RegistryEntry.Status);
         Assert.Equal(3, result.RegistryEntry.Population);
         Assert.Equal(1, result.RegistryEntry.FindingCount);
+        Assert.Equal(Provenance.Inferred, result.RegistryEntry.Provenance);
     }
 
     [Fact]

@@ -32,6 +32,7 @@ public static class MalformedLineCheck
             Status = CheckRunStatus.Ran,
             Population = checked((int)population),
             FindingCount = checked((int)skipped),
+            Provenance = Provenance.Observed,
         };
     }
 }

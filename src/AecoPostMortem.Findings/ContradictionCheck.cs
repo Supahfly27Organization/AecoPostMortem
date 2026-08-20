@@ -71,6 +71,7 @@ public static class ContradictionCheck
             Status = CheckRunStatus.Ran,
             Population = sessions.Count,
             FindingCount = candidates.Count,
+            Provenance = Provenance.Inferred,
         };
 
         return new Result

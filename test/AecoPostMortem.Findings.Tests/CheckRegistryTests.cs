@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+
 namespace AecoPostMortem.Findings.Tests;
 
 /// <summary>Scenarios 4 and 5 of the finding contract (issue #23): every check is registered whether
@@ -17,6 +20,7 @@ public sealed class CheckRegistryTests
                     Status = CheckRunStatus.Ran,
                     Population = 35,
                     FindingCount = 0,
+                    Provenance = Provenance.Inferred,
                 },
                 new CheckRegistryEntry
                 {
@@ -24,6 +28,7 @@ public sealed class CheckRegistryTests
                     Status = CheckRunStatus.Refused,
                     Population = 3,
                     RefusalReason = "scope mechanism ambiguous",
+                    Provenance = Provenance.Derived,
                 },
             ],
         };
@@ -42,6 +47,7 @@ public sealed class CheckRegistryTests
             Status = CheckRunStatus.Refused,
             Population = 3,
             RefusalReason = "scope mechanism ambiguous",
+            Provenance = Provenance.Derived,
         };
 
         var clean = new CheckRegistryEntry
@@ -50,6 +56,7 @@ public sealed class CheckRegistryTests
             Status = CheckRunStatus.Ran,
             Population = 35,
             FindingCount = 0,
+            Provenance = Provenance.Inferred,
         };
 
         Assert.Null(refused.FindingCount);
@@ -67,8 +74,36 @@ public sealed class CheckRegistryTests
             Status = CheckRunStatus.Refused,
             Population = 3,
             RefusalReason = "scope mechanism ambiguous",
+            Provenance = Provenance.Derived,
         };
 
         Assert.Equal(3, refused.Population);
+    }
+
+    /// <summary>FR-42 (issue #46)'s provenance badge: a silent check's own provenance travels on the
+    /// registry entry itself, the same "required, not validated" discipline <c>Finding.Provenance</c>
+    /// already uses (<c>FindingTests</c>) — a caller cannot build an entry without stating it.</summary>
+    [Fact]
+    public void Provenance_is_a_required_member()
+    {
+        var property = typeof(CheckRegistryEntry).GetProperty(nameof(CheckRegistryEntry.Provenance));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    [Fact]
+    public void An_entry_carries_the_provenance_the_check_would_have_produced()
+    {
+        var entry = new CheckRegistryEntry
+        {
+            CheckId = "hook-failure",
+            Status = CheckRunStatus.Ran,
+            Population = 35,
+            FindingCount = 0,
+            Provenance = Provenance.Observed,
+        };
+
+        Assert.Equal(Provenance.Observed, entry.Provenance);
     }
 }

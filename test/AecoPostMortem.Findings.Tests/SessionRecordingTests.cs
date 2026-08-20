@@ -296,6 +296,7 @@ public sealed class SessionRecordingTests
         Status = CheckRunStatus.Ran,
         Population = examined,
         FindingCount = unresolved,
+        Provenance = Provenance.Observed,
     };
 
     static Session SessionWith(

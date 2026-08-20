@@ -61,6 +61,7 @@ public static class NeverReadPathFinding
             Status = CheckRunStatus.Ran,
             Population = population,
             FindingCount = findings.Length,
+            Provenance = Provenance.Derived,
         };
 
         return new Result { Findings = findings, RegistryEntry = registryEntry };

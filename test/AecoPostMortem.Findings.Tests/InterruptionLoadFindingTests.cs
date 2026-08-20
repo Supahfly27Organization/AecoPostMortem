@@ -109,6 +109,7 @@ public sealed class InterruptionLoadFindingTests
         Assert.Equal(CheckRunStatus.Ran, result.RegistryEntry.Status);
         Assert.Equal(2, result.RegistryEntry.Population);
         Assert.Equal(1, result.RegistryEntry.FindingCount);
+        Assert.Equal(Provenance.Observed, result.RegistryEntry.Provenance);
     }
 
     [Fact]

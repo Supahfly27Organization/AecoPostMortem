@@ -320,8 +320,11 @@ public static class ApiHost
 
     /// <summary>
     /// FR-40's real orchestration (S-22, issue #35): resolves the whole store's <see cref="RawEvent"/>s
-    /// into <see cref="SessionRuleSet"/>s (<see cref="SessionRuleSetLookup"/>), classifies every
-    /// distinct statement in the corpus once with <see cref="RulesInventoryClassifier"/>, and serves
+    /// into <see cref="SessionRuleSet"/>s (<see cref="SessionRuleSetLookup"/>) and a real
+    /// <see cref="ToolInvocationShape"/> corpus (<see cref="ToolInvocationShapeLookup"/>, corpus-wide —
+    /// the same "every statement, not only the selected version's" scope <see cref="RuleShapeCatalogue.MatchAll"/>
+    /// already uses below), classifies every distinct statement in the corpus once with
+    /// <see cref="RulesInventoryClassifier"/> against that corpus, and serves
     /// <see cref="RulesInventory.Build"/>'s result for one version. The selected repository is the
     /// same default <see cref="BuildRepositoryScope"/> gives <see cref="GetDigest"/> — this surface has
     /// no repository selector of its own (<c>web/CLAUDE.md</c>) — so <paramref name="versionHash"/>
@@ -339,8 +342,11 @@ public static class ApiHost
 
         var sessions = context.Sessions.ToList();
         var rawEvents = context.RawEvents.ToList();
+        var toolCalls = context.ToolCalls.ToList();
+        var agents = context.Agents.ToList();
 
         var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
+        var invocations = ToolInvocationShapeLookup.BuildAll(toolCalls, agents, rawEvents);
         var repositoryScope = BuildRepositoryScope(sessions);
 
         var selectedVersion = versionHash is null
@@ -357,7 +363,8 @@ public static class ApiHost
             .SelectMany(block => block.Statements)
             .Distinct()
             .ToList();
-        var classify = RulesInventoryClassifier.BuildClassifier(RuleShapeCatalogue.MatchAll(statements));
+        var classify = RulesInventoryClassifier.BuildClassifier(
+            RuleShapeCatalogue.MatchAll(statements), invocations);
 
         try
         {

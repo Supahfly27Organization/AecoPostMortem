@@ -1,17 +1,10 @@
 import { useParams } from 'react-router-dom'
-import type { SessionEnvelope, SessionTapeStep } from '../api/session'
+import type { SessionEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
+import { Tape } from '../session/Tape'
 import './SessionPage.css'
 
 const numberFormat = new Intl.NumberFormat('en-US')
-
-const KIND_LABEL: Record<SessionTapeStep['kind'], string> = {
-  prompt: 'Prompt',
-  hook: 'Hook',
-  skill: 'Skill',
-  toolCall: 'Tool call',
-  mcpCall: 'MCP call',
-}
 
 function formatElapsed(elapsedMs: number | null): string {
   if (elapsedMs === null) {
@@ -23,10 +16,6 @@ function formatElapsed(elapsedMs: number | null): string {
   const minutes = totalMinutes % 60
 
   return hours > 0 ? `${hours}h ${minutes}min` : `${minutes} min`
-}
-
-function formatOffset(offsetMs: number): string {
-  return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
 function formatContextSize(contextSize: SessionEnvelope['masthead']['contextSize']): string {
@@ -92,24 +81,29 @@ function Masthead({ masthead }: { masthead: SessionEnvelope['masthead'] }) {
   )
 }
 
-/** FR-21 Scenario 2 (wall-clock order with offsets) and Scenario 3 (a session with no steps
- * states that plainly). The server has already ordered `steps` — this renders that order rather
- * than re-deriving it. */
-function Tape({ steps }: { steps: SessionTapeStep[] }) {
-  if (steps.length === 0) {
-    return <p className="session-tape__empty">No steps were recorded for this session.</p>
+/** FR-21, part 3 of 3 (S-53, issue #17), Scenarios 3 and 4: a session whose masthead and tape are
+ * not yet final states that plainly, in its own words — never the generic load-failure message
+ * (`role="alert"`, above), and never the other non-final state's wording either. Both render in
+ * place of the masthead and tape: today's counts and steps would otherwise read as the session's
+ * finished picture when they are provisional or partly unrecoverable. */
+function NonFinalState({ status }: { status: Extract<SessionEnvelope['status'], { kind: 'ingestIncomplete' | 'reconstructionFailed' }> }) {
+  if (status.kind === 'ingestIncomplete') {
+    return (
+      <div className="session-page__incomplete">
+        <p>This session is still ingesting — it has not recorded its own end yet, so today&rsquo;s figures are not final.</p>
+      </div>
+    )
   }
 
   return (
-    <ul className="session-tape" aria-label="Tape">
-      {steps.map((step) => (
-        <li key={step.stepId} className="session-tape__step">
-          <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
-          <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
-          <span className="session-tape__label">{step.label}</span>
-        </li>
-      ))}
-    </ul>
+    <div className="session-page__reconstruction-failed">
+      <p>Reconstruction failed for this session.</p>
+      <ul>
+        {status.skipped.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -133,7 +127,11 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
   return (
     <div className="session-page">
       <Masthead masthead={envelope.masthead} />
-      <Tape steps={envelope.steps} />
+      {envelope.status.kind === 'complete' ? (
+        <Tape steps={envelope.steps} />
+      ) : (
+        <NonFinalState status={envelope.status} />
+      )}
     </div>
   )
 }

@@ -53,6 +53,7 @@ describe('The masthead states what this session was', () => {
         contextSize: { kind: 'observed', inputTokens: 12_345, outputTokens: 6_789, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, modelCount: 2 },
       },
       steps: [],
+      status: { kind: 'complete' },
     })
   })
 
@@ -98,6 +99,7 @@ describe('The tape is ordered by real time', () => {
         { kind: 'mcpCall', stepId: 'tc2', label: 'search_graph', timestamp: '2026-08-16T10:00:04Z', offsetMs: 4_000, ownerKind: 'main', agentId: null },
         { kind: 'toolCall', stepId: 'tc1', label: 'view', timestamp: '2026-08-16T10:00:05Z', offsetMs: 5_000, ownerKind: 'main', agentId: null },
       ],
+      status: { kind: 'complete' },
     })
   })
 
@@ -139,6 +141,7 @@ describe('A session with no tool calls still renders', () => {
         contextSize: { kind: 'notRecorded' },
       },
       steps: [],
+      status: { kind: 'complete' },
     })
   })
 
@@ -170,5 +173,71 @@ describe('The session cannot be loaded', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent(/could not load/i)
+  })
+})
+
+/** FR-21, part 3 of 3 (S-53, issue #17), Scenario 3: a session whose ingest has not completed
+ * states that plainly rather than rendering whatever partial tape has arrived so far as final. */
+describe('A session still ingesting says so', () => {
+  it('states that the session is incomplete rather than rendering a partial tape as final', async () => {
+    respondWith({
+      masthead: {
+        sessionId: 'session-mid-ingest',
+        repository: null,
+        branch: null,
+        copilotVersion: '0.0.339',
+        elapsedMs: null,
+        turnCount: 3,
+        toolCallCount: 5,
+        subagentCount: 0,
+        skillCount: 0,
+        modelCount: null,
+        contextSize: { kind: 'notRecorded' },
+      },
+      steps: [
+        { kind: 'prompt', stepId: 't1', label: 'Completed', timestamp: '2026-08-16T10:00:00Z', offsetMs: 0, ownerKind: 'main', agentId: null },
+      ],
+      status: { kind: 'ingestIncomplete' },
+    })
+
+    renderAtSession('session-mid-ingest')
+
+    expect(await screen.findByText(/still ingesting|not (yet )?complete/i)).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Tape' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+/** Scenario 4: a session whose reconstruction failed states why, and what was skipped — a
+ * distinct message from both the generic load error and the incomplete-ingest state. */
+describe('A session that failed to reconstruct says why', () => {
+  it('states that reconstruction failed and names what was skipped', async () => {
+    respondWith({
+      masthead: {
+        sessionId: 'session-broken',
+        repository: null,
+        branch: null,
+        copilotVersion: '0.0.339',
+        elapsedMs: 600_000,
+        turnCount: 3,
+        toolCallCount: 5,
+        subagentCount: 1,
+        skillCount: 0,
+        modelCount: null,
+        contextSize: { kind: 'notRecorded' },
+      },
+      steps: [],
+      status: {
+        kind: 'reconstructionFailed',
+        skipped: ['2 of 5 subagent spawn(s) could not be resolved to their originating tool call'],
+      },
+    })
+
+    renderAtSession('session-broken')
+
+    expect(await screen.findByText(/reconstruction failed/i)).toBeInTheDocument()
+    expect(await screen.findByText(/could not be resolved/i)).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Tape' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

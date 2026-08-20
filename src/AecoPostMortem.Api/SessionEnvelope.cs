@@ -149,16 +149,62 @@ public sealed record SessionTapeStepEnvelope
     }
 }
 
+/// <summary>The wire shape for <see cref="SessionRecordingStatus"/> (FR-21 part 3 of 3, S-53,
+/// issue #17). A closed three-shape union behind a private constructor, the same mechanism
+/// <see cref="SessionTokenFiguresEnvelope"/> and <see cref="SuggestionEnvelope"/> already use — so a
+/// client reads which of the three states applies from the <c>"kind"</c> discriminator rather than
+/// inferring it from which optional fields happen to be present.</summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(Complete), "complete")]
+[JsonDerivedType(typeof(IngestIncomplete), "ingestIncomplete")]
+[JsonDerivedType(typeof(ReconstructionFailed), "reconstructionFailed")]
+public abstract record SessionRecordingStatusEnvelope
+{
+    private SessionRecordingStatusEnvelope()
+    {
+    }
+
+    public static SessionRecordingStatusEnvelope CompleteValue { get; } = new Complete();
+
+    public static SessionRecordingStatusEnvelope IngestIncompleteValue { get; } = new IngestIncomplete();
+
+    public static SessionRecordingStatusEnvelope From(SessionRecordingStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+
+        return status switch
+        {
+            SessionRecordingStatus.Complete => CompleteValue,
+            SessionRecordingStatus.IngestIncomplete => IngestIncompleteValue,
+            SessionRecordingStatus.ReconstructionFailed failed => new ReconstructionFailed { Skipped = failed.Skipped },
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown SessionRecordingStatus shape."),
+        };
+    }
+
+    public sealed record Complete : SessionRecordingStatusEnvelope;
+
+    public sealed record IngestIncomplete : SessionRecordingStatusEnvelope;
+
+    public sealed record ReconstructionFailed : SessionRecordingStatusEnvelope
+    {
+        public required IReadOnlyList<string> Skipped { get; init; }
+    }
+}
+
 /// <summary>
 /// FR-21's served masthead and tape (S-08, issue #15): the wire shape a client reads
 /// <see cref="SessionRecording"/> through, the same layering <see cref="DigestEnvelope"/> already
-/// establishes for <see cref="ProcessDigest"/> (S-36).
+/// establishes for <see cref="ProcessDigest"/> (S-36). <see cref="Status"/> (S-53, issue #17)
+/// carries FR-21 part 3 of 3's finality state alongside the masthead and steps — a client checks it
+/// before rendering the tape as the session's final picture.
 /// </summary>
 public sealed record SessionEnvelope
 {
     public required SessionMastheadEnvelope Masthead { get; init; }
 
     public required IReadOnlyList<SessionTapeStepEnvelope> Steps { get; init; }
+
+    public required SessionRecordingStatusEnvelope Status { get; init; }
 
     public static SessionEnvelope From(SessionRecording recording)
     {
@@ -168,6 +214,7 @@ public sealed record SessionEnvelope
         {
             Masthead = SessionMastheadEnvelope.From(recording.Masthead),
             Steps = recording.Tape.Steps.Select(SessionTapeStepEnvelope.From).ToList(),
+            Status = SessionRecordingStatusEnvelope.From(recording.Status),
         };
     }
 }

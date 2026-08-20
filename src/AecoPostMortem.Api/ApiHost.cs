@@ -120,6 +120,13 @@ public static class ApiHost
     /// re-deriving them from RAW in this project, which would duplicate the ETL wiring a later
     /// story owns. <see langword="null"/> when <paramref name="sessionId"/> names no session at
     /// all, distinct from a session that exists but recorded no steps (Scenario 3).
+    ///
+    /// FR-21 part 3 of 3 (S-53, issue #17) widens this read by one narrow addition: it also reads
+    /// this session's own RAW events and runs them through <c>Ingestion.ExecutionRecordBuilder</c>
+    /// purely for its <c>SpawnResolutionCheck</c> diagnostic — never for the
+    /// <c>Turn</c>/<c>ToolCall</c>/<c>Agent</c> rows it also returns, which would be exactly the
+    /// duplicate reconstruction path the remark above rules out. A session's own RAW events are
+    /// bounded by that session, so this second read stays cheap regardless of corpus size.
     /// </summary>
     public static SessionEnvelope? GetSession(LocalStore store, string sessionId)
     {
@@ -140,7 +147,10 @@ public static class ApiHost
         var skills = context.Skills.Where(s => s.SessionId == sessionId).ToList();
         var hooks = context.Hooks.Where(h => h.SessionId == sessionId).ToList();
 
-        var recording = SessionRecording.Build(session, turns, toolCalls, agents, skills, hooks);
+        var rawEvents = context.RawEvents.Where(r => r.SessionId == sessionId).ToList();
+        var spawnResolution = ExecutionRecordBuilder.Build(sessionId, rawEvents).SpawnResolutionCheck;
+
+        var recording = SessionRecording.Build(session, turns, toolCalls, agents, skills, hooks, spawnResolution);
         return SessionEnvelope.From(recording);
     }
 

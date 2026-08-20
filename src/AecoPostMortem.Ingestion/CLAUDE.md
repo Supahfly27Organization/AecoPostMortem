@@ -48,7 +48,11 @@ them — stays here, the same split `Findings` uses for every other check shape.
 `AecoPostMortem.Api` references this project the other way, for `CopilotSourceLocation` and
 `SessionDiscovery` — S-48's app-state diagnosis needs to know whether the Copilot session-state
 root exists, and reuses FR-1's own discovery rather than a second, parallel `Directory.Exists`
-check. See `AecoPostMortem.Api/CLAUDE.md`.
+check. S-53 (issue #17, FR-21 part 3 of 3) adds a second reason: `ApiHost.GetSession` also calls
+`ExecutionRecordBuilder.Build` directly, over one session's own RAW events, but reads only its
+`SpawnResolutionCheck` back — never the `Turn`/`ToolCall`/`Agent` rows the same call also returns,
+which stay this project's own concern until the ETL wiring below lands for real. See
+`AecoPostMortem.Api/CLAUDE.md`.
 
 ## Non-obvious decisions
 

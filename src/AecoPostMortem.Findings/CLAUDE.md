@@ -27,7 +27,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
-| `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
+| `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding`. FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and `SessionRecording.Status`, plus an optional `CheckRegistryEntry? spawnResolution` parameter on `Build` |
 
 ## References
 
@@ -191,6 +191,25 @@ nothing in this repository yet *writes* those rows at ingest time
 are queryable (`DerivedSchema.EnsureCurrent` creates them on open), they are simply empty until a
 later story's ETL populates them, so `Api.ApiHost.GetSession` reads them today exactly as it would
 once that writer exists — no separate code path.
+
+### `SessionRecordingStatus` is a closed union decided inside `Build`, from inputs the caller already resolved
+
+FR-21 part 3 of 3 (S-53, issue #17): whether a session's masthead and tape are ready to be read as
+final is not a boolean a caller could forget to check — `SessionRecordingStatus` is a closed
+three-shape union behind a private constructor, the same mechanism `SessionTokenFigures` already
+uses for its own two shapes. `Build` computes it itself rather than taking it as a caller-supplied
+value outright, because both of its inputs are already in `Build`'s own parameter list or already on
+`Session`: `session.EndedAt is null` (no new parameter — `Session` already carries this) is checked
+first, matching `ProcessDigest.Build`'s own "the more urgent, more specific claim wins" ordering for
+`MastheadCounters.IngestInProgress` over its analysis-state check — while a session has not
+concluded, nothing here can be trusted as final, not even a reconstruction diagnosis over whatever
+partial data has arrived so far. Only then is the optional `spawnResolution` parameter (FR-9's own
+`Ingestion.SpawnResolutionCheck`, an already-resolved plain input, `null` when no reconstruction
+check was run) consulted: a `FindingCount > 0` reads as `ReconstructionFailed`, carrying `Skipped` —
+plain English, never a bare count with no explanation, the same "never a percentage without the
+count that produced it" discipline this project applies to a Waste finding's rate. Every existing
+call site that supplies only six arguments still compiles and still reads `Complete` for a session
+with a recorded end, since `spawnResolution` defaults to `null`.
 
 `SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": Copilot's event
 log carries no separate prompt entity, and `Turn` itself carries no message text
@@ -544,4 +563,13 @@ five step-population counts; `SessionTape` orders every `Prompt`/`Hook`/`Skill`/
 step by wall-clock time with its offset from session start, and states plainly when it carries none.
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
 `web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
-path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52, not built here.
+
+`SessionRecordingStatus` (issue #17, S-53, FR-21 part 3 of 3) closes the remaining gap: virtualised
+rendering and full keyboard reachability at scale are `web/`'s own job (`web/src/session/Tape.tsx`),
+but the two non-happy states — a session still ingesting, and one whose reconstruction left a
+subagent spawn unresolved — are decided here, from `Session.EndedAt` and an already-resolved
+`Ingestion.SpawnResolutionCheck` respectively (see the non-obvious decision above). `AecoPostMortem.
+Api.ApiHost.GetSession` is the first and only caller that supplies a real `spawnResolution` value,
+by running the session's own RAW events through `Ingestion.ExecutionRecordBuilder` purely for that
+diagnostic (`AecoPostMortem.Api/CLAUDE.md`).

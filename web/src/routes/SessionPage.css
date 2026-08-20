@@ -75,3 +75,24 @@
 .session-page__no-selection {
   color: #666;
 }
+
+.session-page__incomplete {
+  border: 1px solid #b7891f;
+  background: #fdf6ea;
+  color: #6b4e0e;
+  padding: 0.85rem 1.1rem;
+  border-radius: 6px;
+}
+
+.session-page__reconstruction-failed {
+  border: 1px solid #c0392b;
+  background: #fdecea;
+  color: #7b241c;
+  padding: 0.85rem 1.1rem;
+  border-radius: 6px;
+}
+
+.session-page__reconstruction-failed ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+}

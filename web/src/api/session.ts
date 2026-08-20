@@ -43,9 +43,18 @@ export interface SessionMasthead {
   contextSize: SessionTokenFigures
 }
 
+/** Mirrors `AecoPostMortem.Api.SessionRecordingStatusEnvelope` (FR-21 part 3 of 3, S-53, issue
+ * #17). A closed three-shape union, the same discipline `SessionTokenFigures` already uses here —
+ * `'complete'` is the only kind a caller may render the tape from as the session's final picture. */
+export type SessionRecordingStatus =
+  | { kind: 'complete' }
+  | { kind: 'ingestIncomplete' }
+  | { kind: 'reconstructionFailed'; skipped: string[] }
+
 export interface SessionEnvelope {
   masthead: SessionMasthead
   steps: SessionTapeStep[]
+  status: SessionRecordingStatus
 }
 
 export function sessionRoute(sessionId: string): string {

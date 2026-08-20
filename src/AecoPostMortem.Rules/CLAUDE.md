@@ -7,10 +7,11 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 
 | File | What it holds |
 |---|---|
-| `ToolInvocationShape.cs` | one observed tool call reduced to its argument shape — booleans for path, pattern, replacement, file text, command, and whether it spawned an agent. `ToolName` is carried as an opaque label; nothing reads it as meaning |
+| `ToolInvocationShape.cs` | one observed tool call reduced to its argument shape — booleans for path, pattern, replacement, file text, command, and whether it spawned an agent, plus `McpServerName` (the provider's own logged server field). `ToolName` and `McpServerName` are carried as opaque labels; nothing reads either as meaning |
 | `ToolVocabulary.cs` | `ToolVocabulary.Build` — the distinct tool names in whatever corpus is passed in (FR-29) |
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
+| `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -267,6 +268,62 @@ rendered result is never separated from the derivation that could make two imple
 grouping is over the intents themselves — there is no session-enumeration side channel that could
 produce a zero for it.
 
+### Operand resolution is layered lookups over S-21's own outputs, not a parallel classifier
+
+`OperandResolver.Resolve` tries `ToolVocabulary.Build` (exact name), then a structural equality
+check against each call's own `McpServerName` (the server-field layer), then
+`ToolRoleDeriver.Derive` (the role layer) — in that order, returning on the first layer that
+produces at least one tool. It reuses S-21's two functions rather than re-deriving vocabulary or
+roles its own way, so a future change to how a role is classified only has one place to change.
+
+### The server-field layer is a structural equality check, never a substring match on `ToolName`
+
+FR-31's own worked example is the reason this exists: a rule about one MCP server must exclude a
+different server's tool whose name happens to contain the same text (measured 28 tools resolve
+correctly under this layer; issue #51's edge case documents the same failure mode discovered from
+the other direction — a circularity check that matched a substring pulled in 9 calls to a different
+server and 2 to a variant name). `OperandResolver.Resolve` compares `operandText` against
+`ToolInvocationShape.McpServerName` with `string.Equals(..., StringComparison.Ordinal)` — never
+`Contains` — and collects every tool whose calls carry that exact server name.
+`The_server_field_is_a_structural_match_not_a_substring_match_on_tool_names` in
+`OperandResolverTests` proves it with a tool whose own name contains the server text as a substring
+but whose logged server field names a different server.
+
+### The role layer matches an operand's text against `ToolRole`'s own member names
+
+FR-31 names "the derived role" as the third layer without stating what text a rule's own operand
+would carry to select one. Rather than guess a display convention (`"file-read"`, `"Search tools"`,
+...) this project cannot verify against Copilot's actual rule phrasing, `Resolve` parses
+`operandText` directly against `ToolRole`'s five member names (`Enum.TryParse<ToolRole>(operandText,
+ignoreCase: false, ...)`). This keeps the layer exact and closed to the same five-member vocabulary
+`ToolRole.cs` already defines, with nothing here able to invent a sixth label. Whatever project
+extracts operand text from a rule statement's own phrasing (S-25, FR-34) is responsible for
+normalising it to one of these five names before calling in, the same way every other check in this
+project takes an already-resolved plain input rather than doing its own text interpretation.
+
+### `Unresolved` is a fourth enum member, not an empty `Tools` set on a resolved layer
+
+FR-31's fourth layer is required to be reported, never silently dropped. `Resolve` only returns a
+resolved layer (`ExactToolName`, `McpServerField`, `DerivedRole`) when that layer actually produced
+at least one tool — an empty match at any layer falls through to the next one, and running out of
+layers is `Unresolved`, its own enum value rather than an empty `Tools` set on a layer that claims
+to have matched. `Layer == Unresolved` is therefore the one condition a downstream caller (S-26,
+FR-35 — "this rule names a tool your agent does not have") checks to build its finding, with no
+count-based inference needed.
+
+### Subtraction only ever removes from operand B; operand A is returned unchanged
+
+FR-32 states the tie-break as "A winning", not "the more/less confident layer winning" — the two
+operands can resolve through different layers entirely (the discovery finding 8 defect was exactly
+this: an exact-name match for one operand colliding with a role-layer match for the other) and A
+still wins regardless of which layer produced either side. `ResolveTwoOperands` therefore performs
+one direction of subtraction only: `OperandB.Tools = ResolvedB.Tools - ResolvedA.Tools`, with
+`OperandA` returned exactly as `Resolve` produced it. `OperandB.Layer` is left as whatever layer
+originally resolved it, even if subtraction empties its `Tools` — that is a different fact ("B's
+own claim was entirely absorbed by A") from `Unresolved` ("nothing matched B in the first place"),
+and collapsing the two would make a resolution's own record of what happened lie about which one
+occurred.
+
 ### A version's identity is the (repository, hash) pair, groups by hash within chronological order
 
 `RuleSetVersioning.Compute` orders each repository's sessions by `StartedAt` (ordinal, `SessionId`
@@ -314,7 +371,15 @@ makes a bare denominator uncompilable rather than merely undocumented.
 
 ## Status
 
-Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
+Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
+resolution (S-23, issue #37, FR-31/FR-32): `OperandResolver.Resolve` and `.ResolveTwoOperands` are
+the mechanism every check shape with a named operand (S-25's catalogue, S-26's "tool your agent
+does not have") builds on rather than reimplementing tool classification. Nothing yet extracts
+operand text from a rule statement's own phrasing — that is S-25's job (FR-34); this story
+publishes the resolution mechanism the way S-21 published vocabulary/role derivation ahead of
+anything calling it with real rule text.
+
+The check-shape catalogue has
 six entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
 `AbortedTurnCheck` (issue #28, FR-18) and `PhaseChurnCheck` (issue #29, FR-19). The shape they

@@ -10,8 +10,8 @@
 .recurrence-strip__session {
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  background: #eef1f5;
-  color: #33404d;
+  background: var(--sunk);
+  color: var(--ink-2);
   font-size: 0.8rem;
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
 }

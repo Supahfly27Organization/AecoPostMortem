@@ -1,6 +1,6 @@
 .digest-page__state {
   margin: 1rem 0 0;
-  color: #5b6470;
+  color: var(--ink-2);
 }
 
 .digest-page__findings {

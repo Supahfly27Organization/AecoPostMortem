@@ -1,7 +1,7 @@
 .masthead {
-  border: 1px solid #dde1e6;
+  border: 1px solid var(--rule);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   padding: 0.9rem 1rem;
   margin: 0 0 1rem;
 }
@@ -9,14 +9,14 @@
 /* The provisional note is not decoration around the counts — it changes what they mean, so it sits
    above them and takes the accent the figures themselves deliberately do not. */
 .masthead[data-provisional='true'] {
-  border-color: #d9b168;
-  background: #fffaf0;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .masthead__provisional {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #7a5a12;
+  color: var(--accent);
 }
 
 .masthead__figures {
@@ -36,7 +36,7 @@
   font-size: 0.7rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #5b6470;
+  color: var(--ink-3);
 }
 
 .masthead__value {

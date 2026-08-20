@@ -5,13 +5,14 @@
   margin: 0 0 1rem;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #33404d;
+  color: var(--ink);
 }
 
 .repository-selector select {
   font: inherit;
+  color: inherit;
   padding: 0.25rem 0.5rem;
-  border: 1px solid #c7ccd3;
+  border: 1px solid var(--rule-2);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
 }

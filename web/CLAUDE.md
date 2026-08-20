@@ -41,6 +41,7 @@ passing `--prefix`, for the same reason.
 | `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built. FR-22 (S-09, issue #18) added `AgentLanes`/`SubagentOutputPanel`: one entry per subagent, rendered between the finding chip row and the tape, each carrying the report it actually produced (or a stated "no output"/"failed" state) — renders nothing when `envelope.lanes` is empty, the same "no section at all" discipline `ComingSoon`'s sibling surfaces avoid reinventing |
 | `src/session/Tape.tsx` | FR-21, part 3 of 3 (S-53, issue #17): the tape itself, moved out of `SessionPage.tsx` — fixed-row-height virtualisation (only the scrolled-to window plus overscan is mounted, proven at the largest measured session scale, 84 turns + 764 tool calls) and full keyboard reachability (a single roving tab stop on the list itself; Arrow/Home/End/PageUp/PageDown move a `selectedIndex` that pulls its row into the mounted window before selecting it, `aria-activedescendant` names it for assistive technology). Reconciled with FR-21 part 2 of 3 (S-52, issue #16)'s step-selection contract: each row's content sits inside a `tabIndex={-1}` button — a click target, never a second tab stop — so `SessionPage`'s inspector gets the same `onSelectStep` callback from a mouse click that it already got from keyboard Enter/Space. FR-22 (S-09, issue #18) added per-row lane markers: `data-owner-kind`/`data-agent-id`/`data-agent-lane`, the last a deterministic hash of `agentId` into one of 8 colours (`laneIndex`), rendered as a coloured left border via the `--session-tape-lane` CSS custom property |
 | `src/session/Tape.css` | `Tape.tsx`'s absolute-positioning layout (each mounted row placed by `top: index * rowHeight` inside a spacer-sized scroll container), the `aria-selected` highlight, and the `tabIndex={-1}` row button's own layout |
+| `src/index.css` | global reset plus this app's design tokens — see "Design tokens are ported verbatim from the mockups" below |
 
 ## Non-obvious decisions
 
@@ -310,6 +311,35 @@ component tree where all three tabs unconditionally exist has no such gap to int
 renders `finding.recurrence.key` as a digest row's own visible label (FR-41). `FindingChips` reuses
 that exact convention rather than inventing a second one for this surface, so the same finding reads
 with the same label whether it is seen on the digest or on a session's chip row.
+
+### Design tokens are ported verbatim from the mockups, not redesigned
+
+`src/index.css` defines this app's whole palette (`--ground`/`--surface`/`--sunk`/`--ink`/`--ink-2`/
+`--ink-3`/`--rule`/`--rule-2`/`--accent`/`--accent-soft`/`--flag`/`--flag-soft`/`--ok`/`--ok-soft`/
+`--infer`/`--infer-soft`/`--lane`/`--mono`/`--sans`) as CSS custom properties on `:root`, copied
+hex-for-hex from `docs/product-superpowers/discovery/mockups/{digest,flight-recorder}.html`'s own
+`:root` blocks — including a dark-mode set both via `@media (prefers-color-scheme: dark)` and via an
+explicit `:root[data-theme='dark']` override for a future toggle (`data-theme='light'` forces light
+regardless of system preference). Every other file in `src/` was then edited to replace its
+hardcoded hex colours with `var(--token)` references to these. This is a values-only diff — no
+component/JSX changed, and colours were not adjusted for contrast or otherwise redesigned along the
+way, even where the mockups' own token choices read close to WCAG AA at small text sizes (e.g.
+`--accent` on `--accent-soft`) — the point of this pass was parity with the approved mockups, not an
+independent palette review. If the mockups' own palette changes later, this is where to re-port from.
+
+One value is a known, deliberate inconsistency inherited from the mockups themselves, not introduced
+here: `--ink-3` differs between the two dark-mode blocks (`8E96A4` under the media query vs `6B7280`
+under `[data-theme='dark']`) in both mockup files — currently harmless since nothing in this app sets
+`data-theme` yet, but worth flagging to whoever builds the toggle rather than assuming it's a typo in
+this port.
+
+The mockups' own `:focus-visible` rule also sets `border-radius: 2px` — deliberately dropped here.
+The mockup is one inline `<style>` block where declaration order made that harmless; this app's
+`main.tsx` imports `./App.tsx` (and therefore every component's own CSS) before `./index.css`, so
+Vite bundles `index.css` last and its rules win every equal-specificity tie — a `border-radius` there
+would override every component's own corner radius the moment it receives keyboard focus, visibly
+snapping the session tape's roving tab stop. The rule keeps its `outline`/`outline-offset`, just no
+`border-radius`.
 
 ## Playbook — adding a route
 

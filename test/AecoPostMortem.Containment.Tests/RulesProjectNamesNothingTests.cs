@@ -65,6 +65,12 @@ public sealed class RulesProjectNamesNothingTests
         "statement", "directive", "shape", "catalogue", "matches", "states", "obligation",
         "check", "blank",
 
+        // FR-40's status labels ("Watched", "Checkable — not yet built", "Not checkable") and the
+        // prose of RulesInventory's own two exception/invariant messages.
+        "watched", "checkable", "built", "yet", "fr", "extracted", "exactly", "status",
+        "classifier", "returned", "none", "occurrence", "this", "corpus", "carried", "carries",
+        "requested",
+
         // The nouns a shape's own name uses for what it binds.
         "param", "parameter", "parameters", "argument", "arguments",
         "flag", "flags", "option", "options", "tool", "tools", "command", "commands",

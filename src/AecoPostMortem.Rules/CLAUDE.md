@@ -28,6 +28,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
 | `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
 | `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
+| `RulesInventory.cs` | FR-40 (S-22, issue #35): `RuleStatementStatus` (the closed four-shape status union), `RuleRetirement` (in force / retired at a date), `RulesInventoryRow`, `RulesInventoryStatusCounts`, `RulesInventoryState`, `RulesInventory.Build`/`.MostRecentVersion`, and `UnknownRuleSetVersionException` — one rule-set version's statements, each with exactly one status, its origin, its reach, its in-force window and its retirement |
 | `RuleShape.cs` | FR-34 (S-25, issue #39): `RuleShapeKind` (the closed five-member shape enum), `RuleShapeMatch` (a statement, its shape, and the operand text lifted from it), `UnmatchedStatementDisposition`/`UnmatchedStatement` (FR-40's two middle inventory statuses, each with a reason), and `RuleShapeMatching` (the partition, with a computed `StatementCount`) |
 | `RuleShapeCatalogue.cs` | FR-34's catalogue itself: `RuleShapeCatalogue.Shapes`, `.TryMatch` and `.MatchAll` — eight phrasing patterns across five shapes, matched in precedence order, with operands read from the matched statement's own text |
 | `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only) and `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows) |
@@ -506,6 +507,90 @@ and one hash — the same `RuleSetVersionId` `RuleSetVersioning` produces — so
 first and cannot construct a figure across an edit even by accident, mirroring how `HookFailureCounts`
 makes a bare denominator uncompilable rather than merely undocumented.
 
+### A statement's status is supplied by the caller, not decided here
+
+`RulesInventory.Build` takes a `Func<RuleStatement, RuleStatementStatus>` rather than classifying
+statements itself, the same shape `Api.DigestEnvelope.From` takes its finding mapper. Deciding
+whether a statement matches a built check shape is S-25's catalogue work (FR-34, issue #39), which
+this project does not carry yet — and the boundary between *Checkable — not yet built* and *Not
+checkable* is exactly the thing that catalogue defines: the first means "a shape could express this,
+none exists"; the second means "no shape can express it, because the logs do not record what it
+talks about", which is why FR-40 requires it to state a reason. Baking a classifier in here would
+have meant guessing that boundary and then having to un-guess it when S-25 lands. When it does, only
+the function passed in changes; every scenario this file's inventory implements is unaffected.
+
+### Retirement is positional in the repository's own session order, never a computed date
+
+FR-40's "adherence frozen at the date it was removed" needs a date, and the corpus has no removal
+event — a rule vanishes by simply not appearing in the next session's prompt. `RetirementOf` takes
+the repository's chronologically ordered sessions, finds the last one whose **own block set** carried
+the statement, and reports the *next* session's own `StartedAt`: the first moment the log shows the
+statement gone.
+
+The search is over each session's block set, not over the row's `SessionIds`, and the difference is
+a real bug that was caught in review rather than a stylistic preference. `SessionIds` holds only the
+*selected* version's sessions, and because sessions share a version precisely when their block sets
+are identical, it is **the same list for every row in that version**. Searching it dates every
+statement's removal to the end of the selected version — so a statement that a later version went on
+carrying for weeks is reported as removed at the wrong date, and `AdherenceFrozenAt` inherits it.
+`A_statement_a_later_version_kept_is_retired_at_that_later_removal_not_at_this_versions_end` is the
+three-version fixture that pins this; a two-version corpus cannot tell the two derivations apart,
+which is why the original suite passed.
+Nothing here reads a clock (the determinism contract, PRD §3.8), and nothing derives a date
+independently of the sessions themselves. A statement present in the repository's most recent
+version is never retired, so the default view — the most recent version, `MostRecentVersion` — is
+the one in which nothing is frozen.
+
+### Exactly one version, and no shape here can hold two
+
+`Build` takes one `RuleSetVersionId` and produces rows only from sessions carrying that hash;
+`AvailableVersions` carries other versions' *identities and windows*, never their statements. This
+is FR-40's Scenario 6 made structural rather than conventional, and it matters more than the wording
+suggests: a measured 34 of 43 statements are absent from the most recent session, so the
+union-of-all-versions table the digest mockup showed would render three quarters of its rows as
+though they were still in force (PRD Part 4).
+
+### Three empty states, not one
+
+`RulesInventoryState` distinguishes `NoInstructionBlocks` from `BlocksCarriedNoStatements` even
+though Scenario 4 asks only that "no rules were found" be stated. FR-26's own fourth scenario already
+established that these are different facts — `SessionInstructionBlocks.HasInstructionBlocks` exists
+for exactly this — and they have different fixes: the first says this repository has no written
+rules, the second says it has them and the list-item extraction unit found nothing in them, which
+would be an extraction defect rather than an empty repository.
+
+### Known seams the inventory inherits rather than fixes
+
+Three things a reader of `RulesInventory.cs` will notice. All three are pre-existing and none is
+changed by S-22, because changing any of them changes a merged story's semantics:
+
+- **A null `Repository` is one bucket, not "unknown".** `RuleSetVersioning.Compute` groups by
+  `session.Repository`, and `null == null`, so every session whose repository could not be resolved
+  shares a scope. `RulesInventory.Build` follows the same rule (`string.Equals(..., Ordinal)`), which
+  means under a null scope the "most recent session" driving retirement can belong to an unrelated
+  project. The web surface labels this scope "no recorded repository" rather than naming a project,
+  so it is at least not mislabelled — but a removal date computed under it is only as meaningful as
+  the grouping. Fixing it means giving S-20 a real "repository unknown" identity, which is its story.
+- **Every row in a version shares one carrying-session list and one in-force window.** By
+  construction: sessions share a version precisely because their block sets are identical, so a
+  statement in that version was carried by all of them. The per-row `SessionIds`/`InForceFrom`/
+  `InForceUntil` therefore vary across *versions*, not across rows within one. That is correct for
+  Scenarios 2 and 3 under version scoping, and it is exactly why retirement could **not** be derived
+  from `SessionIds` — see the note above.
+- **`RuleSetVersionHasher` canonicalises `block.SourceFile` + `statement.Text`, while
+  `RuleStatementDeduplication` keys on `statement.SourceFile` + `Text`.** `RuleStatementExtractor`
+  always sets the statement's source file from its block's, so the two agree on any extracted corpus;
+  a hand-built `RuleStatement` with a mismatched `SourceFile` could make two sessions share a hash
+  yet yield different rows, which would break the one-version-one-statement-set assumption `Build`
+  leans on. Worth knowing before hand-constructing fixtures.
+
+### `UnknownRuleSetVersionException` is not the empty state
+
+Asking for a version no session carried is an error; a version whose sessions carried no rules is a
+designed, renderable state. Collapsing the two would make "this repository has no rules" and "you
+passed a hash that never existed" indistinguishable to a caller — the same reasoning
+`MixedRuleSetVersionException` gives for being its own type rather than a bare `ArgumentException`.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
@@ -542,6 +627,15 @@ FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExt
 parses `<custom_instruction>` blocks from plain prompt text, and
 `RuleStatementDeduplication.Deduplicate` collapses identical statements across sessions while
 preserving which sessions carried each one.
+
+FR-40's inventory (S-22, issue #35) has landed on top of both: `RulesInventory.Build` reduces a
+corpus of `SessionRuleSet`s to one version's statements, each with exactly one
+`RuleStatementStatus`, its source file, its carrying sessions, its in-force window and its
+`RuleRetirement`. It is the first consumer of `RuleStatementDeduplication` and `RuleSetVersioning`
+together. It still classifies nothing itself (see the non-obvious decision above) — the caller
+supplies each status, and S-25's catalogue is what will supply it for real. `AecoPostMortem.Api.
+RulesInventoryEnvelope` is the wire shape, and `web/src/routes/RulesInventoryPage.tsx` renders it;
+no endpoint serves it from a live store yet, the same not-yet-wired gap `ProcessDigest` documents.
 
 Rule-set versioning (S-20, issue #33, FR-27/FR-28) has also landed: `RuleSetVersioning.Compute` turns
 a corpus of `SessionRuleSet`s into `RuleSetVersion`s (identity, window, sample size) per repository,

@@ -21,13 +21,24 @@ import './FindingRow.css'
  * Mockup parity item #2: `SessionStrip` joins `sessionsAffected` on the collapsed row for the same
  * reason — which sessions, in what pattern, is also worth scanning without expanding. `sessionIds`
  * is the caller's `masthead.repositoryScope.sessionIds` (`DigestPage`), the same session set every
- * ranked finding was scoped to. */
+ * ranked finding was scoped to.
+ *
+ * `variant` (FR-48, issue #52, S-42) defaults to `'ranked'`, unchanged from before this prop
+ * existed. The digest's own "Judgment calls" section passes `'unranked'` for a
+ * `DigestEnvelope.inferredFindings` entry: `Findings/CLAUDE.md` is explicit that an Inferred
+ * finding is never ranked by `sessionsAffected`, and this leading column exists specifically to
+ * make that number the most visually prominent thing on the row (S-36's edge case) — showing it at
+ * the same prominence on a hypothesis would visually contradict the guarantee the server went out
+ * of its way to build. Nothing is lost by omitting it: `RecurrenceStrip`, rendered on expand either
+ * way, already names every session the finding touched. */
 export function FindingRow({
   finding,
   sessionIds,
+  variant = 'ranked',
 }: {
   finding: FindingEnvelope
   sessionIds: string[]
+  variant?: 'ranked' | 'unranked'
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -39,12 +50,14 @@ export function FindingRow({
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >
-        <span className="finding-row__sessions" data-rank-metric="sessions-affected">
-          <strong className="finding-row__sessions-count">{finding.sessionsAffected}</strong>
-          <span className="finding-row__sessions-unit">
-            {finding.sessionsAffected === 1 ? 'session' : 'sessions'}
+        {variant === 'ranked' && (
+          <span className="finding-row__sessions" data-rank-metric="sessions-affected">
+            <strong className="finding-row__sessions-count">{finding.sessionsAffected}</strong>
+            <span className="finding-row__sessions-unit">
+              {finding.sessionsAffected === 1 ? 'session' : 'sessions'}
+            </span>
           </span>
-        </span>
+        )}
         <span className="finding-row__key">{finding.recurrence.key}</span>
         <SessionStrip sessionIds={sessionIds} occurrences={finding.recurrence.occurrences} />
         <ProvenanceBadge provenance={finding.provenance} />

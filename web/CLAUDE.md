@@ -23,11 +23,11 @@ passing `--prefix`, for the same reason.
 | `src/routes/RulesInventoryPage.tsx` | FR-40's real content (S-22, issue #35): one rule-set version's statements, each with exactly one status, its source file, its carrying sessions, its in-force window and its retirement — plus the version scope, the status breakdown and the two designed "no rules found" states. Fetches `/api/rules-inventory` via `useRulesInventory` |
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render |
 | `src/api/useRulesInventory.ts` | the fetch-per-`versionHash` hook `RulesInventoryPage` reads, mirroring `useSession`'s re-fetch-on-change shape rather than `useDigest`'s fetch-once |
-| `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established |
-| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below |
+| `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established. FR-48 (issue #52, S-42) added the "Judgment calls" section for `digest.inferredFindings` — renders nothing when that list is empty, the same "no section at all" discipline `SessionPage.tsx`'s `AgentLanes` already established for an empty `envelope.lanes` |
+| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below. FR-48 (issue #52, S-42) added `DigestEnvelope.inferredFindings` — real, served data that had silently gone undeclared (and therefore dropped on arrival) since `InferredFindings` shipped server-side; see "A missing wire field can hide even after its server-side story ships" below |
 | `src/api/useDigest.ts` | the fetch-once-on-mount hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape |
 | `src/digest/Masthead.tsx` | FR-41's corpus masthead (S-36, issue #44): sessions, span, repositories, events, tool calls and rule coverage, every figure read straight off `MastheadEnvelope`'s ingest-time counters. Marks itself `data-provisional` mid-ingest and says an empty corpus has no span |
-| `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed |
+| `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed. FR-48 (issue #52, S-42) added `variant?: 'ranked' \| 'unranked'` (default `'ranked'`) — `'unranked'` omits that leading count for a `DigestEnvelope.inferredFindings` entry, since a hypothesis is deliberately never ranked by it |
 | `src/digest/SessionStrip.tsx` | Mockup parity item #2 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`): one cell per session in `masthead.repositoryScope.sessionIds`, lit where a finding's own `recurrence.occurrences` touched that session — the mockup's `.strip`, ported. Hidden under 820px, mirroring the mockup's own breakpoint |
 | `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone. FR-39 (S-35, issue #43) added `data-emphasis="prominent"` on the percentage span, the marker `MonitorComparisonBlock.tsx`'s own session count shares |
 | `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count |
@@ -332,6 +332,30 @@ renders `finding.recurrence.key` as a digest row's own visible label (FR-41). `F
 that exact convention rather than inventing a second one for this surface, so the same finding reads
 with the same label whether it is seen on the digest or on a session's chip row.
 
+### A missing wire field can hide even after its server-side story ships
+
+FR-48 (issue #52, S-42) shipped `DigestEnvelope.InferredFindings` server-side, real and populated
+(`AecoPostMortem.Api/CLAUDE.md`) — but `api/digest.ts`'s `DigestEnvelope` interface never declared
+it, so the field arrived on the wire and was silently dropped on every fetch: `fetchDigest`'s
+`response.json() as DigestEnvelope` cast does not fail when the parsed object carries a field the
+TypeScript type doesn't name, it simply never gets read. This is the same "hand-kept in sync, no
+generated client" gap `api/appState.ts` documents, but a sharper case of it: unlike a naming-policy
+mismatch (`AppStateKind`'s own past incident, `AecoPostMortem.Api/CLAUDE.md`), a *missing* field
+produces no error on either side — both this file's own type and every test that mocks
+`DigestEnvelope` stay green, because nothing forces the fixture to carry a field the interface
+doesn't ask for either. `DigestPage.test.tsx`'s `digestWith` fixture now sets `inferredFindings`
+explicitly (defaulting to `[]`) so a future field addition to the real envelope has to touch this
+file to type-check, the same discipline that would have caught this gap immediately had the field
+been required in a test fixture from the start.
+
+`FindingRow`'s `variant` prop (above) is the one further wrinkle this closed: `Findings/CLAUDE.md`
+already resolved *not* to rank a hypothesis by `sessionsAffected` server-side, but reusing
+`FindingRow` unchanged for an inferred entry would have shown that exact number in the same leading,
+display-size column S-36's own edge case designed specifically to look like a rank — a rendering
+gap the server-side decision alone could not close. `variant='unranked'` omits that column without
+losing the figure: `RecurrenceStrip`, unconditionally rendered on expand, already names every
+session the finding touched.
+
 ### Design tokens are ported verbatim from the mockups, not redesigned
 
 `src/index.css` defines this app's whole palette (`--ground`/`--surface`/`--sunk`/`--ink`/`--ink-2`/
@@ -416,6 +440,30 @@ prioritisation-doc estimate (Effort 4/5, "pure frontend, no backend change") ass
 the live 35-session, two-repository reference corpus in a real browser: the strip renders on every
 row, cell count matches the selected repository's own session count, and lit positions match each
 finding's `sessionsAffected` figure.
+
+FR-48 (issue #52, S-42) closed a real gap: `DigestEnvelope.inferredFindings` had been served by
+`ApiHost.GetDigest` for a prior story but was never declared on `api/digest.ts`'s own type, so it
+was silently dropped on arrival (see "A missing wire field can hide even after its server-side story
+ships" above). `DigestPage` now renders it as its own "Judgment calls" section, below the ranked
+list and rendered only when the list is non-empty, each entry reusing `FindingRow` with
+`variant="unranked"` so a hypothesis is never shown with the same rank-metric column a measured
+finding gets. Verified against the live 35-session reference corpus: `inferredFindings` is
+structurally empty today — `ApiHost.GetDigest` wires no check that produces a `Provenance.Inferred`
+finding yet (`ToolFailureClusterFinding`, the one that would, is documented there as "not run here"
+pending a mandating rule) — an honest empty result, the same "mechanism real, corpus doesn't happen
+to exercise it yet" pattern this project has hit before. The rendering path itself was proven two
+ways: `DigestPage.test.tsx`'s own synthetic-finding test, and a real browser against the live host
+with `window.fetch` patched to inject one synthetic inferred finding into the real response —
+confirmed rendering the section heading, the dashed violet `INFERRED` badge, the evidence, the
+recurrence strip and the "No suggestion is offered." absent state, with no leading session-count
+column.
+
+The "Every check ran and found nothing." message (above) now also requires
+`inferredFindings.length === 0`, not only `rankedFindings.length === 0`: `Digest.cs` derives
+`DigestState.Analyzed` from whether any check ran, independent of how many findings resulted in
+which list, so a corpus where every check that ran happened to produce only hypotheses would leave
+`rankedFindings` empty while `inferredFindings` is not — without this guard the page would state
+"found nothing" directly above a populated "Judgment calls" section.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
 `session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,

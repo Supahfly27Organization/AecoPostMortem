@@ -144,6 +144,13 @@ export interface DigestEnvelope {
   masthead: MastheadEnvelope
   state: DigestState
   rankedFindings: FindingEnvelope[]
+  /** FR-48 (issue #52, S-42): every `Provenance.Inferred` finding, served separately from
+   * `rankedFindings` and never interleaved by rank with it — `AecoPostMortem.Findings.Digest.cs`'s
+   * own remarks say ranking a hypothesis by `sessionsAffected` "would dress the hypothesis up with
+   * the same measured-looking number that ranks Observed and Derived findings." This field mirrors
+   * `DigestEnvelope.InferredFindings` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) exactly — same
+   * `FindingEnvelope` shape as `rankedFindings`, just a different, unranked list. */
+  inferredFindings: FindingEnvelope[]
 }
 
 /** Throws on a non-2xx response or a network failure; callers (see `useDigest`) turn that into a

@@ -224,6 +224,21 @@ public static class RawEventBatch
 
         return mismatches;
     }
+
+    /// <summary>
+    /// FR-7's retroactive case: a session already ingested before its cwd was added to the
+    /// exclusion list has to be removable, not just refused on the next read. Issued as a bulk
+    /// <c>DELETE</c> via EF Core's <c>ExecuteDelete</c> rather than loaded-then-tracked-then-removed
+    /// — the same "not per-entity tracking" reasoning as <see cref="Append"/>, just for the opposite
+    /// direction. Deleting a session with nothing stored is not an error; it returns 0.
+    /// </summary>
+    public static int DeleteBySession(PostMortemContext context, string sessionId)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        return context.RawEvents.Where(row => row.SessionId == sessionId).ExecuteDelete();
+    }
 }
 
 /// <summary>

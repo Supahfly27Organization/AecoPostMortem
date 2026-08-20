@@ -361,26 +361,16 @@ public sealed record RulesInventory
     }
 
     /// <summary>
-    /// <see cref="RuleSetVersioning.Compute"/>'s own order is ordinal by first session id, which is
-    /// stable but — because session ids are opaque — unrelated to time. A version picker ordered
-    /// that way gives an operator no way to tell which version is the most recent, and that is the
-    /// one FR-40's retirement rule is stated against. Re-orders by where each version's first
-    /// session falls in the repository's chronological run, so the last entry is always the version
-    /// <see cref="MostRecentVersion"/> names.
+    /// <see cref="RuleSetVersioning.Compute"/>'s own order is chronological by
+    /// <see cref="RuleSetVersion.FirstSessionStartedAt"/>, so a version picker built from it already
+    /// puts the version <see cref="MostRecentVersion"/> names last — this is a thin, named pass-through
+    /// rather than a re-derivation, kept so a reader here does not have to look up
+    /// <see cref="RuleSetVersioning.Compute"/> to know its result is already in the order this
+    /// surface needs.
     /// </summary>
     static IReadOnlyList<RuleSetVersion> ChronologicalVersions(
-        (SessionRuleSet Session, string Hash)[] inRepository)
-    {
-        var firstAppearance = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (var index = 0; index < inRepository.Length; index++)
-        {
-            firstAppearance.TryAdd(inRepository[index].Hash, index);
-        }
-
-        return RuleSetVersioning.Compute(inRepository.Select(entry => entry.Session))
-            .OrderBy(version => firstAppearance[version.Hash])
-            .ToArray();
-    }
+        (SessionRuleSet Session, string Hash)[] inRepository) =>
+        RuleSetVersioning.Compute(inRepository.Select(entry => entry.Session));
 
     static RulesInventoryRow ToRow(
         RuleStatementOccurrence occurrence,

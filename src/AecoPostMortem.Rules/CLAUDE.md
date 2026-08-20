@@ -28,7 +28,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `DeclaredIntent.cs` | FR-19's plain input (issue #29): one self-declared phase — `SessionId`, `Phase` (an opaque label) and `Sequence` (the corpus-wide chronological order, the only ordering input this project trusts) |
 | `PhaseOrdering.cs` | `PhaseOrdering.Derive` — the distinct phases in the corpus, ordered by each phase's earliest `Sequence` across every session (FR-19; the S-21 vocabulary pattern applied to phase labels) |
 | `PhaseChurnCheck.cs` | FR-19's check shape (issue #29): `PhaseChurnResult` (a session's returns, its own total intents, and the vocabulary/ordering that produced it), `PhaseChurnCheck.Run`, which derives the ordering once and evaluates each session independently |
-| `RuleSetVersion.cs` | FR-27 (S-20, issue #33): `SessionRuleSet` (a session's repository, start time and blocks — plain input), `RuleSetVersionId` (repository + content hash, a version's identity), `RuleSetVersion` (the identity plus its window — `FirstSessionId`/`LastSessionId` — and `SessionCount`) |
+| `RuleSetVersion.cs` | FR-27 (S-20, issue #33): `SessionRuleSet` (a session's repository, start time and blocks — plain input), `RuleSetVersionId` (repository + content hash, a version's identity), `RuleSetVersion` (the identity plus its window — `FirstSessionId`/`LastSessionId` — and `SessionCount`). `FirstSessionStartedAt` (chronology fix, follow-up to #108) carries `FirstSessionId`'s own start time — the real sort key every chronological ordering of versions uses; `FirstSessionId` itself is opaque (a random UUID in the reference corpus) and carries no ordering meaning of its own |
 | `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
 | `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
 | `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
@@ -581,10 +581,21 @@ breaking ties — the same discipline `AbortedTurnCheck` and `PhaseOrdering` use
 already-ordered sequence by its sessions' content hash. `IEnumerable.GroupBy` preserves first-seen
 order both across groups and within one, so a group's first and last members are automatically the
 chronologically first and last sessions that carried that hash — `FirstSessionId`/`LastSessionId`
-never need a separate min/max pass. Two sessions with the identical hash are the same version even
-if a different-hash session sits between them in time (a rule edited, then reverted); this was not
-in the measured corpus and the acceptance criteria only ask for "the first and last session carrying
-it," so this project does not split a reappearing hash into two windows.
+never need a separate min/max pass, and `FirstSessionStartedAt` is read straight off that same first
+member. Two sessions with the identical hash are the same version even if a different-hash session
+sits between them in time (a rule edited, then reverted); this was not in the measured corpus and the
+acceptance criteria only ask for "the first and last session carrying it," so this project does not
+split a reappearing hash into two windows.
+
+`Compute`'s own overall result is ordered `(Repository, FirstSessionStartedAt)` — real chronological
+order, not by `FirstSessionId` text. A real defect (flagged in PR #108, fixed as a follow-up):
+session ids are opaque, random UUIDs in the reference corpus, so an earlier version that sorted by
+`FirstSessionId` produced an order with no relationship to time — `RuleSetVersionAdjacency.
+RequireAdjacentPair` (below) inherited the same bug, and a real chronologically-adjacent pair in this
+corpus could be refused as non-adjacent purely because their UUIDs did not happen to sort next to
+each other (confirmed against the live corpus: 19 of 22 real consecutive pairs were wrongly refused
+before this fix). `RulesInventory.ChronologicalVersions` no longer needs its own workaround for this
+either — see its own doc comment.
 
 ### The version hash is order-insensitive over blocks, order-preserving within one
 
@@ -644,15 +655,29 @@ and one hash — the same `RuleSetVersionId` `RuleSetVersioning` produces — so
 first and cannot construct a figure across an edit even by accident, mirroring how `HookFailureCounts`
 makes a bare denominator uncompilable rather than merely undocumented.
 
-### `RuleSetVersionAdjacency` orders by `FirstSessionId`, not by insertion order
+### `RuleSetVersionAdjacency` orders by `FirstSessionStartedAt`, not by insertion order or session id text
 
 FR-39's refusal needs "nothing sits between them" to mean something for whatever order a caller
 happens to hand `RuleSetVersioning.Compute`'s own output in — that method already sorts its overall
-result by `(Repository, FirstSessionId)`, but a caller filtering or recombining versions from
+result by `(Repository, FirstSessionStartedAt)`, but a caller filtering or recombining versions from
 several calls could hand `RequireAdjacentPair` a list in any order. `RequireAdjacentPair`
-re-orders the repository's own versions by `FirstSessionId` (`StringComparer.Ordinal`, the same
-comparer `RuleSetVersioning.Compute` itself uses) before locating either requested hash, so
-adjacency is never a fact about the order two versions happened to arrive in.
+re-orders the repository's own versions by `FirstSessionStartedAt` (`StringComparer.Ordinal`, the
+same comparer `RuleSetVersioning.Compute` itself uses — ISO-8601 timestamps sort correctly under it,
+the same property `Data.Execution.ToolCall.StartedAt` already relies on) before locating either
+requested hash, so adjacency is never a fact about the order two versions happened to arrive in.
+
+An earlier version of this method (through PR #108) re-ordered by `FirstSessionId` instead — the
+session id itself, not its start time. That is a real, opaque identifier (a random UUID in the
+reference corpus) with no ordering meaning of its own, so "adjacent per that re-sort" quietly stopped
+meaning "chronologically next": a real pair of chronological neighbours could land anywhere relative
+to each other once re-sorted by UUID text, and `RequireAdjacentPair` would refuse them as non-adjacent
+purely on that coincidence. Confirmed against the live corpus before and after this fix: of the 22
+real consecutive rule-set-version pairs in the dominant repository, 19 answered
+`NonAdjacentRuleSetVersionsException` (404 through `/api/monitor-comparison`) under the old
+`FirstSessionId`-text ordering — 17 of those correctly succeed under this one, and the remaining 2
+still answer 404 either way, confirmed unrelated to adjacency (no `PreferAOverB` statement to compare
+in the `after` version, `Api.CLAUDE.md`'s own `GetMonitorComparison` remarks — this early return
+happens before `RequireAdjacentPair` is ever called).
 
 ### The refusal carries the full `RuleSetVersion`, not just the id that failed
 

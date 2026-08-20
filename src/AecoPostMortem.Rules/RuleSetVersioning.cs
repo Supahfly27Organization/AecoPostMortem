@@ -32,6 +32,7 @@ public static class RuleSetVersioning
                 {
                     Id = new RuleSetVersionId { Repository = repositoryGroup.Key, Hash = hashGroup.Key },
                     FirstSessionId = members[0].Session.SessionId,
+                    FirstSessionStartedAt = members[0].Session.StartedAt,
                     LastSessionId = members[^1].Session.SessionId,
                     SessionCount = members.Length,
                 });
@@ -40,7 +41,7 @@ public static class RuleSetVersioning
 
         return versions
             .OrderBy(version => version.Repository, StringComparer.Ordinal)
-            .ThenBy(version => version.FirstSessionId, StringComparer.Ordinal)
+            .ThenBy(version => version.FirstSessionStartedAt, StringComparer.Ordinal)
             .ToArray();
     }
 }

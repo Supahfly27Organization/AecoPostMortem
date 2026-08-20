@@ -17,6 +17,7 @@ public sealed class MonitorComparisonTests
     {
         Id = new RuleSetVersionId { Repository = "supahfly27/UpFront", Hash = hash },
         FirstSessionId = firstSessionId,
+        FirstSessionStartedAt = firstSessionId,
         LastSessionId = firstSessionId,
         SessionCount = sessionCount,
     };

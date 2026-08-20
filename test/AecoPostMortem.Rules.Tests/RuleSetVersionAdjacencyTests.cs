@@ -10,13 +10,16 @@ namespace AecoPostMortem.Rules.Tests;
 /// </summary>
 public sealed class RuleSetVersionAdjacencyTests
 {
-    static RuleSetVersion Version(string repository, string hash, string firstSessionId, int sessionCount) => new()
-    {
-        Id = new RuleSetVersionId { Repository = repository, Hash = hash },
-        FirstSessionId = firstSessionId,
-        LastSessionId = firstSessionId,
-        SessionCount = sessionCount,
-    };
+    static RuleSetVersion Version(
+        string repository, string hash, string firstSessionId, int sessionCount, string? startedAt = null) =>
+        new()
+        {
+            Id = new RuleSetVersionId { Repository = repository, Hash = hash },
+            FirstSessionId = firstSessionId,
+            FirstSessionStartedAt = startedAt ?? firstSessionId,
+            LastSessionId = firstSessionId,
+            SessionCount = sessionCount,
+        };
 
     [Fact]
     public void Two_adjacent_versions_are_returned_as_before_and_after()
@@ -84,6 +87,28 @@ public sealed class RuleSetVersionAdjacencyTests
                 versions,
                 new RuleSetVersionId { Repository = "repo-a", Hash = "hash-1" },
                 new RuleSetVersionId { Repository = "repo-a", Hash = "hash-unknown" }));
+    }
+
+    [Fact]
+    public void Adjacency_is_determined_by_real_start_time_not_by_session_id_text()
+    {
+        // hash-2's own FirstSessionId ("aaa") sorts before hash-1's ("zzz") under ordinal string
+        // comparison, but hash-1 genuinely started first in time — RequireAdjacentPair must order by
+        // FirstSessionStartedAt, not by the opaque session id text, or this pair (real chronological
+        // neighbours) would be refused as non-adjacent.
+        RuleSetVersion[] versions =
+        [
+            Version("repo-a", "hash-1", firstSessionId: "zzz", sessionCount: 3, startedAt: "2026-01-01T00:00:00Z"),
+            Version("repo-a", "hash-2", firstSessionId: "aaa", sessionCount: 4, startedAt: "2026-01-05T00:00:00Z"),
+        ];
+
+        var (before, after) = RuleSetVersionAdjacency.RequireAdjacentPair(
+            versions,
+            new RuleSetVersionId { Repository = "repo-a", Hash = "hash-1" },
+            new RuleSetVersionId { Repository = "repo-a", Hash = "hash-2" });
+
+        Assert.Equal("hash-1", before.Hash);
+        Assert.Equal("hash-2", after.Hash);
     }
 
     [Fact]

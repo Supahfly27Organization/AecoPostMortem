@@ -819,13 +819,15 @@ Verified against the live 35-session reference corpus, real hashes end to end: a
 ("prefer specific files over entire directories") both operands `unresolved` — a null percentage on
 each side, honestly, since neither operand names anything `OperandResolver` can match against a real
 tool. A non-adjacent real pair (one version apart) answers 404, matching
-`NonAdjacentRuleSetVersionsException`'s own refusal. **A real defect surfaced by this exercise, not
-introduced by it**: `RuleSetVersionAdjacency.RequireAdjacentPair`'s own ordering — `FirstSessionId`
-under ordinal string comparison — has no relationship to chronological order once session ids are
-random UUIDs (this corpus' own shape), so "adjacent" per that primitive is not the same as
-"chronologically next" in practice; querying the corpus' own `availableVersions` (chronologically
-ordered) two entries apart in that list answered 404 (non-adjacent per the ordinal check) even though
-they are chronological neighbours. This is pre-existing behaviour from S-35/issue #43, unrelated to
-and unmodified by this wiring — flagged to the user as a follow-up to scope separately, not fixed
-here without going through this repo's own brainstorming/approval step for a change to already-shipped,
-tested code.
+`NonAdjacentRuleSetVersionsException`'s own refusal. **A real defect surfaced by this exercise was
+fixed as a follow-up, scoped and approved separately from this wiring**: `RuleSetVersionAdjacency.
+RequireAdjacentPair`'s own ordering — `FirstSessionId` under ordinal string comparison — had no
+relationship to chronological order once session ids are random UUIDs (this corpus' own shape), so
+"adjacent" per that primitive was not the same as "chronologically next" in practice; querying the
+corpus' own `availableVersions` (chronologically ordered) two entries apart in that list answered 404
+(non-adjacent per the ordinal check) even though they were chronological neighbours. `Rules.
+RuleSetVersion.FirstSessionStartedAt` (`Rules/CLAUDE.md`'s own remarks) is the fix: both
+`RuleSetVersioning.Compute`'s own overall ordering and `RequireAdjacentPair`'s re-sort now use that
+field instead of `FirstSessionId` text. Confirmed against the live corpus, before and after: of 22
+real consecutive version pairs in the dominant repository, 17 flipped from wrongly-refused (404) to
+correctly succeeding.

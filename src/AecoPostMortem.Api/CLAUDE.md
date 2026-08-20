@@ -6,7 +6,7 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General` and `FindingEnvelope.Adherence`, and the `From`/`FromAdherence` factories that assemble them from a `Finding` |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
@@ -36,7 +36,7 @@ re-deriving them from RAW in this project.
 
 ## Non-obvious decisions
 
-### `FindingEnvelope` is two closed shapes, not one type with a nullable resolution
+### `FindingEnvelope` is three closed shapes, not one type with a nullable resolution
 
 `Finding.Resolution` is nullable because only adherence classes carry one (FR-33). The response
 envelope makes that distinction structural rather than repeating the nullable field: `General` has no
@@ -47,10 +47,41 @@ therefore lives here, structurally, at build time; `S-24` is the story that exer
 behaviour at the API boundary — this contract only has to make the bare figure unrepresentable, not
 implement the refusal itself.
 
-Both shapes derive from `FindingEnvelope` through a private constructor, so nothing outside this file
-can add a third shape — the same closed-hierarchy trick `SuggestionEnvelope` uses. `[JsonPolymorphic]`
-/ `[JsonDerivedType]` carry a `"kind"` discriminator (`"general"` / `"adherence"`) so a client can tell
-the two apart without inspecting which optional fields happen to be present.
+All three shapes derive from `FindingEnvelope` through a private constructor, so nothing outside this
+file can add a fourth shape — the same closed-hierarchy trick `SuggestionEnvelope` uses.
+`[JsonPolymorphic]` / `[JsonDerivedType]` carry a `"kind"` discriminator (`"general"` / `"adherence"`
+/ `"baseRate"`) so a client can tell the shapes apart without inspecting which optional fields happen
+to be present.
+
+### `FindingEnvelope.BaseRate` labels a conditional rule's figure, and cannot be mistaken for a resolved one (FR-44, issue #41)
+
+A conditional rule — the parallel-tool-calling rule's worked example: a measured 43.6% single-call
+rate across 7,449 tool-issuing messages, whose *availability of a second independent call* was never
+measured — is not a violation rate, and PRD §3.9 names presenting it as one as the exact failure to
+avoid. `BaseRate` structurally cannot carry `Resolution` or `RuleVersion` (same as `General` — a base
+rate is not a resolved adherence percentage FR-33 could attach a layer to), and instead carries a
+`required string UnevaluatedCondition` stating what the logs could not check. Assembling one without
+that condition is the same CS9035 compile error `Adherence` gives for its own two required fields —
+Scenario 1's "the unevaluated condition is stated" is therefore not optional prose a caller could
+forget to add.
+
+Scenario 2 ("A base rate is never ranked as a violation") is deliberately *not* enforced by excluding
+base-rate findings from `ProcessDigest`'s ranking — a base rate can still touch more sessions than a
+measured violation and rank above it (`DigestEnvelopeTests.A_base_rate_item_ranked_above_a_measured_
+violation_still_serialises_a_distinct_kind`). What FR-44 requires is that it never *renders* as one:
+the `"baseRate"` wire discriminator is the visual/structural distinction, always different from
+`"adherence"` regardless of rank — the same mechanism `DigestEnvelope.From`'s per-finding mapper
+already had to support for `Adherence` (FR-33), reused here rather than a second special case.
+
+`FromBaseRate(Finding, string unevaluatedCondition)` follows `FromAdherence`'s own precedent:
+`unevaluatedCondition` is a required parameter, not read off the `Finding` (which has no field for
+it — the same reasoning `FromAdherence` gives for taking `resolution`/`ruleVersion` as parameters
+rather than trusting `Finding.Resolution` alone). `SampleConditionalRuleFinding` in both
+`FindingEnvelopeTests` and `DigestEnvelopeTests` gives the finding `Provenance.Inferred`, not
+`Observed`: the message count itself is a plain fact, but treating it as bearing on the rule at all
+assumes the unmeasured condition held, the same reasoning FR-48 gives for labelling the
+MCP-unreliability-causes-disobedience hypothesis Inferred even though its two failure rates are each
+Observed on their own.
 
 ### `SuggestionEnvelope` makes "no suggestion" a value, not an absence
 

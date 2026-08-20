@@ -23,6 +23,9 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SessionTokenFigures.cs` | FR-24 (S-11, issue #20): reads `Session`'s own token fields into the masthead's token-totals contract — not a `Finding`, no rule adherence involved — closed to `Observed` and `SessionTotalsNotRecorded` |
 | `AbortedTurnFinding.cs` | FR-18 (S-16, issue #28): reads `AecoPostMortem.Data.Execution.Turn` rows, calls `AecoPostMortem.Rules.AbortedTurnCheck`, and writes one `Finding` per aborted turn — never grouped — plus a `CheckRegistryEntry` |
 | `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
+| `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
+| `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
+| `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
 | `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
 
 ## References
@@ -70,6 +73,14 @@ supply once that ETL exists, the same way `ToolCallOutcome` is reused directly b
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
 ingestion. See `AecoPostMortem.Ingestion/CLAUDE.md`.
+
+`ToolFailureClusterFinding` (issue #51, S-40) is the second caller of `FailedToolCallsCheck`,
+alongside `FailedToolCallsFinding` — both read the identical `ToolFailureRate` result and diverge
+only in what they build from it (`FindingClass.Waste`/`Provenance.Derived` vs.
+`FindingClass.MissingCapability`/`Provenance.Inferred`), which is why this story's own edge case
+says it does not recompute failure rates from scratch. It also uses `Rules.RuleStatement` (FR-26,
+S-19) as the shape a "mandated tool" names the rule that mandates it — no new type duplicates what
+`RuleStatement` already carries (`SourceFile`, `Text`).
 
 ## Non-obvious decisions
 
@@ -331,23 +342,117 @@ match it is contrasted against. This is also what makes the edge case hold witho
 it — an unresolved prompt (`ResultKind` is `null`) renders as its own literal group,
 `"no outcome recorded"`, and can never be merged into a resolved outcome's count by construction.
 
+### `OperatorResponseLog` is append-only, and the guardrail reads its current state, not its full history
+
+`Finding.OperatorResponse` (S-44, issue #23) is the field that already exists for "the operator's
+response" — this story does not add a second, competing response field. What it adds is the piece
+that field alone cannot express: FR-45's edge case says changing a verdict later must not lose the
+earlier one, and a single mutable `OperatorResponse` property has no way to keep both. `Finding`
+itself is also re-derived from RAW on every run (Repo Rule 4) and carries no id, so there is nowhere
+on the domain type to persist a history against even if the field weren't overwritable. The response
+history therefore lives beside `Finding`, keyed by its own `(Class, RecurrenceKey)` identity
+(FR-57): `OperatorResponseLog.Record` only ever appends to `Entries`, `CurrentResponses()` reduces
+that history to the latest entry per finding identity, and `Apply(Finding)` is what makes
+`Finding.OperatorResponse` "meaningfully populated" — it copies the current response onto a finding,
+leaving the field's own default (`Ignored`) alone when the log has no entry for that identity.
+
+`OperatorResponseRecord` captures `Provenance` at the moment of recording rather than reading it back
+off a `Finding` later — Scenario 1 of issue #49 says the outcome is stored "against the finding **and
+its provenance level**", so the level travels with the response, not with a later re-derivation of
+the finding that produced it. `RecordedAt` is a caller-supplied `DateTimeOffset`, not read from a
+clock inside this type, for the same determinism reason `SuggestionRenderer` reads no clock — the
+log's ordering has to be reproducible from its own data, not from when the code happened to run.
+
+`Guardrail.Compute` takes the whole `OperatorResponseLog` and reduces it through
+`CurrentResponses()` before counting — never the raw `Entries` — so a finding whose verdict flipped
+from Rejected to Accepted counts once, as Accepted, toward both figures. Counting every historical
+entry instead would let one operator's indecision on one finding inflate the sample the same way a
+repeated tool-name string match would inflate `FailedToolCallsFinding`'s rate; the guardrail is
+about current judgment, not edit history. "Adjudicated" (PRD §5.4's own word) means
+`Accepted`-or-`Rejected`; `Ignored` — the default for a finding nobody has acted on — is excluded
+from both shares, and both `RejectionShare` and `InferredShare` are `null`, not `0`, when
+`AdjudicatedCount` is zero, matching this project's existing rule that a percentage never appears
+without the count that produced it. `Guardrail.MinimumSampleTarget` (20, PRD §5.4) is carried as a
+fact on the type but not enforced by `Compute` — whether to actually *read* a share below that
+sample is a rendering-layer decision no story has built yet, the same way `RuleCoverageStatus`
+carries only the state Release 1 can populate and leaves the decision about a later state to the
+story that adds it.
+
+No persistence or CLI/API surface is wired to `OperatorResponseLog` yet — like `SessionTokenFigures`
+and `ProcessDigest.Build`, this story publishes the contract the operator-facing "accept/reject/
+ignore" action and the guardrail's rendering will build against; nothing in this repository yet
+writes an `OperatorResponseRecord` from a real operator action or persists `OperatorResponseLog`
+across runs.
+
+### `ToolFailureClusterFinding`'s cross-reference is an already-resolved plain input, not a substring match
+
+Scenario 2 of issue #51 needs to know which tool identity a rule mandates — the same "which real
+tool call does an operand name" question S-23 (issue #37, FR-31's four-layer resolution) exists to
+answer, most confident first: exact tool name, then the logged `mcpServerName` field (never a
+substring — `AecoPostMortem.Data.Execution.ToolCall.McpServerName`/`McpToolName` are already real,
+separate columns for exactly this), then the derived role, then unresolved. S-23 is not merged as
+this story lands, so `MandatedTool` takes the resolved pairing (`ToolIdentity`, the `RuleStatement`
+that mandates it) as a plain input the same way `ToolCallOutcome` already does for a completed call
+— matching this project's established pattern rather than reintroducing a substring match as a
+shortcut, which is the exact failure this story's own edge case names: an earlier 49/15 figure that
+pulled in a different MCP server's tool by matching `search_code` as a substring instead of an exact
+identity (FR-31 layer 2, FR-48). A future caller supplies `MandatedTool` from S-23's resolution once
+it exists, the same way `HookFailureFinding` and `FailedToolCallsFinding` document their own
+not-yet-wired `Data` reads.
+
+The cluster itself matches by the exact same `ToolIdentity` `FailedToolCallsCheck` already grouped
+by (`string.Equals(..., StringComparison.Ordinal)`) — never a substring — and states that convention
+literally as a `matchConvention` evidence item on every cluster (FR-46: "match tool names exactly,
+and state the convention on the table"), the same reasoning `Resolution` gives for why an adherence
+figure can't be served without the layer that produced it.
+
+### A cluster's link to its mandating rule is evidence, not a new cross-finding-reference type
+
+No `RuleAdherenceToolChoice` check exists yet in this project — S-23's operand resolution is what a
+real one would need. "Links to the adherence finding for that rule" (issue #51, Scenario 2) is
+therefore represented the same way `RepeatedFileReadFindingCheck`'s per-session read counts are: free
+-form `EvidenceItem`s (`mandatingRuleSourceFile`, `mandatingRuleText`, `mandatingRuleLinkKind`), never
+a bare pointer or foreign key. The value quoted is exactly the pair a `RuleAdherenceToolChoice`
+finding is identified by once one exists — `FindingClassRegistry` already declares that class's
+recurrence key as "the rule statement" — so a caller can look the real finding up by
+`(FindingClass.RuleAdherenceToolChoice, ruleStatement)` the moment that check lands, without this
+evidence shape needing to change. `mandatingRuleLinkKind = "hypothesis"` makes Scenario 2's own
+wording — "labelled as a hypothesis" — a literal, assertable value rather than something a reader
+has to infer from the finding's `Provenance` alone (even though `Provenance.Inferred` already says
+the same thing at the whole-finding level, per FR-48). A tool no rule mandates carries none of the
+three fields at all — absence in, absence out, the same discipline `SilentCheckEnvelope.From`
+documents for a check the registry has no entry for.
+
+### `MissingCapability`, not `Waste` — the same rate, a different class because it means something different
+
+`ToolFailureClusterFinding` and `FailedToolCallsFinding` both call `FailedToolCallsCheck.Run` and
+read the identical `ToolFailureRate`, but they build two different `Finding`s from it, deliberately:
+`FailedToolCallsFinding` reports the *fact* of the failure (`Provenance.Derived`, `FindingClass.
+Waste` — arithmetic over observed data, no judgment). `ToolFailureClusterFinding` reports the
+*hypothesis* that a high rate makes the server the real problem rather than the rule (`Provenance.
+Inferred`, `FindingClass.MissingCapability` — Epic E8, "the highest-value findings with the weakest
+provenance," PRD Phase D). Two `CheckId`s (`"failed-tool-calls"` vs. `"tool-failure-clusters"`) over
+one shared computation, not one check registered twice.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-six real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+seven real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
 `RepeatedFileReadFindingCheck` (issue #25, FR-15), `FailedToolCallsFinding`
 (`CheckId = "failed-tool-calls"`, FR-16, issue #26), `InterruptionLoadFinding`
 (`CheckId = "interruption-load"`, FR-20, issue #30), `AbortedTurnFinding`
 (`CheckId = "aborted-turn"`, FR-18, issue #28) and `PhaseChurnFinding`
-(`CheckId = "phase-churn"`, FR-19, issue #29) — all `FindingClass.Waste` detection logic. A seventh
-check registers a real id — `malformed-line`, built by
+(`CheckId = "phase-churn"`, FR-19, issue #29) — all `FindingClass.Waste` detection logic — plus
+`ToolFailureClusterFinding` (`CheckId = "tool-failure-clusters"`, FR-46, issue #51), the first
+`FindingClass.MissingCapability` detection logic, reusing `FailedToolCallsCheck` rather than
+recomputing its rate. An eighth check registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
 but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
 real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
 mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the six Waste-class checks is self-contained, but `FindingClassRegistry`'s
-Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
-merging by hand.
+real one. Each of the seven checks is self-contained, but `FindingClassRegistry`'s Waste
+`RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need merging by
+hand.
 
 `ProcessDigest.Build` (issue #44, S-36, FR-41 part 1 of 2) ranks whatever findings are handed to it
 by distinct sessions affected and states the masthead's designed states
@@ -360,6 +465,13 @@ are S-54, not built here.
 `SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract, now consumed by the masthead
 it was published ahead of: `SessionRecording.Build` calls `From(Session)` for
 `SessionMasthead.ContextSize`.
+
+`OperatorResponseLog` and `Guardrail` (issue #49, S-39, FR-45) publish FR-45's recording and PRD
+§5.4's guardrail computation as plain, already-resolved-input types, the same contract-first pattern
+`SessionTokenFigures` and `ProcessDigest.Build` used for their own stories. Exercised directly by
+`OperatorResponseLogTests` and `GuardrailTests`; no CLI command records a real operator action yet,
+no store persists a log across runs, and no `AecoPostMortem.Api` envelope serves a `Guardrail` —
+those are later work this story only makes possible.
 
 `SessionRecording` (issue #15, S-08, FR-21 part 1 of 3) — the masthead and time-ordered tape — has
 landed: `SessionMasthead` states identity, repository, branch, CLI version, elapsed time and the

@@ -28,6 +28,9 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
 | `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
 | `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
+| `RuleShape.cs` | FR-34 (S-25, issue #39): `RuleShapeKind` (the closed five-member shape enum), `RuleShapeMatch` (a statement, its shape, and the operand text lifted from it), `UnmatchedStatementDisposition`/`UnmatchedStatement` (FR-40's two middle inventory statuses, each with a reason), and `RuleShapeMatching` (the partition, with a computed `StatementCount`) |
+| `RuleShapeCatalogue.cs` | FR-34's catalogue itself: `RuleShapeCatalogue.Shapes`, `.TryMatch` and `.MatchAll` — eight phrasing patterns across five shapes, matched in precedence order, with operands read from the matched statement's own text |
+| `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only) and `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows) |
 | `ContradictionCheck.cs` | FR-43 (S-38, issue #47): `ContradictionCandidate` (a pair of statements plus their shared, negation-stripped wording) and `ContradictionCheck.Run` — pairwise keyword-polarity detection over whatever statements the caller hands in, `i < j` only so no statement is ever compared against itself |
 
 ## The invariant
@@ -44,6 +47,19 @@ assertion into a test: a project with no dependencies has a very small surface i
 could hide.
 `The_rules_project_references_no_persistence_assembly` in `test/AecoPostMortem.Containment.Tests`
 enforces it, so adding a reference here fails the build.
+
+**And no name may appear in a literal here** (S-25's second scenario).
+`RulesProjectNamesNothingTests.The_rules_project_uses_only_a_reviewed_vocabulary_in_its_literals`
+extracts every string and character literal in this project and requires every word in them to be on
+`PermittedVocabulary` — an allowlist of English grammar, FR-30's permitted argument field names, and
+regex group names. This is an allowlist for the same reason the reference rule is: a blocklist of
+tool names can only reject the tools this author happened to know, which is the exact assumption
+FR-34 exists to remove. A tool, MCP server or repository name introduces a word that is not grammar,
+and the build fails. Adding a word to that list is the reviewable act the test exists to force.
+`The_rules_project_names_no_repository_the_frozen_corpus_names` is the second half: it reads the
+frozen corpus manifest's own `repository` fields and asserts none appears anywhere in this project's
+source — comments and identifiers included, which the literal scan does not reach. Both were checked
+by mutation: injecting a tool name, an MCP server name and a repository name here fails them.
 
 It takes plain inputs — rule statements as text, the discovered tool vocabulary as a list, call
 counts as numbers — and returns results. `AecoPostMortem.Findings` does the orchestration, reading
@@ -362,6 +378,64 @@ about the input shape, not a loop this check has to remember to run internally. 
 extracts several tool names from one rule statement's own phrasing (S-25's job, not this project's)
 is responsible for producing one `RuleToolMention` per name.
 
+### The catalogue holds shapes, and a shape is grammar — the operands come from the statement
+
+`RuleShapeCatalogue` matches on eight regular expressions across five shapes (`NeverReadPath`,
+`PreferAOverB`, `ToolIsBanned`, `UseAAfterB`, `AlwaysPassParam` — the five FR-34 measured firing).
+Every token in those patterns is an English verb, modal or particle: `never`, `prefer`, `over`,
+`instead of`, `after`, `before`, `always pass`. Nothing in them is a tool, a server or a repository,
+which is why the vocabulary test above can be an allowlist of grammar and still pass. The operand is
+whatever text the statement itself put between the pattern's keywords, so a repository whose rules
+this author never saw is matched by the same five shapes as one they did — that is the whole point
+of FR-34, and `The_catalogue_reproduces_the_measured_floor_of_eight_rules_across_five_shapes` proves
+it against a fictional repository whose tool names did not exist until that test was written.
+
+### Precedence runs most specific to least, and a rejected operand does not consume the statement
+
+Entries are tried in order: path prohibition, explicit comparison, bare prohibition, ordering,
+argument obligation. A statement can satisfy two shapes at once — "do not use A instead of B" is both
+a prohibition and a comparison — and reading it as the comparison it spells out loses less than
+reading it as a ban on the whole phrase. The two `PreferAOverB` entries carry negative lookbehinds
+(`(?<!\bnot\s)`, `(?<!\bnever\s)`) for the opposite case: without them, "do not use A instead of B"
+would be read as recommending A, the exact inverse of what it says.
+
+When an entry's pattern matches but the operand fails the shape's own test — `NeverReadPath` requires
+a path-shaped operand, `ToolIsBanned` requires one that is not — matching moves to that pattern's
+*next* match before moving to the next entry, and out to the inventory only if nothing fits. A
+rejected operand therefore never silently converts a rule into an unmatched statement on the strength
+of a position the statement had already moved past.
+
+### An operand's own full stop is not the sentence's
+
+The operand capture is lazy and bounded by a sentence terminator, and that terminator requires
+whitespace or end-of-input after it (`[.;](?=\s|$)`). Without the lookahead,
+``Never read `src/AecoPostMortem.Data/Migrations/` …`` bounds the operand at the dot inside
+`AecoPostMortem.Data` and yields `src/AecoPostMortem` — a *confident wrong operand*, which S-25's
+edge case names as the failure mode this project must catch by construction rather than by review
+(a wrong operand mapping produces a wrong number, not an obvious failure).
+`An_operand_is_not_truncated_at_a_full_stop_inside_it` covers both a dotted path segment and a
+dotfile; this defect was real and was caught by that test, not by reading the regex.
+
+### A statement matching no shape is dispositioned, never dropped
+
+`MatchAll` partitions rather than filters: every statement handed in leaves as either a
+`RuleShapeMatch` or an `UnmatchedStatement`, and `RuleShapeMatching.StatementCount` is computed from
+the two so it cannot disagree with them. The disposition is FR-40's two middle statuses — a statement
+carrying a normative marker (`never`, `must`, `only`, `required`, …) but matching no shape is
+`CheckableNotBuilt`, one carrying none is `NotCheckable` — and `Reason` is `required`, so there is no
+constructor path that records an unmatched statement without saying why. The marker list is English
+modals, not a list of rules; FR-34's own text permits ordinary grammar and forbids only the three
+kinds of name.
+
+### The catalogue resolves nothing itself
+
+`RuleShapeMatch` carries operand *text*, not tools. Turning that text into tools is
+`OperandResolver.Resolve`/`.ResolveTwoOperands`, against whatever corpus the caller passes in — so
+the two-operand shapes get FR-32's A-wins subtraction for free, and S-26 (FR-35, "this rule names a
+tool your agent does not have") is `Layer == Unresolved` on a matched operand with nothing further
+built here. Keeping resolution out of the catalogue is what lets both stories share one mechanism
+instead of the catalogue growing a second, parallel one.
+
 ### A version's identity is the (repository, hash) pair, groups by hash within chronological order
 
 `RuleSetVersioning.Compute` orders each repository's sessions by `StartedAt` (ordinal, `SessionId`
@@ -445,6 +519,15 @@ that is S-25's job (FR-34, issue #39), not implemented in this project yet. `Rul
 plain-input shape S-25's extraction is expected to produce one of per named tool, the same way this
 project's other checks take an already-resolved plain input rather than doing their own text
 interpretation.
+
+The check-shape catalogue itself (S-25, issue #39, FR-34) has now landed and closes that gap:
+`RuleShapeCatalogue.MatchAll` takes `RuleStatement`s — what `RuleStatementExtractor` already
+produces — and returns the shape each one matched with its operands read from its own text, plus a
+dispositioned entry for every statement that matched none. It is the last piece the invariant needed
+to be *tested* rather than reviewed, because it is the only part of this project that reads rule
+prose at all, and it does so with grammar. Nothing yet feeds a real corpus's extracted statements
+through it, resolves the matched operands against that corpus's tools, or renders FR-40's inventory —
+that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
 seven entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),

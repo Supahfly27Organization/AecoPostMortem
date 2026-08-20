@@ -34,6 +34,28 @@ NORMALIZED/FINDINGS rows from RAW is not implemented yet — that logic lands wi
 stories; today `rebuild` empties the derived tables rather than repopulating them, which is the
 honest behaviour for a RAW that has no reader yet.
 
+### `ingest` writes RAW and the coverage report; it does not populate the derived layer
+
+`CommandRunner.Ingest` resolves the session-state root — the optional positional `[path]` argument
+if given, otherwise `copilotSessionStateRoot` (`serve`'s own default-override parameter, reused
+here) — loads the exclusion list from beside the store actually opened
+(`Path.Combine(store.Folder, ExclusionListSource.FileName)`, not
+`ExclusionListSource.DefaultPath`, so a test store's run never depends on the real machine's own
+`exclusions.json`), and calls `AecoPostMortem.Ingestion.IngestionRun.Run`. The returned
+`CoverageReport` is written to stdout — sessions found/ingested/excluded with reasons, lines
+parsed/skipped, events by type sorted `StringComparer.Ordinal` for a deterministic run-to-run
+diff — which is `ingest`'s whole `CommandSpec.OutputChannel` contract (FR-58, FR-14). A missing
+Copilot root is not a special case here: `SessionDiscovery.Discover` already reports it as zero
+sessions rather than throwing, so the report says so on its own.
+
+This wires FR-1 through FR-7's RAW ingestion, nothing more. `ExecutionRecordBuilder` — the
+NORMALIZED-layer reconstruction (`Turn`/`ToolCall`/`Agent`) — is not called from here; populating
+those tables from RAW is still the separate, larger piece both this command and `rebuild` are
+missing (`AecoPostMortem.Ingestion/CLAUDE.md`'s own Status section names it). `ApiHost.GetSession`
+already reconstructs a session's execution record live from RAW for the Flight Recorder, so the
+product functions today without that table-population step; `rebuild` still only empties the
+derived tables rather than repopulating them.
+
 ### `serve` prints the URL, then blocks — `runHost` is the seam that makes that testable
 
 `CommandRunner.Serve` builds the host (`AecoPostMortem.Api.ApiHost.Build`), writes
@@ -67,10 +89,12 @@ state `ApiHost.Build` already handles (`webRootPath: null`), not a failure. `dot
 ## Status
 
 The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `CommandListing`,
-`CommandRunner`, `Program`), and `purge`, `rebuild` and `serve` are wired. `serve` builds and runs
-the local API and web shell host (`AecoPostMortem.Api.ApiHost`) on a stated default port
-(`CommandRunner.DefaultPort`), overridable with `--port <n>`. Behaviour behind `ingest` still
-arrives in the order its `CommandSpec.ArrivesWith` names.
+`CommandRunner`, `Program`), and all four commands are wired. `serve` builds and runs the local API
+and web shell host (`AecoPostMortem.Api.ApiHost`) on a stated default port
+(`CommandRunner.DefaultPort`), overridable with `--port <n>`. `ingest` persists RAW through
+`IngestionRun.Run` and reports the coverage report; it does not yet populate the NORMALIZED
+derived tables (see the non-obvious decision above) — that wiring is still open for both `ingest`
+and `rebuild`.
 
 ## Playbook — adding a command
 

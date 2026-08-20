@@ -50,6 +50,15 @@ public static class CommandRunner
 
         var command = invocation.Command!;
 
+        if (string.Equals(command.Name, "ingest", StringComparison.Ordinal))
+        {
+            return Ingest(
+                store ?? LocalStore.AtDefaultLocation(),
+                copilotSessionStateRoot ?? CopilotSourceLocation.DefaultSessionStateRoot,
+                invocation,
+                stdout);
+        }
+
         if (string.Equals(command.Name, "purge", StringComparison.Ordinal))
         {
             return Purge(store ?? LocalStore.AtDefaultLocation(), stdout);
@@ -103,6 +112,73 @@ public static class CommandRunner
             $"Purged {outcome.Deleted.Count} file(s), {outcome.BytesReclaimed:N0} bytes."));
 
         return Success;
+    }
+
+    /// <summary>
+    /// FR-58/FR-14: reads the Copilot session-state root — an optional positional path
+    /// (<see cref="CommandSpec.Arguments"/>'s <c>"[path]"</c>) overrides the stated default the same
+    /// way <c>serve</c>'s own <paramref name="copilotSessionStateRoot"/> does — through
+    /// <see cref="IngestionRun.Run"/> and writes the resulting <see cref="CoverageReport"/> to
+    /// stdout, <c>ingest</c>'s own <see cref="CommandSpec.OutputChannel"/>. The exclusion list is
+    /// loaded from beside the store actually being opened (<see cref="LocalStore.Folder"/>), not
+    /// from the hard-coded default folder <see cref="ExclusionListSource.DefaultPath"/> resolves to
+    /// — so a test store's run never depends on whatever exclusions the real machine has configured,
+    /// the same isolation <paramref name="store"/> and <paramref name="copilotSessionStateRoot"/>
+    /// already give the rest of this command's dependencies.
+    /// </summary>
+    static int Ingest(
+        LocalStore store,
+        string copilotSessionStateRoot,
+        ParsedInvocation invocation,
+        TextWriter stdout)
+    {
+        var sessionStateRoot = invocation.Arguments.Count > 0
+            ? invocation.Arguments[0]
+            : copilotSessionStateRoot;
+
+        var excludedRoots = ExclusionListSource.Load(
+            Path.Combine(store.Folder, ExclusionListSource.FileName));
+
+        using var context = store.Open();
+
+        var report = IngestionRun.Run(context, sessionStateRoot, excludedRoots);
+
+        WriteCoverageReport(report, stdout);
+
+        return Success;
+    }
+
+    static void WriteCoverageReport(CoverageReport report, TextWriter stdout)
+    {
+        stdout.WriteLine(string.Create(
+            CultureInfo.InvariantCulture, $"Sessions found: {report.SessionsFound}"));
+        stdout.WriteLine(string.Create(
+            CultureInfo.InvariantCulture, $"Sessions ingested: {report.SessionsIngested}"));
+        stdout.WriteLine(string.Create(
+            CultureInfo.InvariantCulture, $"Sessions excluded: {report.SessionsExcluded.Count}"));
+
+        foreach (var excluded in report.SessionsExcluded)
+        {
+            stdout.WriteLine($"  {excluded.SessionId}: {excluded.Reason}");
+        }
+
+        stdout.WriteLine(string.Create(
+            CultureInfo.InvariantCulture, $"Lines parsed: {report.LinesParsed}"));
+        stdout.WriteLine(string.Create(
+            CultureInfo.InvariantCulture, $"Lines skipped: {report.LinesSkipped}"));
+
+        stdout.WriteLine("Events by type:");
+
+        if (report.EventsByType.Count == 0)
+        {
+            stdout.WriteLine("  none");
+        }
+
+        foreach (var eventType in report.EventsByType.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            stdout.WriteLine(string.Create(
+                CultureInfo.InvariantCulture, $"  {eventType.Key}: {eventType.Value}"));
+        }
     }
 
     /// <summary>

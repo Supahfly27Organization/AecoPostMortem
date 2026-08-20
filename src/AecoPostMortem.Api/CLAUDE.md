@@ -11,7 +11,8 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`) and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` is the same diagnosis without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` and `GetSession` are the same two without a listener |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording` |
 
 ## References
 
@@ -24,6 +25,14 @@ session-state root exists (`Ingestion.SessionDiscovery`, reusing FR-1's own disc
 second `Directory.Exists` check). This is a genuine widening of the "thin host" description below,
 not an oversight — S-48 is one of the stories `FindingEnvelope.cs`'s own doc comment named as
 building "real endpoints," and the app-state endpoint is not a finding endpoint at all.
+
+`ApiHost.GetSession` (S-08) widens the same `Data` reference further: it opens a `PostMortemContext`
+and reads `Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks` directly by session id, then hands
+the plain rows to `Findings.SessionRecording.Build` — the same "read through `Data`, feed `Findings`
+plain inputs" split `Findings/CLAUDE.md` documents for its own checks, just performed here instead of
+inside `Findings` because nothing in `AecoPostMortem.Findings` may query the store on its own. See
+`SessionEnvelope.cs`'s own remarks below for why this reads the *derived* tables rather than
+re-deriving them from RAW in this project.
 
 ## Non-obvious decisions
 
@@ -137,6 +146,49 @@ stay serialisation-agnostic, the same separation `FindingEnvelope`/`SuggestionEn
 rather than an opaque integer for a state whose entire point (S-36's Gherkin) is to be stated in
 words.
 
+### `GetSession` reads the derived tables as they are today — empty — rather than re-deriving from RAW here
+
+`AecoPostMortem.Ingestion.ExecutionRecordBuilder` can rebuild `Turn`/`ToolCall`/`Agent` (not
+`Skill`/`Hook`, which it does not parse) from a session's `RawEvent`s, but nothing in this
+repository yet writes any of the six shapes `GetSession` needs into the store at ingest time
+(`AecoPostMortem.Ingestion/CLAUDE.md`, "not yet wired into the store"). Two options existed: have
+this endpoint replay RAW through `ExecutionRecordBuilder` itself, or read the already-mapped but
+still-empty `Data.Execution` tables and let a later story's writer populate them. This project took
+the second path — `GetSession` queries `context.Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks`
+exactly the way it would once a writer exists, rather than duplicating a second, partial (no
+`Skill`/`Hook`) reconstruction path inside `Api` that the eventual ETL story would have to reconcile
+with or replace. `SessionRouteTests` seeds those tables directly through `PostMortemContext` — the
+same stand-in `OwnershipTests` (`AecoPostMortem.Data.Tests`) already uses — to exercise the read path
+ahead of the writer that will populate it for real.
+
+### `SessionTokenFiguresEnvelope` closes the same gap `SuggestionEnvelope` closed for FR-56
+
+`Findings.SessionTokenFigures` was published (S-11, issue #20) ahead of anything that would render
+it, deliberately left unwrapped by any envelope until "S-08's masthead is the story that will call
+`From` and render its two states" (`Findings/CLAUDE.md`). This is that story: `SessionTokenFiguresEnvelope`
+is a closed two-shape union behind a private constructor — `Observed` and `NotRecorded` — the same
+`[JsonPolymorphic]`/`[JsonDerivedType]` mechanism `SuggestionEnvelope` uses, so "context size at end"
+is never a nullable field a client could misread as zero.
+
+### `SessionMastheadEnvelope.ElapsedMs`/`SessionTapeStepEnvelope.OffsetMs` carry milliseconds, not a serialised `TimeSpan`
+
+The domain layer (`Findings.SessionMasthead.Elapsed`, `SessionTapeStep.Offset`) uses `TimeSpan`;
+the envelope converts both to `long`/`long?` milliseconds instead of letting `System.Text.Json`
+serialise `TimeSpan` directly, so a client reads a plain number rather than needing to agree with
+the server on a `TimeSpan` text format. `DateTimeOffset` (`SessionTapeStepEnvelope.Timestamp`) is
+left as-is — `MastheadEnvelope.SpanStart`/`SpanEnd` already establish that this type serialises
+losslessly and needs no format agreement of its own.
+
+### `SessionTapeStepEnvelope.Kind` and `OwnerKind` get their camelCase wire form from the global converter, not a per-property override
+
+Unlike `MastheadEnvelope.RuleCoverage`/`DigestEnvelope.State` (which opt out of the global naming
+policy via an explicit, un-parameterised `[JsonConverter(typeof(JsonStringEnumConverter))]` so a
+client reads the exact word, e.g. `"NotYetAnalyzed"`), `SessionTapeStepKind` and
+`AecoPostMortem.Data.Execution.OwnerKind` carry no such override — there is no "must read as this
+exact English word" requirement here, so both fall through to the
+`JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` `ApiHost.Build` already registers globally,
+the same as `AppStateKind`. A step reads `"toolCall"`/`"mcpCall"`/etc., never `"ToolCall"`.
+
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
@@ -145,3 +197,10 @@ endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds are the first rea
 project ships: `serve` (`AecoPostMortem.Cli`) builds and runs this host, and `web/`'s
 `AppStateBanner` is the client that reads it. No finding endpoint exists yet — that arrives with the
 stories `FindingEnvelope.cs` already named.
+
+`GET /api/sessions/{sessionId}` (`SessionEnvelope.cs`, `ApiHost.GetSession`, S-08, issue #15) is the
+second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by
+`Findings.SessionRecording.Build`. `web/src/routes/SessionPage.tsx` is the client. Returns 404 for a
+session id the store carries no `Session` row for; a session with rows but no steps still serves its
+masthead with an empty `Steps` list. Finding chips (a different data path — findings joined per
+session) and the inspector are S-52/S-53, not served here.

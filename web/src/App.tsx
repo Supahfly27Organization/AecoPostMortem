@@ -13,6 +13,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<DigestPage />} />
         <Route path="sessions" element={<SessionPage />} />
+        <Route path="sessions/:sessionId" element={<SessionPage />} />
         <Route path="rules" element={<RulesInventoryPage />} />
       </Route>
     </Routes>

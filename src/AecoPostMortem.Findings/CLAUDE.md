@@ -15,7 +15,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
-| `Digest.cs` | FR-41 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking |
+| `Digest.cs` | FR-41 part 1 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking; FR-41 part 2 (issue #45, S-54): `RepositoryScope`, carried on `Masthead` |
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
@@ -190,6 +190,21 @@ corpus that is both mid-ingest and has no check registered yet still reads `Inco
 urgent, more specific claim wins rather than the two states being merged or left to declare in
 whichever order a caller happens to check them.
 
+### `RepositoryScope` is another already-resolved plain input, not a live filter
+
+FR-41 part 2 (issue #45, S-54) and PRD Part 8 Q5: the digest shows one repository at a time,
+selectable, because ranking findings across repositories would mix rule sets that were never in
+force together (FR-28's reasoning applied to this surface). `RepositoryScope` follows the exact
+shape `MastheadCounters` already established for "already resolved, not computed here" — the caller
+of `ProcessDigest.Build` has already filtered `findings` to one repository before calling it;
+`RepositoryScope` only states which repository that was (`SelectedRepository`) and which others
+exist to select (`AvailableRepositories`), for a UI selector to render. It does not itself re-filter
+`RankedFindings` when more than one repository is available — that is the seam this story's own edge
+case names for a later cross-repository story, not a filtering mechanism to build here.
+`ProcessDigestStructureTests`'s allowlist includes `RepositoryScope` for the same reason it already
+includes `MastheadCounters`: it is a plain, already-resolved data type, so admitting it does not
+weaken the "no live query" guarantee that test proves.
+
 ### `RuleCoverageStatus` has exactly one member today, on purpose
 
 FR-26 and FR-40 (rule extraction, the coverage bar's population) are Release 2. Rather than a
@@ -317,13 +332,17 @@ real one. Each of the six Waste-class checks is self-contained, but `FindingClas
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.
 
-`ProcessDigest.Build` (issue #44, S-36, FR-41 part 1 of 2) ranks whatever findings are handed to it
+`ProcessDigest.Build` (issue #44, S-36, FR-41 part 1) ranks whatever findings are handed to it
 by distinct sessions affected and states the masthead's designed states
 (`NotYetAnalyzed`/`Incomplete`/`Analyzed`, `RuleCoverageStatus.NotYetAnalyzed`). It takes
 `MastheadCounters` as a plain input — nothing in this repository yet writes those counters at ingest
 time, the same not-yet-wired gap `HookFailureFinding` and `FailedToolCallsFinding` document for their
-own `Data` reads. Row expansion, the recurrence strip and the repository selector (FR-41 part 2 of 2)
-are S-54, not built here.
+own `Data` reads. `RepositoryScope` (issue #45, S-54, FR-41 part 2) is now a required parameter too,
+the same already-resolved-plain-input shape. Row expansion and the recurrence strip themselves needed
+no new domain type — `Finding.Evidence`, `.Provenance`, `.Recurrence` and `.Suggestion` (via
+`FindingEnvelope`/`SuggestionEnvelope` in `AecoPostMortem.Api`) already carried everything FR-41 part
+2's Scenarios 1, 2 and 4 needed; `web/src/digest/` (`web/CLAUDE.md`) is where that data is actually
+rendered as an expandable row.
 
 `SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract published ahead of the masthead
 that will consume it — S-08 (FR-21) is Must Have, not yet built, and this story only depended on the

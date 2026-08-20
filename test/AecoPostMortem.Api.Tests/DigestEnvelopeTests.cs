@@ -47,13 +47,20 @@ public sealed class DigestEnvelopeTests
         ],
     };
 
+    static RepositoryScope SingleRepoScope() => new()
+    {
+        SelectedRepository = "aeco/AecoPostMortem",
+        AvailableRepositories = ["aeco/AecoPostMortem"],
+    };
+
     [Fact]
     public void From_carries_the_digest_state_and_maps_every_ranked_finding_in_order()
     {
         var digest = ProcessDigest.Build(
             Counters(),
             RanCleanRegistry(),
-            [WasteFinding("src/rare.cs", "session-1"), WasteFinding("src/hot.cs", "session-1", "session-2")]);
+            [WasteFinding("src/rare.cs", "session-1"), WasteFinding("src/hot.cs", "session-1", "session-2")],
+            SingleRepoScope());
 
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 
@@ -67,7 +74,7 @@ public sealed class DigestEnvelopeTests
     [Fact]
     public void The_masthead_envelope_carries_sessions_span_repositories_events_tool_calls_and_rule_coverage()
     {
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
 
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 
@@ -81,9 +88,29 @@ public sealed class DigestEnvelopeTests
     }
 
     [Fact]
+    public void The_masthead_envelope_carries_the_selected_repository_and_the_ones_available_to_switch_to()
+    {
+        var scope = new RepositoryScope
+        {
+            SelectedRepository = "aeco/AecoPostMortem",
+            AvailableRepositories = ["aeco/AecoLedger", "aeco/AecoPostMortem", "aeco/Upfront"],
+        };
+
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], scope);
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        Assert.Equal("aeco/AecoPostMortem", envelope.Masthead.RepositoryScope.SelectedRepository);
+        Assert.Equal(
+            ["aeco/AecoLedger", "aeco/AecoPostMortem", "aeco/Upfront"],
+            envelope.Masthead.RepositoryScope.AvailableRepositories);
+    }
+
+    [Fact]
     public void DigestEnvelope_serialises_the_state_and_the_ranked_findings()
     {
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [WasteFinding("src/hot.cs", "session-1")]);
+        var digest = ProcessDigest.Build(
+            Counters(), RanCleanRegistry(), [WasteFinding("src/hot.cs", "session-1")], SingleRepoScope());
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 
         var json = JsonSerializer.Serialize(envelope);
@@ -95,6 +122,29 @@ public sealed class DigestEnvelopeTests
         var masthead = document.RootElement.GetProperty("Masthead");
         Assert.True(masthead.TryGetProperty("SessionCount", out _));
         Assert.Equal("NotYetAnalyzed", masthead.GetProperty("RuleCoverage").GetString());
+        Assert.Equal(
+            "aeco/AecoPostMortem",
+            masthead.GetProperty("RepositoryScope").GetProperty("SelectedRepository").GetString());
+    }
+
+    [Fact]
+    public void A_row_with_no_suggestion_template_still_serialises_an_explicit_absent_suggestion_state()
+    {
+        // Scenario 4: a finding whose class has no suggestion template expands with its evidence and
+        // states that no suggestion is offered — reusing SuggestionEnvelope's existing Absent state
+        // (S-50, issue #13) rather than a new "no suggestion" representation.
+        var noSuggestion = WasteFinding("src/no-template.cs", "session-1");
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [noSuggestion], SingleRepoScope());
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        var row = Assert.Single(envelope.RankedFindings);
+        Assert.IsType<SuggestionEnvelope.AbsentSuggestion>(row.Suggestion);
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+        var suggestion = document.RootElement.GetProperty("RankedFindings")[0].GetProperty("Suggestion");
+        Assert.Equal("absent", suggestion.GetProperty("state").GetString());
     }
 
     [Fact]
@@ -112,7 +162,8 @@ public sealed class DigestEnvelopeTests
                 IngestInProgress = false,
             },
             new CheckRegistry { Entries = [] },
-            []);
+            [],
+            new RepositoryScope { SelectedRepository = null, AvailableRepositories = [] });
 
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 

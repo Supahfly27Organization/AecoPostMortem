@@ -4,6 +4,30 @@ using AecoPostMortem.Findings;
 namespace AecoPostMortem.Api;
 
 /// <summary>
+/// FR-41 part 2 (S-54)'s served repository scope — the wire shape for
+/// <see cref="Findings.RepositoryScope"/>. PRD Part 8 Q5: the digest shows one repository at a time
+/// by default; <see cref="AvailableRepositories"/> is the seam a later cross-repository view
+/// switches through, not that view itself.
+/// </summary>
+public sealed record RepositoryScopeEnvelope
+{
+    public required string? SelectedRepository { get; init; }
+
+    public required IReadOnlyList<string> AvailableRepositories { get; init; }
+
+    public static RepositoryScopeEnvelope From(RepositoryScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new RepositoryScopeEnvelope
+        {
+            SelectedRepository = scope.SelectedRepository,
+            AvailableRepositories = scope.AvailableRepositories,
+        };
+    }
+}
+
+/// <summary>
 /// FR-41's served masthead — the wire shape for <see cref="Findings.Masthead"/>. Enum members
 /// serialise as their name (<see cref="JsonStringEnumConverter"/>) so a client reads
 /// <c>"NotYetAnalyzed"</c> rather than an opaque ordinal for a state whose entire point is to be
@@ -26,6 +50,8 @@ public sealed record MastheadEnvelope
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required RuleCoverageStatus RuleCoverage { get; init; }
 
+    public required RepositoryScopeEnvelope RepositoryScope { get; init; }
+
     public static MastheadEnvelope From(Masthead masthead)
     {
         ArgumentNullException.ThrowIfNull(masthead);
@@ -39,6 +65,7 @@ public sealed record MastheadEnvelope
             EventCount = masthead.Counters.EventCount,
             ToolCallCount = masthead.Counters.ToolCallCount,
             RuleCoverage = masthead.RuleCoverage,
+            RepositoryScope = RepositoryScopeEnvelope.From(masthead.RepositoryScope),
         };
     }
 }

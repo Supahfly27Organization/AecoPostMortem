@@ -9,7 +9,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General` and `FindingEnvelope.Adherence`, and the `From`/`FromAdherence` factories that assemble them from a `Finding` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
-| `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
+| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`) and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` is the same diagnosis without a listener |
 
@@ -90,6 +90,15 @@ is the first real endpoint this project ships, and it does not need the finding 
 `SilentCheckEnvelope.From` follows the same plain-input pattern — a `CheckRegistry` in, a projected
 list out — nothing here reads through `Data` or calls into `Rules` for it either.
 
+### `RepositoryScopeEnvelope` mirrors `RepositoryScope` exactly — a plain projection, not a filter
+
+FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope.From` copies `SelectedRepository` and
+`AvailableRepositories` straight across, the same shape `MastheadEnvelope.From` already uses for
+every other masthead field. It does not re-derive or re-filter anything — `DigestEnvelope.From`'s
+`RankedFindings` mapping is untouched by which repository is selected, because the caller of
+`ProcessDigest.Build` (`AecoPostMortem.Findings/CLAUDE.md`) already scoped `findings` to one
+repository before this envelope is ever assembled.
+
 ### `ApiHost.Build` returns an unstarted `WebApplication`
 
 The caller (`AecoPostMortem.Cli`'s `serve` command) decides when to start it and how long to run
@@ -140,8 +149,12 @@ words.
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
-`DigestEnvelope`, `MastheadEnvelope`) — still unconsumed by any finding endpoint. The app-state
-endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds are the first real endpoint this
-project ships: `serve` (`AecoPostMortem.Cli`) builds and runs this host, and `web/`'s
-`AppStateBanner` is the client that reads it. No finding endpoint exists yet — that arrives with the
-stories `FindingEnvelope.cs` already named.
+`DigestEnvelope`, `MastheadEnvelope`, `RepositoryScopeEnvelope`) — still unconsumed by any real
+endpoint in `ApiHost`. The app-state endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds
+are the first (and still only) real endpoint this project ships: `serve` (`AecoPostMortem.Cli`)
+builds and runs this host, and `web/`'s `AppStateBanner` is the client that reads it. No finding or
+digest endpoint exists yet — `web/`'s `DigestPage` (S-54, issue #45) already targets `/api/digest`
+ahead of it, the same seam `AppStateBanner` used for `/api/app-state` before S-48 wired it, but
+`ApiHost.Build` does not `MapGet` it: assembling a real `ProcessDigest` from the live store (a
+`MastheadCounters` populated at ingest, a `CheckRegistry`, and every `Finding` from every check
+orchestrator) is later, unwired work no story has done yet.

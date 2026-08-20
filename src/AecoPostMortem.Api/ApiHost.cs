@@ -212,11 +212,11 @@ public static class ApiHost
         var agents = context.Agents.ToList();
 
         var repositoryScope = BuildRepositoryScope(sessions);
-        var scopedSessionIds = (repositoryScope.SelectedRepository is null
-                ? sessions
-                : sessions.Where(session => session.Repository == repositoryScope.SelectedRepository))
-            .Select(session => session.SessionId)
-            .ToHashSet(StringComparer.Ordinal);
+        // repositoryScope.SessionIds is already exactly this scope's session ids (BuildRepositoryScope
+        // computes both from the same selected-repository filter) — reusing it here, rather than
+        // re-filtering sessions a second time, is what guarantees the served session-strip positions
+        // and the sessions every check below runs over can never disagree.
+        var scopedSessionIds = repositoryScope.SessionIds.ToHashSet(StringComparer.Ordinal);
         var scopedSessions = sessions.Where(session => scopedSessionIds.Contains(session.SessionId)).ToList();
 
         var scopedToolCalls = toolCalls.Where(call => scopedSessionIds.Contains(call.SessionId)).ToList();
@@ -353,6 +353,15 @@ public static class ApiHost
     /// 35 sessions) for this default to land on in practice. <see langword="null"/> only when no
     /// session in the store carries a repository at all, matching <see cref="RepositoryScope.SelectedRepository"/>'s
     /// own documented meaning for that value.
+    ///
+    /// <see cref="RepositoryScope.SessionIds"/> is every session in that scope (the selected
+    /// repository, or the whole corpus when none is selected), ordered by the session's own real
+    /// start time — never by session id text, which is a random UUID in the reference corpus and has
+    /// no relationship to arrival order (the same defect PR #112 fixed for rule-set version
+    /// ordering) — tie-broken by session id ordinally for a deterministic total order. This is the
+    /// same session set every check <see cref="GetDigest"/> runs is scoped to
+    /// (<c>scopedSessionIds</c>), computed once here so both a finding's own ranking and the served
+    /// session-strip positions agree on exactly which sessions are "in scope".
     /// </summary>
     static RepositoryScope BuildRepositoryScope(IReadOnlyList<Session> sessions)
     {
@@ -369,12 +378,21 @@ public static class ApiHost
             .Select(group => group.Key)
             .FirstOrDefault();
 
+        var scopedSessions = selected is null
+            ? sessions
+            : sessions.Where(session => session.Repository == selected);
+
         return new RepositoryScope
         {
             SelectedRepository = selected,
             AvailableRepositories = repositories
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(repository => repository, StringComparer.Ordinal)
+                .ToList(),
+            SessionIds = scopedSessions
+                .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
+                .ThenBy(session => session.SessionId, StringComparer.Ordinal)
+                .Select(session => session.SessionId)
                 .ToList(),
         };
     }

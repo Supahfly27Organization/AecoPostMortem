@@ -15,6 +15,12 @@ public sealed record RepositoryScopeEnvelope
 
     public required IReadOnlyList<string> AvailableRepositories { get; init; }
 
+    /// <summary>Mirrors <see cref="Findings.RepositoryScope.SessionIds"/> verbatim — every session id
+    /// in this scope, chronologically ordered. A per-finding session strip needs this: which of the
+    /// scope's own sessions a finding's <see cref="Recurrence.Occurrences"/> touched, and in what
+    /// position, not only how many.</summary>
+    public required IReadOnlyList<string> SessionIds { get; init; }
+
     public static RepositoryScopeEnvelope From(RepositoryScope scope)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -23,6 +29,7 @@ public sealed record RepositoryScopeEnvelope
         {
             SelectedRepository = scope.SelectedRepository,
             AvailableRepositories = scope.AvailableRepositories,
+            SessionIds = scope.SessionIds,
         };
     }
 }

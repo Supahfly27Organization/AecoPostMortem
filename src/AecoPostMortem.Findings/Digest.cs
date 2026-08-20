@@ -87,6 +87,16 @@ public sealed record RepositoryScope
     /// switches through — this type does not itself re-filter <see cref="ProcessDigest.RankedFindings"/>
     /// when more than one is present.</summary>
     public required IReadOnlyList<string> AvailableRepositories { get; init; }
+
+    /// <summary>Every session id in this scope — the same set every check
+    /// <see cref="ProcessDigest.RankedFindings"/> was computed over, so a finding's own
+    /// <see cref="Recurrence.Occurrences"/> is always a subset of this list. Ordered chronologically
+    /// by the session's own real start time, never by session id text (random UUIDs in the reference
+    /// corpus have no relationship to arrival order — the same defect PR #112 fixed for rule-set
+    /// version ordering). This is what a per-finding session strip needs and
+    /// <see cref="Recurrence"/> alone cannot give it: which sessions were *not* touched, and in what
+    /// position, not only which ones were.</summary>
+    public required IReadOnlyList<string> SessionIds { get; init; }
 }
 
 /// <summary>The masthead: <see cref="MastheadCounters"/> plus the rule-coverage bar's current state

@@ -445,6 +445,13 @@ case names for a later cross-repository story, not a filtering mechanism to buil
 includes `MastheadCounters`: it is a plain, already-resolved data type, so admitting it does not
 weaken the "no live query" guarantee that test proves.
 
+Mockup parity item #2 (the per-finding session strip) added a third field the same way: `SessionIds`
+— every session id in this scope, ordered by the session's own real start time
+(`AecoPostMortem.Api/CLAUDE.md`'s `ApiHost.BuildRepositoryScope` does the ordering; this type only
+carries whatever its caller supplies, unchanged). `Recurrence.Occurrences` alone cannot answer "which
+of this scope's own sessions did this finding touch, and in what position" — only which sessions it
+touched — so a strip that lights positions, not just states a count, needed this new field.
+
 ### `InferredFindings` is a separate, deliberately unranked field — not a filter a caller applies
 
 FR-48 (issue #52, S-42) says an Inferred finding is "never ranked beside" an Observed or Derived

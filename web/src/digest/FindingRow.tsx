@@ -3,6 +3,7 @@ import type { FindingEnvelope } from '../api/digest'
 import { AdherenceFigureBlock } from './AdherenceFigureBlock'
 import { ProvenanceBadge } from './ProvenanceBadge'
 import { RecurrenceStrip } from './RecurrenceStrip'
+import { SessionStrip } from './SessionStrip'
 import { SuggestionBlock } from './SuggestionBlock'
 import './FindingRow.css'
 
@@ -17,6 +18,11 @@ import './FindingRow.css'
  * leads the summary at display size rather than annotating it. The full session list is still the
  * expanded `RecurrenceStrip`'s job — the count ranks, the names explain.
  *
+ * Mockup parity item #2: `SessionStrip` joins `sessionsAffected` on the collapsed row for the same
+ * reason — which sessions, in what pattern, is also worth scanning without expanding. `sessionIds`
+ * is the caller's `masthead.repositoryScope.sessionIds` (`DigestPage`), the same session set every
+ * ranked finding was scoped to.
+ *
  * `variant` (FR-48, issue #52, S-42) defaults to `'ranked'`, unchanged from before this prop
  * existed. The digest's own "Judgment calls" section passes `'unranked'` for a
  * `DigestEnvelope.inferredFindings` entry: `Findings/CLAUDE.md` is explicit that an Inferred
@@ -27,9 +33,11 @@ import './FindingRow.css'
  * way, already names every session the finding touched. */
 export function FindingRow({
   finding,
+  sessionIds,
   variant = 'ranked',
 }: {
   finding: FindingEnvelope
+  sessionIds: string[]
   variant?: 'ranked' | 'unranked'
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -51,6 +59,7 @@ export function FindingRow({
           </span>
         )}
         <span className="finding-row__key">{finding.recurrence.key}</span>
+        <SessionStrip sessionIds={sessionIds} occurrences={finding.recurrence.occurrences} />
         <ProvenanceBadge provenance={finding.provenance} />
       </button>
 

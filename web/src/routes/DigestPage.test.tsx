@@ -31,6 +31,7 @@ function digestWith(overrides: Partial<DigestEnvelope> = {}): DigestEnvelope {
       repositoryScope: {
         selectedRepository: 'aeco/AecoPostMortem',
         availableRepositories: ['aeco/AecoLedger', 'aeco/AecoPostMortem', 'aeco/Upfront'],
+        sessionIds: ['session-1', 'session-2', 'session-3'],
       },
     },
     state: 'Analyzed',
@@ -101,6 +102,19 @@ describe('DigestPage', () => {
     const select = await screen.findByRole('combobox', { name: 'Repository' })
     expect(select).toHaveValue('aeco/AecoPostMortem')
     expect(screen.getAllByRole('option')).toHaveLength(3)
+  })
+
+  // Mockup parity item #2: the session strip is threaded from the masthead's own repository
+  // scope down to each row — this is the real, wired path a browser exercises, not just
+  // FindingRow's own unit coverage of the prop in isolation.
+  it('threads the corpus scope down to each row as the session strip', async () => {
+    respondWith(digestWith())
+    render(<DigestPage />)
+
+    const summary = await screen.findByRole('button', { expanded: false })
+    const strip = summary.querySelector('[role="img"]')
+
+    expect(strip).toHaveAttribute('aria-label', '2 of 3 sessions affected')
   })
 
   // Scenario 1: every row carries its evidence and provenance once expanded.

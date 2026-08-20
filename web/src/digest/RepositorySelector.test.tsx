@@ -11,7 +11,11 @@ describe('RepositorySelector', () => {
   it('shows the single default repository when it is the only one in the store', () => {
     render(
       <RepositorySelector
-        scope={{ selectedRepository: 'aeco/AecoPostMortem', availableRepositories: ['aeco/AecoPostMortem'] }}
+        scope={{
+          selectedRepository: 'aeco/AecoPostMortem',
+          availableRepositories: ['aeco/AecoPostMortem'],
+          sessionIds: [],
+        }}
       />,
     )
 
@@ -24,6 +28,7 @@ describe('RepositorySelector', () => {
         scope={{
           selectedRepository: 'aeco/AecoPostMortem',
           availableRepositories: ['aeco/AecoLedger', 'aeco/AecoPostMortem', 'aeco/Upfront'],
+          sessionIds: [],
         }}
       />,
     )
@@ -42,6 +47,7 @@ describe('RepositorySelector', () => {
         scope={{
           selectedRepository: 'aeco/AecoPostMortem',
           availableRepositories: ['aeco/AecoLedger', 'aeco/AecoPostMortem'],
+          sessionIds: [],
         }}
         onSelect={onSelect}
       />,

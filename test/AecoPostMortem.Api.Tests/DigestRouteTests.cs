@@ -279,6 +279,60 @@ public sealed class DigestRouteTests
         }
     }
 
+    /// <summary>Piece 2 of the per-finding session strip (issue tracked in the mockup-parity
+    /// backlog): <c>Masthead.RepositoryScope.SessionIds</c> is what a session strip needs and
+    /// <c>Recurrence</c> alone cannot give it — every session in the currently selected repository,
+    /// in real chronological order, not session id text (random UUIDs here) or insertion order.
+    /// Session ids are deliberately chosen so alphabetical order and chronological order disagree
+    /// (`zz-first` is earliest, `aa-third` is latest) — a regression to sorting by session id text
+    /// (the exact PR #108/#112 defect this ordering convention exists to avoid) would produce the
+    /// reverse of the asserted order, so this test cannot pass by coincidence the way sorting ids
+    /// that already happen to agree both ways could.</summary>
+    [Fact]
+    public async Task The_masthead_serves_the_selected_repositorys_own_sessions_in_real_chronological_order()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("zz-first", "org/majority", "2026-08-16T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("aa-third", "org/majority", "2026-08-16T12:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("mm-second", "org/majority", "2026-08-16T11:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("only-one", "org/minority", "2026-08-16T09:00:00Z"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal("org/majority", envelope!.Masthead.RepositoryScope.SelectedRepository);
+            Assert.Equal(
+                new[] { "zz-first", "mm-second", "aa-third" },
+                envelope.Masthead.RepositoryScope.SessionIds);
+            Assert.DoesNotContain("only-one", envelope.Masthead.RepositoryScope.SessionIds);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    static Session ASessionStartedAt(string sessionId, string repository, string startedAt) => new()
+    {
+        SessionId = sessionId,
+        StartedAt = startedAt,
+        EndedAt = startedAt,
+        CopilotVersion = "0.0.339",
+        EventSchemaVersion = "1",
+        SourceFile = $@"~/.copilot/session-state/{sessionId}/events.jsonl",
+        Cwd = @"C:\repo",
+        Repository = repository,
+    };
+
     static RawEvent SystemMessage(string sessionId, string content, long sequence = 0) => new(
         sessionId,
         sequence,

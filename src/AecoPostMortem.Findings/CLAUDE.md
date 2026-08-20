@@ -28,6 +28,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
 | `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
+| `SubagentAttribution.cs` | FR-49 (S-43, issue #53): `SubagentRuleDisplay` — closed to `Nothing` (the default) or an explicit, caller-stated `AssumedInherited` (always `Provenance.Inferred`, computed not settable) — and `SubagentObservedContext.From(Agent, taskPrompt, sessionSkills)`, the subagent's own spawn description, task prompt and skill invocations, always `Provenance.Observed`. Neither type infers or guesses a rule set; not a `Finding` |
 
 ## References
 
@@ -438,6 +439,42 @@ ignore" action and the guardrail's rendering will build against; nothing in this
 writes an `OperatorResponseRecord` from a real operator action or persists `OperatorResponseLog`
 across runs.
 
+### A subagent's rules are `Nothing` or an explicit `Inferred` assumption — never derived
+
+FR-49 (S-43, issue #53) exists because Copilot's own system prompt carries no agent id: there is no
+event anywhere in RAW this product could quote as "the rules this subagent ran under," unlike a
+session's own rule set (`RuleStatementExtractor`, S-19, which reads real `<custom_instruction>`
+blocks). `SubagentRuleDisplay` is closed to exactly two shapes through a private constructor, the
+same closed-union reasoning `SessionTokenFigures` uses for its own absent state:
+`SubagentRuleDisplay.Nothing` (the default, and the story's own preferred outcome — the edge case
+says showing nothing "is an acceptable, preferred outcome over a labelled guess appearing in the
+digest's ranked list") or `SubagentRuleDisplay.AssumedInherited`, built only from rule statements a
+caller supplies on purpose. Nothing in this type walks `Data.Execution.Agent.ParentAgentId` or any
+other structural link to *derive* an inheritance assumption — that would be exactly the guess the
+edge case forbids ("do not try to infer or guess a subagent's rule set from context"). A future
+caller that wants to assume a subagent inherited its spawning session's own rule set resolves that
+rule set itself (S-19/S-20) and passes it to `AssumedInherited` explicitly; this type only enforces
+that whatever comes out the other side is labelled `Provenance.Inferred` — a computed property, not
+a settable field, so `InheritedRuleSetAssumption` cannot be constructed carrying any other
+provenance (Scenario 1).
+
+### `SubagentObservedContext` is a second, wholly separate contract from the rule-display question
+
+Scenario 2 needs three facts genuinely on record for a subagent — its spawn description, its task
+prompt, its own skill invocations — reported as Observed, never mixed into the same type as the
+rule-display question above (a caller could otherwise be tempted to read "we have Observed context"
+as license to also assert a rule set). `SpawnDescription` reads `Agent.Description` verbatim
+(`subagent.started.data.agentDescription`, S-49) and `SkillInvocations` filters the session's own
+`Skill` rows to `OwnerKind.Agent` with a matching `AgentId` — never a parent's or a sibling's
+invocations, the same "never a parent's" discipline `ExecutionRecordBuilder` documents for
+`ToolCall.TurnId` being `null` on a subagent's own calls. `TaskPrompt` is a plain, caller-supplied
+input rather than read off `Data` directly: no derived entity yet carries the spawning `task` call's
+own prompt argument — `ToolCall` has no `Arguments` column, only `Path` is extracted today
+(`AecoPostMortem.Ingestion/CLAUDE.md`, "arguments is parsed polymorphically") — the same
+not-yet-wired gap `PhaseChurnFinding` documents for its own `DeclaredIntent` input. `Provenance` is
+again a computed property fixed to `Observed`, never settable, so this shape cannot accidentally
+carry any other provenance value.
+
 ### `ToolFailureClusterFinding`'s cross-reference is an already-resolved plain input, not a substring match
 
 Scenario 2 of issue #51 needs to know which tool identity a rule mandates — the same "which real
@@ -545,3 +582,10 @@ step by wall-clock time with its offset from session start, and states plainly w
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
 `web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
 path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+
+`SubagentRuleDisplay` and `SubagentObservedContext` (issue #53, S-43, FR-49) publish the same
+contract-first pattern for a subagent's rules and its own context: no CLI command or
+`AecoPostMortem.Api` envelope serves either yet — that wiring, and whatever caller eventually
+decides to construct an `AssumedInherited` display, are later work (plausibly S-52/S-53's own
+inspector tabs, which already own the session-page rendering this would slot into) this story only
+makes possible.

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AecoPostMortem.Data;
@@ -248,10 +249,10 @@ public static class ApiHost
             SessionCount = sessions.Count,
             SpanStart = sessions.Count == 0
                 ? null
-                : sessions.Select(session => DateTimeOffset.Parse(session.StartedAt)).Min(),
+                : sessions.Select(session => ParseTimestamp(session.StartedAt)).Min(),
             SpanEnd = sessions.Count == 0
                 ? null
-                : sessions.Select(session => DateTimeOffset.Parse(session.EndedAt ?? session.StartedAt)).Max(),
+                : sessions.Select(session => ParseTimestamp(session.EndedAt ?? session.StartedAt)).Max(),
             RepositoryCount = sessions
                 .Select(session => session.Repository)
                 .Where(repository => repository is not null)
@@ -261,6 +262,14 @@ public static class ApiHost
             ToolCallCount = toolCalls.Count,
             IngestInProgress = false,
         };
+
+    /// <summary>The same culture-invariant, round-trip parse <c>Findings.SessionRecording.ParseTimestamp</c>
+    /// already established for a stored RAW/derived timestamp string — the unqualified
+    /// <c>DateTimeOffset.Parse</c> overload reads <see cref="CultureInfo.CurrentCulture"/>, a real
+    /// portability gap on a codebase whose determinism contract (PRD §3.8) cares about a reproducible
+    /// result regardless of the machine it runs on.</summary>
+    static DateTimeOffset ParseTimestamp(string timestamp) =>
+        DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
     /// <summary>
     /// FR-41 part 2 (S-54)'s default: the repository carrying the most sessions, ties broken

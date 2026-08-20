@@ -57,6 +57,33 @@ public sealed class DeclaredIntentLookupTests
         Assert.Empty(DeclaredIntentLookup.Find("s1", events));
     }
 
+    /// <summary>FR-4's third argument shape (`ToolArguments.Kind`) is excluded rather than guessed
+    /// at — a `report_intent` call is never measured to carry it in the real corpus, but the parser
+    /// still has to fall through cleanly rather than throw.</summary>
+    [Fact]
+    public void A_report_intent_call_whose_arguments_are_string_shaped_is_excluded()
+    {
+        var events = new[]
+        {
+            Ev(1, "2026-05-07T14:18:16.713Z",
+                """{"id":"e1","data":{"toolCallId":"tc1","toolName":"report_intent","arguments":"not an object"}}"""),
+        };
+
+        Assert.Empty(DeclaredIntentLookup.Find("s1", events));
+    }
+
+    [Fact]
+    public void A_report_intent_call_whose_arguments_are_unparsed_shaped_is_excluded()
+    {
+        var events = new[]
+        {
+            Ev(1, "2026-05-07T14:18:16.713Z",
+                """{"id":"e1","data":{"toolCallId":"tc1","toolName":"report_intent","arguments":42}}"""),
+        };
+
+        Assert.Empty(DeclaredIntentLookup.Find("s1", events));
+    }
+
     [Fact]
     public void Sequence_orders_two_intents_by_their_own_timestamps()
     {

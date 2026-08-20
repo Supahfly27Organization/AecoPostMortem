@@ -223,6 +223,62 @@ public sealed class DigestRouteTests
         }
     }
 
+    /// <summary>Proves the scoping is a real filter, not just a correct default pick: a qualifying
+    /// finding in the minority repository must not leak into the majority repository's ranked list
+    /// even when both repositories genuinely have one.</summary>
+    [Fact]
+    public async Task A_finding_in_the_non_selected_repository_never_appears_in_the_ranked_list()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("majority-1", "org/majority"));
+            context.Sessions.Add(ASession("majority-2", "org/majority"));
+            context.Sessions.Add(ASession("minority-1", "org/minority"));
+
+            for (var i = 0; i < 4; i++)
+            {
+                context.ToolCalls.Add(new ToolCall
+                {
+                    SessionId = "majority-1",
+                    ToolCallId = $"maj-tc{i}",
+                    ToolName = "view",
+                    Path = "/majority-only.cs",
+                    StartedAt = "2026-08-16T10:00:01Z",
+                    OwnerKind = OwnerKind.Main,
+                });
+                context.ToolCalls.Add(new ToolCall
+                {
+                    SessionId = "minority-1",
+                    ToolCallId = $"min-tc{i}",
+                    ToolName = "view",
+                    Path = "/minority-only.cs",
+                    StartedAt = "2026-08-16T10:00:01Z",
+                    OwnerKind = OwnerKind.Main,
+                });
+            }
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal("org/majority", envelope!.Masthead.RepositoryScope.SelectedRepository);
+            var finding = Assert.Single(envelope.RankedFindings);
+            Assert.Contains(finding.Evidence, item => item.Field == "data.path" && item.Value == "/majority-only.cs");
+            Assert.DoesNotContain(finding.Evidence, item => item.Value == "/minority-only.cs");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     static RawEvent Intent(string sessionId, long sequence, string timestamp, string intent)
     {
         var payload = JsonSerializer.Serialize(new

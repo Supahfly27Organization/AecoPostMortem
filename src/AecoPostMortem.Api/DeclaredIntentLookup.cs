@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using AecoPostMortem.Data;
 using AecoPostMortem.Ingestion;
@@ -61,7 +62,9 @@ public static class DeclaredIntentLookup
             {
                 SessionId = sessionId,
                 Phase = phase,
-                Sequence = DateTimeOffset.Parse(raw.Timestamp).ToUnixTimeMilliseconds(),
+                Sequence = DateTimeOffset
+                    .Parse(raw.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+                    .ToUnixTimeMilliseconds(),
             });
         }
 

@@ -1,7 +1,7 @@
 # AecoPostMortem.Ingestion
 
 Path discovery, event-line reader, RAW store, session/turn/agent reconstruction, self-exclusion,
-volume control (FR-10, FR-12, FR-13).
+volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (FR-26).
 
 ## Structure
 
@@ -20,6 +20,7 @@ volume control (FR-10, FR-12, FR-13).
 | `EventEnvelope.cs` | FR-8/FR-9 (issue #7): reads `id`/`parentId`/`agentId`/`data` out of a stored `RawEvent`'s own payload — separate from `EventEnvelopeParsers`, which only reads `type`/`ts` at RAW ingest time |
 | `ExecutionRecordBuilder.cs` | FR-8/FR-9: rebuilds one session's `RawEvent`s into `Data.Execution.Turn`/`ToolCall`/`Agent` rows plus the causality map, pure and deterministic over `RawEvent.Sequence` order |
 | `SpawnResolutionCheck.cs` | turns an `ExecutionRecordBuilder` agent-reconstruction pass into the `unresolvable-spawn` `CheckRegistryEntry` (issue #23, PRD §3.9's name for it) |
+| `SessionRuleExtractor.cs` | FR-26 (S-19, issue #32): resolves a session's `<custom_instruction>` blocks from its own `system.message` `RawEvent`s — the only caller that supplies `Rules.RuleStatementExtractor` its prompt text from the ingested store rather than from a file |
 
 ## References
 
@@ -28,8 +29,15 @@ volume control (FR-10, FR-12, FR-13).
 
 `Findings` — for two purposes: `MalformedLineCheck` builds a `Findings.CheckRegistryEntry` so the
 malformed-line check registers itself (S-02's own acceptance scenario), and `SpawnResolutionCheck`
-does the same for FR-9's spawn-resolution check (this story's Scenario 4). Ingestion does not call
-into `Rules` and does not read any other check or finding shape.
+does the same for FR-9's spawn-resolution check (this story's Scenario 4). Ingestion does not read
+any other check or finding shape beyond those two.
+
+`Rules` — since S-19 (issue #32), for `SessionRuleExtractor` alone: it calls
+`RuleStatementExtractor.ExtractBlocks` with the text `SystemPromptExtractor.Extract` already
+resolved from a `RawEvent`, so `<custom_instruction>` parsing itself stays in `Rules` (this
+project's own CLAUDE.md, "Rule-set extraction and the check-shape catalogue") while the RAW-reading
+half of the job — which events to feed it, and unioning a session's own blocks across all of
+them — stays here, the same split `Findings` uses for every other check shape.
 
 ## Non-obvious decisions
 
@@ -196,6 +204,29 @@ already leave the derived tables empty on purpose, pending a reader. Wiring this
 into those tables — the actual `rebuild`-populates-rows step — is left for whichever later story
 does that wiring; keeping the two concerns separate mirrors `SessionIngestor` staying RAW-only.
 
+### `SessionRuleExtractor` never opens a file — its only input is `RawEvent`
+
+Scenario 3 (issue #32) requires rule extraction to read only the ingested store, never a markdown
+file on disk. `SessionRuleExtractor.Extract` takes `(string sessionId, IEnumerable<RawEvent>
+sessionEvents)` — there is no path parameter for it to read a file from even if it wanted to. It
+delegates prompt-text resolution to the already-existing `SystemPromptExtractor.Extract` (one RAW
+event in, text or nothing out) and hands that text to `Rules.RuleStatementExtractor.ExtractBlocks`,
+which is itself proven never to touch disk by
+`test/AecoPostMortem.Containment.Tests/RuleExtractionNeverReadsDiskTests.cs` (a textual scan of
+`AecoPostMortem.Rules`, the same technique `DeterminismInvariantTests` uses for the clock/chance/model
+invariant). `SessionRuleExtractorTests` proves the behavioural half: extraction succeeds against
+`RawEvent`s built entirely in memory, with no session-state directory ever created by the test.
+
+### A session's blocks are unioned across its own `system.message` events, not deduplicated within it
+
+A session can carry 1–3 distinct system-prompt texts (data map Part 6) — a mid-session context reset
+can change the surrounding prompt while repeating the same injected files. `SessionRuleExtractor.Extract`
+therefore calls `RuleStatementExtractor.ExtractBlocks` once per `system.message` event and
+concatenates every block it returns, rather than picking "the" prompt text for the session. A
+statement repeated across two of a session's own events still counts as one occurrence for that
+session — that collapse is `RuleStatementDeduplication.Deduplicate`'s job (`AecoPostMortem.Rules`),
+which tracks session ids in a set, not this method's.
+
 ### The corpus round-trip is a build gate, not a unit test
 
 `test/AecoPostMortem.Ingestion.Tests/ApplyPatchCorpusRoundTripTests.cs` parses and re-serialises
@@ -210,15 +241,18 @@ and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check
 
 ## Status
 
-Path discovery (`SessionDiscovery`), the event-line reader (`SessionEventReader`,
 `EventEnvelopeParsers`), RAW persistence and idempotent, rewrite-safe re-ingest (`SessionIngestor`,
 FR-5, issue #5), the malformed-line check (`MalformedLineCheck`), volume control (`ExcludedSources`,
 `SystemPromptExtractor`, `RewindSnapshotSource`), the polymorphic `arguments` parser
-(`ToolArguments`) and execution-record reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`,
-`SpawnResolutionCheck`) exist as composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-8,
-FR-9, FR-10, FR-12, FR-13). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses
-it to pull `path` out of an object-shaped `arguments` value. The `ingest` CLI command still reports
-"not implemented" (`AecoPostMortem.Cli`) — wiring path discovery, the event reader,
-`SessionIngestor` and `ExecutionRecordBuilder` into an actual directory walk that also populates the
-derived tables is a later story. The coverage report and self-exclusion (FR-7/FR-14) land with the
-story that follows.
+(`ToolArguments`), execution-record reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`,
+`SpawnResolutionCheck`) and rule-statement resolution (`SessionRuleExtractor`, S-19, issue #32)
+exist as composable building blocks (FR-1, FR-3, FR-4, FR-5, FR-6, FR-8, FR-9, FR-10, FR-12, FR-13,
+FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` — it uses it to pull `path`
+out of an object-shaped `arguments` value. The `ingest` CLI command still reports "not implemented"
+(`AecoPostMortem.Cli`) — wiring path discovery, the event reader, `SessionIngestor` and
+`ExecutionRecordBuilder` into an actual directory walk that also populates the derived tables is a
+later story. `SessionRuleExtractor` likewise resolves one session's own `RawEvent`s, already in
+hand — nothing yet walks the whole store calling it per session and feeding the results into
+`Rules.RuleStatementDeduplication.Deduplicate`; that corpus-wide wiring, and rule-set versioning by
+content hash (FR-27), are S-20's job. The coverage report and self-exclusion (FR-7/FR-14) land with
+the story that follows.

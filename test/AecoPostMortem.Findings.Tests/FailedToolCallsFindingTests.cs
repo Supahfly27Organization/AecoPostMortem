@@ -46,6 +46,12 @@ public sealed class FailedToolCallsFindingTests
         Assert.Contains(finding.Evidence, item => item.Field == "failures" && item.Value == "2");
         Assert.Contains(finding.Evidence, item => item.Field == "calls" && item.Value == "4");
         Assert.Contains(finding.Evidence, item => item.Field == "percentage" && item.Value == "50");
+        // The headline's own session count is the narrower "sessions that actually failed" figure
+        // (1: only session-1), not the wider `sessionCount` evidence item above (2: every session
+        // that called the tool at all, session-2's clean call included) — the same count that feeds
+        // `Recurrence.Occurrences` and therefore the row's own "sessions affected" badge, so the two
+        // numbers on one digest row can never disagree (caught in code review).
+        Assert.Equal("flaky-tool failed 2 of 4 calls (50%) across 1 session.", finding.Headline);
     }
 
     /// <summary>The edge case named in issue #26: a measured 61.2% failure rate on a tool used in

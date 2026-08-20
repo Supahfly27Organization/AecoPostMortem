@@ -24,10 +24,10 @@ passing `--prefix`, for the same reason.
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render |
 | `src/api/useRulesInventory.ts` | the fetch-per-`versionHash` hook `RulesInventoryPage` reads, mirroring `useSession`'s re-fetch-on-change shape rather than `useDigest`'s fetch-once |
 | `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established. FR-48 (issue #52, S-42) added the "Judgment calls" section for `digest.inferredFindings` — renders nothing when that list is empty, the same "no section at all" discipline `SessionPage.tsx`'s `AgentLanes` already established for an empty `envelope.lanes` |
-| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below. FR-48 (issue #52, S-42) added `DigestEnvelope.inferredFindings` — real, served data that had silently gone undeclared (and therefore dropped on arrival) since `InferredFindings` shipped server-side; see "A missing wire field can hide even after its server-side story ships" below |
+| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below. FR-48 (issue #52, S-42) added `DigestEnvelope.inferredFindings` — real, served data that had silently gone undeclared (and therefore dropped on arrival) since `InferredFindings` shipped server-side; see "A missing wire field can hide even after its server-side story ships" below. Mockup parity item #5 added `FindingEnvelopeBase.headline` — a full written sentence naming the problem, mirroring `AecoPostMortem.Api.FindingEnvelope.Headline` |
 | `src/api/useDigest.ts` | the fetch-once-on-mount hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape |
 | `src/digest/Masthead.tsx` | FR-41's corpus masthead (S-36, issue #44): sessions, span, repositories, events, tool calls and rule coverage, every figure read straight off `MastheadEnvelope`'s ingest-time counters. Marks itself `data-provisional` mid-ingest and says an empty corpus has no span |
-| `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed. FR-48 (issue #52, S-42) added `variant?: 'ranked' \| 'unranked'` (default `'ranked'`) — `'unranked'` omits that leading count for a `DigestEnvelope.inferredFindings` entry, since a hypothesis is deliberately never ranked by it |
+| `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed. FR-48 (issue #52, S-42) added `variant?: 'ranked' \| 'unranked'` (default `'ranked'`) — `'unranked'` omits that leading count for a `DigestEnvelope.inferredFindings` entry, since a hypothesis is deliberately never ranked by it. Mockup parity item #5 replaced the collapsed row's label — `finding.headline` (a full written sentence) instead of the bare `finding.recurrence.key` — in the renamed `finding-row__headline` span (`FindingRow.css`, sans font instead of the mono font a bare key used) |
 | `src/digest/SessionStrip.tsx` | Mockup parity item #2 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`): one cell per session in `masthead.repositoryScope.sessionIds`, lit where a finding's own `recurrence.occurrences` touched that session — the mockup's `.strip`, ported. Hidden under 820px, mirroring the mockup's own breakpoint |
 | `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone. FR-39 (S-35, issue #43) added `data-emphasis="prominent"` on the percentage span, the marker `MonitorComparisonBlock.tsx`'s own session count shares |
 | `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count |
@@ -325,12 +325,20 @@ that gets cut under pressure" — a client that only mounts the active panel cou
 later change that never mounts Raw at all if some future gate short-circuits before reaching it; a
 component tree where all three tabs unconditionally exist has no such gap to introduce by accident.
 
-### A finding chip's label is `finding.recurrence.key`, the same convention `FindingRow` already established
+### A finding chip's label is still `finding.recurrence.key` — `FindingRow`'s own label moved on, this one deliberately did not
 
-`FindingEnvelope` carries no separate "title" or "name" field — `digest/FindingRow.tsx` already
-renders `finding.recurrence.key` as a digest row's own visible label (FR-41). `FindingChips` reuses
-that exact convention rather than inventing a second one for this surface, so the same finding reads
-with the same label whether it is seen on the digest or on a session's chip row.
+`FindingChips` (`routes/SessionPage.tsx`) renders `chip.finding.recurrence.key` as a session chip's
+visible label (FR-21 part 2 of 3), the same convention `digest/FindingRow.tsx` established for its
+own row before mockup parity item #5 (below) gave it a real `headline` field to read instead. The
+two surfaces now show two different labels for the same finding — a raw recurrence key on the chip
+row, a full written sentence on the digest row — a real, known divergence this story's own scope cut
+left open rather than a rendering bug: item #5's brainstorming pass scoped the change to
+`FindingRow.tsx`/`api/digest.ts` only ("does NOT need to touch `SessionPage.tsx`"), and `FindingChips`
+reads `SessionFindingChipEnvelope`, not `FindingEnvelope`, through `api/session.ts` rather than
+`api/digest.ts` — `SessionFindingChip.finding` does carry the same `FindingEnvelope` shape
+(`Api/CLAUDE.md`'s `SessionFindingChipEnvelope` remarks), including the new `headline` field, so
+pointing this chip at `chip.finding.headline` instead is a small, well-scoped follow-up whenever a
+story picks the chip row back up, not a new gap to close.
 
 ### A missing wire field can hide even after its server-side story ships
 
@@ -464,6 +472,24 @@ The "Every check ran and found nothing." message (above) now also requires
 which list, so a corpus where every check that ran happened to produce only hypotheses would leave
 `rankedFindings` empty while `inferredFindings` is not — without this guard the page would state
 "found nothing" directly above a populated "Judgment calls" section.
+
+Mockup parity item #5 (the finding headline) closed the "Finding headline" gap the mockup-parity
+discovery doc named: `FindingRow`'s collapsed summary now shows `finding.headline` — a full written
+sentence naming the problem, e.g. "The sessionStart hook failed in 25 of 25 sessions." or "view
+failed 126 of 4460 calls (2.8%) across 20 sessions." — never the bare `finding.recurrence.key` (a raw
+tool name or a rule statement's own text) it showed before. All 11 `Finding`-producing check
+orchestrators in `AecoPostMortem.Findings` (the 10 named in the prioritisation doc's own "touches all
+10 finding builders" estimate, plus `ToolFailureClusterFinding`, which the doc's own count missed —
+see `AecoPostMortem.Findings/CLAUDE.md`) now build a real, grounded headline sentence; see that file
+for the exact wording per check kind. Verified against the live 35-session reference corpus in a real
+browser: every check kind the corpus actually exercises (hook failures, interruption load, failed
+tool calls, repeated file reads, aborted turns, phase churn, and the one real `NeverReadPath`
+violation) renders its own real sentence — `BannedToolFinding`/`UseAAfterBFinding`/
+`AlwaysPassParamFinding` still produce zero findings on this corpus scope (a pre-existing, documented
+gap unrelated to this change, `AecoPostMortem.Api/CLAUDE.md`'s own status notes), so their headline
+text is proven only at the unit level, the same "mechanism real, corpus doesn't happen to exercise it
+yet" pattern those checks already carry. `FindingChips` (`routes/SessionPage.tsx`) was left
+unchanged, on purpose — see "A finding chip's label is still `finding.recurrence.key`" above.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
 `session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,

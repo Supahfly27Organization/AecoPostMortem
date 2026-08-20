@@ -77,6 +77,7 @@ public static class NeverReadPathFinding
         // segment-boundary match over the raw call log, an interpretive step — the same reasoning
         // BannedToolFinding gives for its own OperandResolver-driven match.
         Provenance = Provenance.Derived,
+        Headline = BuildHeadline(violation),
         Evidence =
         [
             new EvidenceItem { Field = "named_path", Value = violation.NamedPath },
@@ -88,4 +89,15 @@ public static class NeverReadPathFinding
             Occurrences = violation.SessionIds.Select(id => new RecurrenceOccurrence { SessionId = id }).ToArray(),
         },
     };
+
+    /// <summary>Mockup parity item #5: grounded in the same named-path/access-count/session-count
+    /// data <see cref="Evidence"/> and <see cref="Recurrence"/> already carry.</summary>
+    static string BuildHeadline(NeverReadPathViolation violation) => string.Format(
+        CultureInfo.InvariantCulture,
+        "{0} was accessed {1} {2} across {3} {4}, despite a rule against reading it.",
+        violation.NamedPath,
+        violation.AccessCount,
+        HeadlineText.Pluralize(violation.AccessCount, "time"),
+        violation.SessionIds.Count,
+        HeadlineText.Pluralize(violation.SessionIds.Count, "session"));
 }

@@ -49,6 +49,12 @@ public abstract record FindingEnvelope
     /// named in that story is that styling does not survive being quoted elsewhere.</summary>
     public required string ProvenanceLabel { get; init; }
 
+    /// <summary>Mockup parity item #5 (`docs/product-superpowers/discovery/
+    /// 2026-08-21-ui-mockup-parity.md`): <see cref="Findings.Finding.Headline"/>, passed straight
+    /// through — this project computes nothing new here, the same passthrough <see cref="Evidence"/>
+    /// and <see cref="Recurrence"/> already are.</summary>
+    public required string Headline { get; init; }
+
     public required IReadOnlyList<EvidenceItem> Evidence { get; init; }
 
     public required Recurrence Recurrence { get; init; }
@@ -75,6 +81,7 @@ public abstract record FindingEnvelope
         Class = finding.Class,
         Provenance = finding.Provenance,
         ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
+        Headline = finding.Headline,
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         SessionsAffected = ProcessDigest.SessionsAffected(finding),
@@ -93,6 +100,7 @@ public abstract record FindingEnvelope
         Class = finding.Class,
         Provenance = finding.Provenance,
         ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
+        Headline = finding.Headline,
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         SessionsAffected = ProcessDigest.SessionsAffected(finding),
@@ -111,6 +119,7 @@ public abstract record FindingEnvelope
         Class = finding.Class,
         Provenance = finding.Provenance,
         ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
+        Headline = finding.Headline,
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         SessionsAffected = ProcessDigest.SessionsAffected(finding),

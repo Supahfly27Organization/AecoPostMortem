@@ -91,6 +91,7 @@ public static class BannedToolFinding
             // layered matching, an interpretive step over the raw call log — the same reasoning
             // RepeatedFileReadFindingCheck gives for its own aggregate count.
             Provenance = Provenance.Derived,
+            Headline = BuildHeadline(usage, sessionIds.Length),
             Evidence = evidence,
             Recurrence = new Recurrence
             {
@@ -99,4 +100,16 @@ public static class BannedToolFinding
             },
         };
     }
+
+    /// <summary>Mockup parity item #5: grounded in the same named-tool/call-count pair
+    /// <see cref="Evidence"/> already carries, plus the session count this method already computed
+    /// for attribution.</summary>
+    static string BuildHeadline(BannedToolUsage usage, int sessionCount) => string.Format(
+        CultureInfo.InvariantCulture,
+        "The banned tool {0} was called {1} {2} across {3} {4}, despite the rule against it.",
+        usage.NamedTool,
+        usage.CallCount,
+        HeadlineText.Pluralize(usage.CallCount, "time"),
+        sessionCount,
+        HeadlineText.Pluralize(sessionCount, "session"));
 }

@@ -42,6 +42,16 @@ public sealed record Finding
 
     public required Provenance Provenance { get; init; }
 
+    /// <summary>Mockup parity item #5 (`docs/product-superpowers/discovery/
+    /// 2026-08-21-ui-mockup-parity.md`): a full written sentence naming the problem — the mockup's
+    /// own `t` field, ported. <c>required</c> for the same reason <see cref="Provenance"/> is: every
+    /// check orchestrator that builds a <see cref="Finding"/> already has the concrete data (a count,
+    /// a tool name, a path, a session figure) a grounded sentence needs — there is no code path in
+    /// this project that can construct a finding with only its bare <see cref="Recurrence.Key"/> to
+    /// show for a title, the exact gap this field closes (`web/src/digest/FindingRow.tsx` rendered
+    /// that raw key before this field existed).</summary>
+    public required string Headline { get; init; }
+
     public required IReadOnlyList<EvidenceItem> Evidence { get; init; }
 
     public required Recurrence Recurrence { get; init; }

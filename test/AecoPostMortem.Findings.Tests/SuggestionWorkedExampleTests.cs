@@ -48,6 +48,7 @@ public sealed class SuggestionWorkedExampleTests
         {
             Class = FindingClass.RuleAdherenceToolChoice,
             Provenance = Provenance.Derived,
+            Headline = "the wrong tool vocabulary was used against the rule",
             Evidence = evidence,
             Recurrence = new Recurrence
             {

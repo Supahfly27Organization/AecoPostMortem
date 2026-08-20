@@ -29,6 +29,7 @@ public sealed class InterruptionLoadFindingTests
         // Nothing renders 2 + 1 = 3 as a combined "interruptions" figure.
         Assert.DoesNotContain(finding.Evidence, item => item.Value == "3");
         Assert.DoesNotContain(finding.Suggestion!.Text, "3 interruptions");
+        Assert.Equal("2 permission prompts and 1 question interrupted the operator across 1 session.", finding.Headline);
     }
 
     [Fact]

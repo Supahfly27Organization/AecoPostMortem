@@ -325,6 +325,7 @@ const ONE_STEP_ENVELOPE: SessionEnvelope = {
         kind: 'general',
         class: 'waste',
         provenance: 'derived',
+        headline: '/repo/a.cs was read repeatedly',
         evidence: [],
         recurrence: { key: 'path:/repo/a.cs', occurrences: [{ sessionId: 'session-1', ruleSetVersion: null }] },
         suggestion: { state: 'absent' },

@@ -42,6 +42,7 @@ public sealed class BannedToolFindingTests
         Assert.Equal(Provenance.Derived, finding.Provenance);
         Assert.Contains(finding.Evidence, item => item.Field == "named_tool" && item.Value == "grep");
         Assert.Contains(finding.Evidence, item => item.Field == "call_count" && item.Value == "1");
+        Assert.Equal("The banned tool grep was called 1 time across 1 session, despite the rule against it.", finding.Headline);
         Assert.Single(finding.Recurrence.Occurrences);
         Assert.Equal("session-1", finding.Recurrence.Occurrences[0].SessionId);
         Assert.Equal(1, result.RegistryEntry.FindingCount);

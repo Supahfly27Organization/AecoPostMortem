@@ -27,6 +27,7 @@ public sealed class AbortedTurnFindingTests
         Assert.Equal(FindingClass.Waste, finding.Class);
         Assert.Contains(finding.Evidence, item => item.Field == "data.reason" && item.Value == "user_interrupt");
         Assert.Contains(finding.Evidence, item => item.Field == "position" && item.Value == "3 of 3");
+        Assert.Equal("A turn aborted (\"user_interrupt\") at turn 3 of 3 in session s1.", finding.Headline);
         Assert.Equal(1, registry.FindingCount);
         Assert.Equal(1, registry.Population);
     }

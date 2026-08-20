@@ -64,6 +64,7 @@ public static class FailedToolCallsFinding
         {
             Class = FindingClass.Waste,
             Provenance = Provenance.Derived,
+            Headline = BuildHeadline(rate, failedSessions.Length),
             Evidence =
             [
                 new EvidenceItem { Field = "toolIdentity", Value = rate.ToolIdentity },
@@ -100,6 +101,27 @@ public static class FailedToolCallsFinding
 
     static string FormatPercentage(double percentage) =>
         percentage.ToString("0.#", CultureInfo.InvariantCulture);
+
+    /// <summary>Mockup parity item #5: grounded in the same rate <see cref="Evidence"/> already
+    /// quotes — the tool identity, the failure count, the call count — plus <paramref
+    /// name="failedSessionCount"/>, the same distinct-failed-session count that feeds
+    /// <see cref="Recurrence.Occurrences"/> (and therefore the row's own leading "sessions affected"
+    /// badge, `ProcessDigest.SessionsAffected`) — not <see cref="ToolFailureRate.SessionCount"/>,
+    /// which (per that type's own remarks) counts every session that called the tool at all,
+    /// including ones where every call succeeded. Reusing the wider figure here would let this
+    /// sentence claim more sessions were affected than the badge beside it on the same row does —
+    /// caught in code review, the same "a served figure and the ranking cannot come from two
+    /// different rules" discipline `Api.FindingEnvelope.SessionsAffected`'s own remarks document.
+    /// </summary>
+    static string BuildHeadline(ToolFailureRate rate, int failedSessionCount) => string.Format(
+        CultureInfo.InvariantCulture,
+        "{0} failed {1} of {2} calls ({3}%) across {4} {5}.",
+        rate.ToolIdentity,
+        rate.FailureRate.Failures,
+        rate.FailureRate.Calls,
+        FormatPercentage(rate.FailureRate.Percentage),
+        failedSessionCount,
+        HeadlineText.Pluralize(failedSessionCount, "session"));
 }
 
 /// <summary>One run's output: the findings this check produced, and the registry entry that

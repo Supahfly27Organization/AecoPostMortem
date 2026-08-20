@@ -131,6 +131,7 @@ public static class ToolFailureClusterFinding
         {
             Class = FindingClass.MissingCapability,
             Provenance = Provenance.Inferred,
+            Headline = BuildHeadline(rate),
             Evidence = evidence,
             Recurrence = new Recurrence
             {
@@ -144,6 +145,18 @@ public static class ToolFailureClusterFinding
 
     static string FormatPercentage(double percentage) =>
         percentage.ToString("0.#", CultureInfo.InvariantCulture);
+
+    /// <summary>Mockup parity item #5: the same rate <see cref="FailedToolCallsFinding"/>'s own
+    /// headline states, framed as this check's own hypothesis (Provenance.Inferred) rather than as
+    /// the plain fact of failure — the distinction this file's own "MissingCapability, not Waste"
+    /// remarks already draw for the rest of this finding.</summary>
+    static string BuildHeadline(ToolFailureRate rate) => string.Format(
+        CultureInfo.InvariantCulture,
+        "{0} fails {1} of {2} calls ({3}%) — possibly a missing capability, not a rule violation.",
+        rate.ToolIdentity,
+        rate.FailureRate.Failures,
+        rate.FailureRate.Calls,
+        FormatPercentage(rate.FailureRate.Percentage));
 }
 
 /// <summary>One run's output: the clusters this check produced, and the registry entry that records

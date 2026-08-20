@@ -252,6 +252,7 @@ public sealed class SessionEnvelopeTests
         {
             Class = FindingClass.Waste,
             Provenance = Provenance.Derived,
+            Headline = "The pre-commit hook failed repeatedly",
             Evidence = [],
             Recurrence = new Recurrence
             {

@@ -91,6 +91,7 @@ public static class RepeatedFileReadFindingCheck
             // Derived, not Observed: a repeat count is an aggregate over several raw read events,
             // not a single event's field (PRD §3.8; the digest mockup marks this finding "der").
             Provenance = Provenance.Derived,
+            Headline = BuildHeadline(path, ordered),
             Evidence = evidence,
             Recurrence = new Recurrence
             {
@@ -100,5 +101,23 @@ public static class RepeatedFileReadFindingCheck
                     .ToArray(),
             },
         };
+    }
+
+    /// <summary>Mockup parity item #5: grounded in exactly the two figures this finding already
+    /// computes — the total read count summed across every occurrence, and how many sessions
+    /// contributed one — the same data <see cref="Evidence"/>'s own <c>read_count:&lt;sessionId&gt;</c>
+    /// items already quote per session.</summary>
+    static string BuildHeadline(string path, IReadOnlyList<RepeatedReadOccurrence> ordered)
+    {
+        var totalReads = ordered.Sum(occurrence => occurrence.ReadCount);
+        var sessionCount = ordered.Count;
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "{0} was read {1} times across {2} {3}.",
+            path,
+            totalReads,
+            sessionCount,
+            HeadlineText.Pluralize(sessionCount, "session"));
     }
 }

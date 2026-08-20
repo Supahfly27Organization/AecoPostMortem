@@ -1,3 +1,4 @@
+using System.Globalization;
 using AecoPostMortem.Rules;
 
 namespace AecoPostMortem.Findings;
@@ -90,6 +91,7 @@ public static class HookFailureFinding
                 {
                     Class = FindingClass.Waste,
                     Provenance = Provenance.Observed,
+                    Headline = BuildHeadline(group.Key, counts),
                     Evidence =
                     [
                         new EvidenceItem
@@ -117,6 +119,15 @@ public static class HookFailureFinding
             })
             .ToList();
     }
+
+    /// <summary>Mockup parity item #5: grounded in the same corpus-wide denominator
+    /// <see cref="BuildSuggestion"/> already states, for this one hook identity.</summary>
+    static string BuildHeadline(string hookName, HookFailureCounts counts) => string.Format(
+        CultureInfo.InvariantCulture,
+        "The {0} hook failed in {1} of {2} sessions.",
+        hookName,
+        counts.OverAllSessions.Count,
+        counts.OverAllSessions.Population);
 
     /// <summary>
     /// FR-56's deterministic template, populated from <see cref="HookFailureCounts"/> as a whole —

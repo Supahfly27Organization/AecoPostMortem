@@ -14,6 +14,7 @@ public sealed class FindingTests
     [Theory]
     [InlineData(nameof(Finding.Class))]
     [InlineData(nameof(Finding.Provenance))]
+    [InlineData(nameof(Finding.Headline))]
     [InlineData(nameof(Finding.Evidence))]
     [InlineData(nameof(Finding.Recurrence))]
     public void The_structural_fields_are_required_members(string propertyName)
@@ -31,6 +32,7 @@ public sealed class FindingTests
         {
             Class = FindingClass.RuleAdherenceToolChoice,
             Provenance = Provenance.Derived,
+            Headline = "grep was called instead of the preferred tool",
             Evidence = [new EvidenceItem { Field = "data.toolName", Value = "grep" }],
             Recurrence = new Recurrence
             {
@@ -58,6 +60,7 @@ public sealed class FindingTests
         {
             Class = FindingClass.Waste,
             Provenance = Provenance.Derived,
+            Headline = "src/foo.cs was read repeatedly",
             Evidence = [new EvidenceItem { Field = "data.path", Value = "src/foo.cs" }],
             Recurrence = new Recurrence
             {
@@ -80,6 +83,7 @@ public sealed class FindingTests
         {
             Class = FindingClass.MissingCapability,
             Provenance = Provenance.Inferred,
+            Headline = "web_fetch fails often enough to be a missing capability",
             Evidence = [new EvidenceItem { Field = "data.toolName", Value = "web_fetch" }],
             Recurrence = new Recurrence
             {

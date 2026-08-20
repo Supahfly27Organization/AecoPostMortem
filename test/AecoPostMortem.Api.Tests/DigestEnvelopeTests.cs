@@ -15,6 +15,7 @@ public sealed class DigestEnvelopeTests
     {
         Class = FindingClass.Waste,
         Provenance = Provenance.Derived,
+        Headline = $"{path} was read repeatedly",
         Evidence = [new EvidenceItem { Field = "data.path", Value = path }],
         Recurrence = new Recurrence
         {
@@ -31,6 +32,7 @@ public sealed class DigestEnvelopeTests
     {
         Class = FindingClass.RuleAdherenceToolChoice,
         Provenance = Provenance.Derived,
+        Headline = "grep was called instead of the preferred tool",
         Evidence = [new EvidenceItem { Field = "data.toolName", Value = "grep" }],
         Recurrence = new Recurrence
         {
@@ -69,6 +71,7 @@ public sealed class DigestEnvelopeTests
     {
         Class = FindingClass.RuleAdherenceToolChoice,
         Provenance = Provenance.Inferred,
+        Headline = "Tool calls were issued one at a time despite the parallel-calling rule",
         Evidence =
         [
             new EvidenceItem { Field = "single_call_messages", Value = "3249" },
@@ -120,6 +123,7 @@ public sealed class DigestEnvelopeTests
     {
         Class = FindingClass.MissingCapability,
         Provenance = Provenance.Inferred,
+        Headline = $"{toolName} fails often enough to be a missing capability",
         Evidence = [new EvidenceItem { Field = "data.toolName", Value = toolName }],
         Recurrence = new Recurrence
         {

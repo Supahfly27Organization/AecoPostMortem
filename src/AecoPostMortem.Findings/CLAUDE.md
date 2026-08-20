@@ -6,7 +6,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 
 | File | What it holds |
 |---|---|
-| `Finding.cs` | `FindingClass`, `Provenance`, `OperatorResponse`, and the `Finding` record itself |
+| `Finding.cs` | `FindingClass`, `Provenance`, `OperatorResponse`, and the `Finding` record itself — mockup parity item #5 added `required string Headline`, a full written sentence naming the problem |
+| `HeadlineText.cs` | Mockup parity item #5's one shared formatting helper — `Pluralize(count, singular)`, regular English only — every check orchestrator's own headline-building code calls it rather than each re-deriving the rule |
 | `FindingClassRegistry.cs` | the four finding classes, each declaring its recurrence key (FR-57) |
 | `Evidence.cs` | `EvidenceItem` — one quoted event field |
 | `Recurrence.cs` | `Recurrence`, `RecurrenceOccurrence` — FR-57's version-independent identity |
@@ -150,10 +151,65 @@ caller today, calling the new `Api.ParamCarryingCallLookup.BuildAll` over the sa
 
 ### The finding record has no `Id` and no `SessionId`
 
-The finding contract names seven fields, and only those seven: class, provenance, evidence,
-recurrence, the resolution used where one applies, its suggestion, and the operator's response. A
-finding's identity is `(class, class-specific key)` per FR-57, not a row id or a session — a
-session is where `Recurrence` says the finding recurred, not where the finding lives.
+The finding contract names eight fields, and only those eight: class, provenance, the headline
+(mockup parity item #5), evidence, recurrence, the resolution used where one applies, its
+suggestion, and the operator's response. A finding's identity is `(class, class-specific key)` per
+FR-57, not a row id or a session — a session is where `Recurrence` says the finding recurred, not
+where the finding lives.
+
+### `Headline` is `required`, the same reason `Provenance` is — and every producer already had the data it needs
+
+Mockup parity item #5 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`): the
+mockup's own `t` field — a full written sentence naming the problem — had no equivalent anywhere in
+this codebase's data model before this story; `web/src/digest/FindingRow.tsx` rendered the bare
+`Recurrence.Key` instead (a raw tool name, a rule statement's own text — never a sentence). `Finding.
+Headline` closes that gap the same structural way `Provenance` closes its own: `required`, so an
+object initializer that omits it is CS9035, not a runtime check a producer could skip by accident.
+
+This story's own brainstorming pass confirmed the "one PR, all producers" scope call before writing
+any code: every one of the eleven `Finding`-producing files in this project (the ten named in the
+prioritisation doc's own "touches all 10 finding builders" estimate, plus `ToolFailureClusterFinding`
+— the doc's own count missed it, since it reuses `FailedToolCallsFinding`'s rate but was not itself
+named as one of the ten) already computes exactly the concrete data a grounded sentence needs by the
+time it reaches `ToFinding`/`ToFinding`-equivalent — a count, a tool name, a path, a session figure —
+the same data each file's own `Evidence`/`Suggestion` text already draws from. Closing the gap was
+therefore repetition of one small, templated `BuildHeadline` static method per file, reusing
+`HeadlineText.Pluralize` for the one shared formatting concern (regular English plurals), not a new
+mechanism invented per check the way some of this project's past rule-shape work was. No producer
+needed new plumbing or a new `Data`/`Rules` read to build its sentence.
+
+Each `BuildHeadline` writes an original sentence in this project's own words, in the mockup's tone —
+plain, specific, grounded in the check's own counts — rather than copying the mockup's own worked
+example verbatim (the mockup describes a different, hypothetical corpus). A representative sample:
+`HookFailureFinding` — `"The {hookName} hook failed in {count} of {population} sessions."`;
+`FailedToolCallsFinding`/`ToolFailureClusterFinding` — `"{tool} failed {n} of {m} calls ({pct}%)
+across {sessions} sessions."`, the same rate framed as a fact (Waste) versus a hypothesis
+(MissingCapability, `"— possibly a missing capability, not a rule violation."`), the identical split
+this file's own "`MissingCapability`, not `Waste`" remarks already draw for the rest of these two
+findings; `NeverReadPathFinding`/`BannedToolFinding` — `"{path/tool} was accessed/called {n} times
+across {sessions} sessions, despite {a rule against reading it/the rule against it}."`;
+`UseAAfterBFinding` — `"{later} was called without {earlier} first, {n} times."`;
+`AlwaysPassParamFinding` — `` "The `{param}` parameter was omitted on {n} calls that should have
+carried it." ``; `AbortedTurnFinding` — `` "A turn aborted (\"{reason}\") at turn {position} of
+{total} in session {sessionId}." ``; `PhaseChurnFinding` — `"Session {sessionId} churned through
+phases {n} times across {m} declared intents."``; `RepeatedFileReadFindingCheck` — `"{path} was read
+{totalReads} times across {sessionCount} sessions."`; `InterruptionLoadFinding` — `"{n} permission
+prompts and {m} questions interrupted the operator across {sessions} sessions."`
+
+Verified against the live 35-session reference corpus (`AecoPostMortem.Api/CLAUDE.md`'s own status
+note): every check kind the corpus actually exercises through `GetDigest` renders a real sentence in
+a real browser — the real `sessionStart` hook failure, the real permission/question interruption
+load, three real failed-tool-call rates, the real `NeverReadPath` violation, several real repeated
+reads, several real aborted turns and several real phase-churn sessions. `BannedToolFinding`/
+`UseAAfterBFinding`/`AlwaysPassParamFinding` still produce zero findings on that corpus's default
+scope (a pre-existing, documented gap this story did not touch — `AecoPostMortem.Api/CLAUDE.md`'s own
+status notes), so their headline text is proven at the unit level only, the same "mechanism real, the
+corpus doesn't happen to exercise it yet" pattern those three checks already carried before this
+story.
+
+`web/src/digest/FindingRow.tsx`'s collapsed row is the one consumer wired to this field
+(`web/CLAUDE.md`); the session view's `FindingChips` (`routes/SessionPage.tsx`) still shows the bare
+`recurrence.key`, deliberately left out of this story's scope — see `web/CLAUDE.md`'s matching note.
 
 ### `Provenance` fails construction by being `required`, not by validating
 
@@ -957,3 +1013,9 @@ the live 35-session reference corpus with real hashes, both directions: a real a
 non-adjacent pair answers 404 via the same `NonAdjacentRuleSetVersionsException` this file's own
 `Compare` remarks already describe. No CLI command reads a served comparison yet — that, and
 mounting `web/src/digest/MonitorComparisonBlock.tsx` on a route, are still later work.
+
+Mockup parity item #5 (`Finding.Headline`) is now real on all eleven `Finding`-producing files in
+this project — see "`Headline` is `required`, the same reason `Provenance` is" above for the exact
+wording per check kind, the real-corpus verification, and the one deliberately unchanged consumer
+(`FindingChips`). `AecoPostMortem.Api.FindingEnvelope.Headline` carries it through unchanged
+(`Api/CLAUDE.md`), and `web/src/digest/FindingRow.tsx` is the real rendering consumer.

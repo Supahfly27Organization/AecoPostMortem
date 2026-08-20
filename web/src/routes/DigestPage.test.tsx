@@ -40,6 +40,7 @@ function digestWith(overrides: Partial<DigestEnvelope> = {}): DigestEnvelope {
         kind: 'general',
         class: 'waste',
         provenance: 'derived',
+        headline: 'src/hot.cs was read repeatedly',
         evidence: [{ field: 'data.path', value: 'src/hot.cs' }],
         recurrence: {
           key: 'src/hot.cs',
@@ -67,7 +68,7 @@ describe('DigestPage', () => {
     respondWith(digestWith())
     render(<DigestPage />)
 
-    expect(await screen.findByText('src/hot.cs')).toBeInTheDocument()
+    expect(await screen.findByText('src/hot.cs was read repeatedly')).toBeInTheDocument()
   })
 
   // Scenario 2 (issue #44): the digest states the scope it is ranking within, not only the ranking.
@@ -156,6 +157,7 @@ describe('DigestPage', () => {
             kind: 'general',
             class: 'missingCapability',
             provenance: 'inferred',
+            headline: 'codebase-memory-mcp-search_graph fails often enough to be a missing capability',
             evidence: [{ field: 'data.tool', value: 'codebase-memory-mcp-search_graph' }],
             recurrence: {
               key: 'codebase-memory-mcp-search_graph',
@@ -198,6 +200,7 @@ describe('DigestPage', () => {
             kind: 'general',
             class: 'missingCapability',
             provenance: 'inferred',
+            headline: 'codebase-memory-mcp-search_graph fails often enough to be a missing capability',
             evidence: [{ field: 'data.tool', value: 'codebase-memory-mcp-search_graph' }],
             recurrence: {
               key: 'codebase-memory-mcp-search_graph',
@@ -213,14 +216,16 @@ describe('DigestPage', () => {
     render(<DigestPage />)
 
     expect(await screen.findByText(/judgment calls/i)).toBeInTheDocument()
-    expect(screen.getByText('codebase-memory-mcp-search_graph')).toBeInTheDocument()
+    expect(
+      screen.getByText('codebase-memory-mcp-search_graph fails often enough to be a missing capability'),
+    ).toBeInTheDocument()
   })
 
   it('renders no "Judgment calls" section at all when there are no inferred findings', async () => {
     respondWith(digestWith())
     render(<DigestPage />)
 
-    await screen.findByText('src/hot.cs')
+    await screen.findByText('src/hot.cs was read repeatedly')
 
     expect(screen.queryByText(/judgment calls/i)).not.toBeInTheDocument()
   })

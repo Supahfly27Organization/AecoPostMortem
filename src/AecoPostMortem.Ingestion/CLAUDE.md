@@ -11,7 +11,7 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `CopilotSourceLocation.cs` | S-48: the default per-user Copilot session-state root (`~/.copilot/session-state`), resolved the same way `AecoPostMortem.Data.StoreLocation` resolves the store's own path. Names the path only — `SessionDiscovery` is what asks whether it is really there |
 | `SessionDiscovery.cs` | FR-1: finds every session directory under the session-state root and classifies its files (`events.jsonl`, `session.db`, `rewind-snapshots/index.json`, `workspace.yaml`) without reading any of them; a missing root is reported, not thrown |
 | `SessionEventReader.cs` | FR-3/FR-6: reads one `events.jsonl` line by line into `RawEvent`s — provider version and event-schema version from line 1 only, malformed lines skipped and counted, a trailing unterminated line stops the read and reports the high-water offset |
-| `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`ts`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
+| `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`timestamp`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
 | `SessionIngestor.cs` | reads a session file and lands what parsed in RAW via `RawEventBatch.Append`; FR-5 (issue #5): runs `RawEventBatch.DetectRewrites` first and refuses the append — reporting the mismatch on `SessionIngestResult.RewriteMismatches`/`RewriteDetected` instead — the moment a rewrite is found. FR-7 (issue #6): checks `SessionExclusion` ahead of both the rewrite check and the append, and retroactively purges via `RawEventBatch.DeleteBySession` when an already-ingested session is now excluded |
 | `SessionStartContext.cs` | FR-7's key: reads `session.start.data.context.cwd` off a session's first event only — the "line 1 only" rule `SessionEventReader.ReadDeclaredVersion` already applies to provider/schema version, applied again here |
 | `SessionExclusion.cs` | FR-7's pure decision: whether a cwd falls under one of an operator-configured list of excluded roots, and the reason sentence FR-14's coverage report states for it (`SessionExclusionOutcome`) |
@@ -23,7 +23,7 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
 | `RewindSnapshotSource.cs` | FR-13: reads `rewind-snapshots/index.json` as one whole-file RAW event at byte offset zero |
 | `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced |
-| `EventEnvelope.cs` | FR-8/FR-9 (issue #7): reads `id`/`parentId`/`agentId`/`data` out of a stored `RawEvent`'s own payload — separate from `EventEnvelopeParsers`, which only reads `type`/`ts` at RAW ingest time |
+| `EventEnvelope.cs` | FR-8/FR-9 (issue #7): reads `id`/`parentId`/`agentId`/`data` out of a stored `RawEvent`'s own payload — separate from `EventEnvelopeParsers`, which only reads `type`/`timestamp` at RAW ingest time |
 | `ExecutionRecordBuilder.cs` | FR-8/FR-9: rebuilds one session's `RawEvent`s into `Data.Execution.Turn`/`ToolCall`/`Agent` rows plus the causality map, pure and deterministic over `RawEvent.Sequence` order |
 | `SpawnResolutionCheck.cs` | turns an `ExecutionRecordBuilder` agent-reconstruction pass into the `unresolvable-spawn` `CheckRegistryEntry` (issue #23, PRD §3.9's name for it) |
 | `SessionRuleExtractor.cs` | FR-26 (S-19, issue #32): resolves a session's `<custom_instruction>` blocks from its own `system.message` `RawEvent`s — the only caller that supplies `Rules.RuleStatementExtractor` its prompt text from the ingested store rather than from a file |
@@ -303,11 +303,31 @@ query-time filter is needed precisely because there is nothing in the store to f
 every `apply_patch` call in the *live* reference corpus (a measured 381 calls) through
 `ToolArguments`, because `ToolArgumentsTests`'s hand-picked strings prove the algorithm but not that
 the real corpus never trips it. The corpus bytes are not checked in (`fixtures/README.md`), so the
-test reads the live source directory recorded in `fixtures/corpus-manifest.json`'s own `source`
-field (overridable by `AECOPOSTMORTEM_CORPUS_SOURCE`) and **skips**, not fails, on a machine that
-doesn't have it — the gate only bites where the corpus actually is.
+test resolves the live source directory through `ReferenceCorpus` (`fixtures/corpus-manifest.json`'s
+own `source` field, overridable by `AECOPOSTMORTEM_CORPUS_SOURCE`) and **skips**, not fails, on a
+machine that doesn't have it — the gate only bites where the corpus actually is.
 `scripts/check-apply-patch-roundtrip.py` is the CI entry point: it runs that one test in isolation
 and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check`.
+`test/AecoPostMortem.Ingestion.Tests/ReferenceCorpus.cs` is the corpus-source resolution both this
+test and `CorpusVerificationTests` share.
+
+### `EventEnvelopeParserV1` reads `timestamp`, not `ts` — full-corpus verification is why
+
+`test/AecoPostMortem.Ingestion.Tests/CorpusVerificationTests.cs` drives a real full ingest of the
+live reference corpus and checks the resulting RAW census against `fixtures/corpus-manifest.json`.
+That check demonstrated `EventEnvelopeParserV1.TryParse` required a `"ts"` property that does not
+exist anywhere in the corpus — every real event carries `"timestamp"` instead, confirmed against
+multiple session files (zero `"ts":` matches, one match per line for `"timestamp":`). Every
+hand-crafted fixture in `SessionIngestorTests`, `SessionEventReaderTests` and
+`EventEnvelopeReaderTests` had independently guessed the same wrong field name, so no unit test
+caught it, and `ApplyPatchCorpusRoundTripTests` doesn't either — it parses envelopes itself rather
+than going through `EventEnvelopeParsers`. The parser reading a field that never occurs in the
+corpus means a real ingest skips every line as malformed: `SessionEventReader`'s "a line that fails
+to parse is skipped and counted, never fatal" behaviour (FR-6) makes total data loss look like a
+clean, low-noise run rather than a hard failure. All three fixture files carry `"timestamp"` now,
+matching the real event shape. This is the argument for running a fixture gate against real corpus
+bytes rather than only against hand-picked JSON: a bug every synthetic fixture agrees on by
+construction is invisible to a suite that never reads real data.
 
 ## Status
 
@@ -327,3 +347,17 @@ is a later story; this project's job is the composable pieces the CLI will call.
 likewise resolves one session's own `RawEvent`s, already in hand — nothing yet walks the whole store
 calling it per session and feeding the results into `Rules.RuleStatementDeduplication.Deduplicate`;
 that corpus-wide wiring, and rule-set versioning by content hash (FR-27), are S-20's job.
+
+Phase A's exit criterion is verified against the frozen fixture corpus
+(`test/AecoPostMortem.Ingestion.Tests/CorpusVerificationTests.cs`,
+`scripts/check-corpus-verification.py`): the RAW event census matches
+`fixtures/corpus-manifest.json`'s per-type counts exactly, every RAW row re-serialises
+byte-identically to its own source line, a full ingest of the 35-session corpus completes in a
+measured ~14s (PRD §3.7's target: under 3 minutes), and an incremental re-ingest with no new events
+completes in a measured ~6s (target: under 15 seconds) — both comfortably inside target on this
+machine, though PRD §3.7 states these as targets rather than measurements, so a corpus that grows
+toward the 500-session/1M-event design target is not guaranteed the same margin. Driving a "full
+ingest" needs no dedicated production code: `CorpusIngestFixture` walks
+`SessionDiscovery.Discover` and calls `SessionIngestor.Ingest` per session directly, the same
+composable building blocks a future `ingest` CLI command wraps — this verification does not itself
+wire that command.

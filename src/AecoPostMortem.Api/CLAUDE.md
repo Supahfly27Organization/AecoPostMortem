@@ -14,8 +14,8 @@ Endpoints for the three surfaces, and the host that serves them.
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetSession` and `GetStepEvidence` are the same three without a listener |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field |
-| `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope` |
-| `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
+| `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
+| `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does. FR-23 (S-10, issue #19) added `StepEvidenceLookup.ReasoningReadabilityByModel`, scanning the whole session's own main-thread `assistant.message` events (not just the current turn) to build the per-model readable share |
 
 ## References
 
@@ -394,6 +394,28 @@ subagent's reasoning belongs to its own step's turn context, not its parent's. E
 recorded per assistant message" — never attempting a lookup, matching the mockup's own wording for
 selecting a non-assistant step.
 
+### An encrypted step names its model and carries the session's own per-model readable share, computed session-wide (FR-23, S-10, issue #19)
+
+The Thinking tab's empty state has to explain a fact the operator could otherwise mistake for a
+missing thought: on `gpt-5.4` the split is a measured 3.5% readable against a measured 88.2% on
+`claude-sonnet-4.5` (PRD FR-23, the recorder mockup's own worked example) — a corpus-wide constant
+would misstate either model's real behaviour, and an average across two models a session actually
+used would misstate both at once (the story's own edge case). `FindThinking` therefore does two
+things once it sees `reasoningOpaque` and no readable text: it reads that same message's own
+`model` field (`assistant.message.data.model`, present on the mockup's own raw payload, alongside
+`reasoningOpaque`) to name the model in `Reason` when one is present, and it calls
+`ReasoningReadabilityByModel(ordered)` — a *second*, session-wide scan (not bounded to the current
+turn's window, unlike the rest of `FindThinking`) over every main-thread `assistant.message` that
+carries any reasoning at all, grouped by `model`. A message with reasoning but no `model` field is
+excluded from the breakdown entirely rather than folded into an invented "unknown" bucket — there is
+no model to attribute it to, and no acceptance scenario asks for a fourth figure. The result is
+ordered by model name (`StringComparer.Ordinal`) for deterministic output (PRD §3.8), and only ever
+attached to the `Unavailable` shape for the provider-encryption reason — the "no raw event" and
+"wrong step kind" `Unavailable`s carry no `ReadabilityByModel` at all, since there is no per-model
+encryption question to answer there. `ModelReasoningReadability.ReadableSharePercent` is a computed
+property, not a settable field — the same "a rate never appears without its counts" reasoning
+`AecoPostMortem.Rules.FailureRate.Percentage` already documents for its own percentage.
+
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
@@ -457,6 +479,12 @@ only when `sessionId` names no session at all; a step whose raw event cannot be 
 is this story's own edge case, and a 404 would have forced the client to guess why. The Detail tab
 needs no endpoint of its own: `web/src/routes/SessionPage.tsx` renders it straight from the tape
 step already in hand.
+
+FR-23 (S-10, issue #19) widened the Thinking tab's `Unavailable` shape: an encrypted step's `Reason`
+now names the model where the raw event carried one, and `ReadabilityByModel` carries the session's
+own measured readable share per model (see the non-obvious decision above) — fully live against any
+real store today, the same `RawEvent`-reading path `StepEvidenceLookup` already used. No `Data`/
+`Findings` reference was added; the whole figure is computed from `RawEvent`s already in hand.
 
 `SessionTapeStepEnvelope.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) carry a
 `SessionTapeStepKind.Skill` step's plugin straight across from `Findings.SessionTapeStep` — no

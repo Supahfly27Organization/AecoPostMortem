@@ -142,4 +142,60 @@ public sealed class StepEvidenceLookupTests
         var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
         Assert.NotEmpty(unavailable.Reason);
     }
+
+    /// <summary>FR-23 (S-10, issue #19), Scenario 2: an encrypted step's reason names the model that
+    /// wrote it, and carries the session's own measured readable share per model — never an average
+    /// across models, and never a corpus-wide constant.</summary>
+    [Fact]
+    public void Provider_encrypted_reasoning_names_the_model_and_reports_the_sessions_own_readable_share_per_model()
+    {
+        var events = new[]
+        {
+            Ev(1, "assistant.turn_start", """{"id":"e1","data":{"turnId":"t1"}}"""),
+            Ev(2, "assistant.message", """{"id":"e2","data":{"reasoningOpaque":"<encrypted>","model":"gpt-5.4"}}"""),
+            Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"t1"}}"""),
+            Ev(4, "assistant.turn_start", """{"id":"e4","data":{"turnId":"t2"}}"""),
+            Ev(5, "assistant.message", """{"id":"e5","data":{"reasoningText":"Considering the fix.","model":"claude-sonnet-4.5"}}"""),
+            Ev(6, "assistant.turn_end", """{"id":"e6","data":{"turnId":"t2"}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+
+        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
+        Assert.Contains("gpt-5.4", unavailable.Reason);
+        Assert.NotNull(unavailable.ReadabilityByModel);
+        Assert.Equal(2, unavailable.ReadabilityByModel!.Count);
+
+        var gpt = Assert.Single(unavailable.ReadabilityByModel, m => m.Model == "gpt-5.4");
+        Assert.Equal(0, gpt.ReadableCount);
+        Assert.Equal(1, gpt.TotalCount);
+        Assert.Equal(0d, gpt.ReadableSharePercent);
+
+        var claude = Assert.Single(unavailable.ReadabilityByModel, m => m.Model == "claude-sonnet-4.5");
+        Assert.Equal(1, claude.ReadableCount);
+        Assert.Equal(1, claude.TotalCount);
+        Assert.Equal(100d, claude.ReadableSharePercent);
+    }
+
+    /// <summary>A message carrying no <c>model</c> field of its own cannot be attributed to any
+    /// model's readable share — it is excluded from the breakdown rather than folded into an
+    /// invented "unknown" bucket, and the reason falls back to generic wording rather than naming
+    /// a model this event never identified.</summary>
+    [Fact]
+    public void Provider_encrypted_reasoning_with_no_model_field_falls_back_to_generic_wording_and_lists_no_share_for_it()
+    {
+        var events = new[]
+        {
+            Ev(1, "assistant.turn_start", """{"id":"e1","data":{"turnId":"t1"}}"""),
+            Ev(2, "assistant.message", """{"id":"e2","data":{"reasoningOpaque":"<encrypted>"}}"""),
+            Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"t1"}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+
+        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
+        Assert.DoesNotContain("gpt", unavailable.Reason);
+        Assert.NotNull(unavailable.ReadabilityByModel);
+        Assert.Empty(unavailable.ReadabilityByModel!);
+    }
 }

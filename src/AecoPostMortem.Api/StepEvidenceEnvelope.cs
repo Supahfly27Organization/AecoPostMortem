@@ -31,7 +31,37 @@ public abstract record ThinkingEnvelope
     public sealed record Unavailable : ThinkingEnvelope
     {
         public required string Reason { get; init; }
+
+        /// <summary>FR-23 (S-10, issue #19): populated only for the provider-encryption reason —
+        /// the session's own measured readable share of reasoning, one entry per model this session
+        /// actually used for a reasoning-bearing main-thread message, never a corpus-wide constant
+        /// and never averaged across models (the story's own edge case: two models get two
+        /// figures). Null for the other two <see cref="Reason"/> cases this type carries (no raw
+        /// event found; a step kind that carries no reasoning of its own), where there is no
+        /// per-model encryption question to answer.</summary>
+        public IReadOnlyList<ModelReasoningReadability>? ReadabilityByModel { get; init; }
     }
+}
+
+/// <summary>
+/// FR-23 (S-10, issue #19): one model's measured readable-reasoning share, computed over this
+/// session's own main-thread <c>assistant.message</c> events that carried any reasoning at all
+/// (readable <c>reasoningText</c> or provider-encrypted <c>reasoningOpaque</c>) — session-scoped,
+/// never a corpus-wide figure (the PRD's own worked example: measured 3.5% readable on
+/// <c>gpt-5.4</c> against measured 88.2% on <c>claude-sonnet-4.5</c>, in the same corpus).
+/// <see cref="ReadableCount"/> and <see cref="TotalCount"/> are both <c>required</c>; the share has
+/// no setter — the same "a rate never appears without its counts" reasoning
+/// <see cref="AecoPostMortem.Rules.FailureRate"/> already documents for its own percentage.
+/// </summary>
+public sealed record ModelReasoningReadability
+{
+    public required string Model { get; init; }
+
+    public required int ReadableCount { get; init; }
+
+    public required int TotalCount { get; init; }
+
+    public double ReadableSharePercent => TotalCount == 0 ? 0d : 100d * ReadableCount / TotalCount;
 }
 
 /// <summary>

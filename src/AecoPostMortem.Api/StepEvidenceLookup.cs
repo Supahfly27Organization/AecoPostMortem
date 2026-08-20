@@ -88,6 +88,7 @@ public static class StepEvidenceLookup
 
         var readable = new List<string>();
         var sawOpaque = false;
+        string? opaqueModel = null;
 
         foreach (var raw in ordered.Where(e =>
             e.Sequence > turnStartSequence && e.Sequence < boundarySequence && e.EventType == "assistant.message"))
@@ -107,6 +108,7 @@ public static class StepEvidenceLookup
             else if (HasProperty(envelope.Data, "reasoningOpaque"))
             {
                 sawOpaque = true;
+                opaqueModel ??= GetString(envelope.Data, "model");
             }
         }
 
@@ -115,15 +117,73 @@ public static class StepEvidenceLookup
             return new ThinkingEnvelope.Present { Text = string.Join("\n\n", readable) };
         }
 
-        return sawOpaque
-            ? new ThinkingEnvelope.Unavailable
+        if (sawOpaque)
+        {
+            // FR-23 (S-10, issue #19): name the model where the event carried one, and always
+            // attach the session's own per-model readable share — "reports the measured readable
+            // share for the models this session actually used" (the story's own wording), computed
+            // across the whole session, not bounded to this one turn.
+            return new ThinkingEnvelope.Unavailable
             {
-                Reason = "The model's reasoning for this step is provider-encrypted and cannot be read.",
-            }
-            : new ThinkingEnvelope.Unavailable
-            {
-                Reason = "No reasoning was recorded for this step.",
+                Reason = opaqueModel is null
+                    ? "The model's reasoning for this step is provider-encrypted and cannot be read."
+                    : $"This step's reasoning is provider-encrypted for {opaqueModel} and cannot be read.",
+                ReadabilityByModel = ReasoningReadabilityByModel(ordered),
             };
+        }
+
+        return new ThinkingEnvelope.Unavailable
+        {
+            Reason = "No reasoning was recorded for this step.",
+        };
+    }
+
+    /// <summary>FR-23 (S-10, issue #19): this session's own main-thread reasoning readability,
+    /// grouped by model — scanned across every <c>assistant.message</c> in the session, not bounded
+    /// to one turn, because "the models this session actually used" (the story's own wording) is a
+    /// session-wide fact, not a per-step one. A message carrying neither <c>reasoningText</c> nor
+    /// <c>reasoningOpaque</c> contributes nothing; a message that carries one of the two but no
+    /// <c>model</c> field of its own is excluded entirely — there is no model to attribute it to,
+    /// and folding it into an invented "unknown" bucket would manufacture a fourth figure no
+    /// acceptance scenario asks for. Ordered by model name (ordinal) for deterministic output
+    /// (PRD §3.8) — nothing else fixes an order for two models tied on first appearance.</summary>
+    static IReadOnlyList<ModelReasoningReadability> ReasoningReadabilityByModel(List<RawEvent> ordered)
+    {
+        var counts = new Dictionary<string, (int Readable, int Total)>(StringComparer.Ordinal);
+
+        foreach (var raw in ordered.Where(e => e.EventType == "assistant.message"))
+        {
+            if (!EventEnvelopeReader.TryRead(raw, out var envelope) || envelope.AgentId is not null)
+            {
+                continue;
+            }
+
+            var model = GetString(envelope.Data, "model");
+            if (model is null)
+            {
+                continue;
+            }
+
+            var isReadable = GetString(envelope.Data, "reasoningText") is { Length: > 0 };
+            var hasReasoning = isReadable || HasProperty(envelope.Data, "reasoningOpaque");
+            if (!hasReasoning)
+            {
+                continue;
+            }
+
+            var current = counts.TryGetValue(model, out var existing) ? existing : (Readable: 0, Total: 0);
+            counts[model] = (current.Readable + (isReadable ? 1 : 0), current.Total + 1);
+        }
+
+        return counts
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => new ModelReasoningReadability
+            {
+                Model = pair.Key,
+                ReadableCount = pair.Value.Readable,
+                TotalCount = pair.Value.Total,
+            })
+            .ToList();
     }
 
     static (RawEvent Raw, EventEnvelope Envelope)? FindByDataField(

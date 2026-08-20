@@ -166,6 +166,11 @@
   color: #666;
 }
 
+.inspector__thinking-readability {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
 .inspector__thinking-text {
   white-space: pre-wrap;
 }

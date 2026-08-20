@@ -28,8 +28,9 @@ public static class FindingClassRegistry
             RecurrenceKeyDescription =
                 "the file path for a repeated read, the hook identity for a hook failure, the "
                 + "tool identity for a failed-tool-call rate, the fixed interruption-load "
-                + "identity for permission-prompt and question counts, or the turn identity for "
-                + "an aborted turn",
+                + "identity for permission-prompt and question counts, the turn identity for an "
+                + "aborted turn, or the session id for phase churn (a whole-session aggregate "
+                + "with no shared sub-object to recur around)",
         },
         new()
         {

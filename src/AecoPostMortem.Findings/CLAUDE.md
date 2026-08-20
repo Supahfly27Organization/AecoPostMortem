@@ -22,6 +22,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `InterruptionLoadFinding.cs` | FR-20 (issue #30): reads `Permission` and `ToolCall` through `Data`, decides which tool calls are questions (`ToolName == "ask_user"`), calls `Rules.InterruptionLoadCheck`, and folds the result into one `FindingClass.Waste` finding plus a `CheckRegistryEntry` |
 | `SessionTokenFigures.cs` | FR-24 (S-11, issue #20): reads `Session`'s own token fields into the masthead's token-totals contract — not a `Finding`, no rule adherence involved — closed to `Observed` and `SessionTotalsNotRecorded` |
 | `AbortedTurnFinding.cs` | FR-18 (S-16, issue #28): reads `AecoPostMortem.Data.Execution.Turn` rows, calls `AecoPostMortem.Rules.AbortedTurnCheck`, and writes one `Finding` per aborted turn — never grouped — plus a `CheckRegistryEntry` |
+| `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
 
 ## References
 
@@ -56,6 +57,14 @@ tables once that pipeline exists.
 `Session` and reads its own nullable token fields, no `Rules` call involved: there is no rate or
 threshold to check here, only a value already computed by whatever populates `Session` (S-49) and a
 presence test.
+
+`PhaseChurnFinding` (issue #29) takes `Rules.DeclaredIntent` operands directly, for the same reason:
+`Data.Execution.ToolCall` carries no field for `report_intent`'s `intent` argument (only `Path`,
+added for reads), and `ToolArguments` is not yet wired into the `RawEvent`-to-`ToolCall` pipeline
+(`AecoPostMortem.Ingestion/CLAUDE.md`) — so there is no real query today that could resolve a
+`report_intent` call's phase label. `DeclaredIntent` already is the plain shape a future caller would
+supply once that ETL exists, the same way `ToolCallOutcome` is reused directly by
+`FailedToolCallsFinding` rather than wrapped in a second Findings-owned type.
 
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
@@ -207,6 +216,29 @@ same reason `RepeatedFileReadFindingCheck` gives: "position in the session" come
 every turn in the session (`AbortedTurnCheck.Run`), not from a single event's own field, even
 though the abort reason itself is a bare observed value.
 
+### `PhaseChurnFinding`'s recurrence key is the session id, unlike every other Waste check
+
+The other three Waste checks each recur around a shared sub-object two sessions can both touch — a
+path, a hook identity, a tool identity. Phase churn has no such object: it is a whole-session
+aggregate over that session's own declared intents, so there is nothing for two different sessions'
+churn to be "the same finding" *about*. `PhaseChurnFinding.ToFinding` therefore keys `Recurrence` on
+the session id itself, so every churning session is its own `Finding` with exactly one
+`RecurrenceOccurrence` — itself. This is a deliberate reading of FR-57 for a check shape the other
+three don't fit, not an oversight of "a session is where `Recurrence` says the finding recurred, not
+where the finding lives" (this file's own words, above): that guidance is about `Finding` carrying no
+bare `SessionId` field, and still holds — `PhaseChurnFinding` never puts a session id anywhere but
+inside `Recurrence`.
+
+### Only sessions that actually churned become a finding
+
+`PhaseChurnCheck.Run` (Rules) reports every session that declared at least one intent, churned or
+not, the same way `FailedToolCallsCheck.Run` reports every tool observed including clean ones.
+`PhaseChurnFinding.Run` filters to `Returns > 0` before building a `Finding`, mirroring
+`FailedToolCallsFinding`'s `Failures > 0` filter — deciding what is worth surfacing as a finding is
+this project's call, not `Rules`'s. A session with intents but zero returns is therefore silent, the
+same as a session with no intents at all (issue #29's named edge case), even though `Rules` can tell
+the two states apart if a future caller needs to.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -270,17 +302,18 @@ it — an unresolved prompt (`ResultKind` is `null`) renders as its own literal 
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-five real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+six real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
 `RepeatedFileReadFindingCheck` (issue #25, FR-15), `FailedToolCallsFinding`
 (`CheckId = "failed-tool-calls"`, FR-16, issue #26), `InterruptionLoadFinding`
-(`CheckId = "interruption-load"`, FR-20, issue #30) and `AbortedTurnFinding`
-(`CheckId = "aborted-turn"`, FR-18, issue #28) — all `FindingClass.Waste` detection logic. A
-sixth check registers a real id — `malformed-line`, built by
+(`CheckId = "interruption-load"`, FR-20, issue #30), `AbortedTurnFinding`
+(`CheckId = "aborted-turn"`, FR-18, issue #28) and `PhaseChurnFinding`
+(`CheckId = "phase-churn"`, FR-19, issue #29) — all `FindingClass.Waste` detection logic. A seventh
+check registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
 but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
 real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
 mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the five Waste-class checks is self-contained, but `FindingClassRegistry`'s
+real one. Each of the six Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.
 

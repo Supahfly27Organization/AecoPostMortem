@@ -19,6 +19,9 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleStatementExtractor.cs` | FR-26's `<custom_instruction>` parser: `RuleStatementExtractor.ExtractBlocks` takes a system prompt's own text and returns its blocks — pure, no file, no session |
 | `RuleStatementDeduplication.cs` | `SessionInstructionBlocks` (one session's blocks, plus `HasInstructionBlocks`), `RuleStatementOccurrence` (a statement plus every session that carried it), and `RuleStatementDeduplication.Deduplicate`, which collapses identical statements across sessions |
 | `AbortedTurnCheck.cs` | FR-18 (S-16, issue #28): `TurnRecord` (the plain per-turn input, aborted or not), `AbortedTurnOccurrence` (reason paired with its 1-based position and the session's own turn count), and `AbortedTurnCheck.Run`, which orders each session's turns and reports only the ones that aborted |
+| `DeclaredIntent.cs` | FR-19's plain input (issue #29): one self-declared phase — `SessionId`, `Phase` (an opaque label) and `Sequence` (the corpus-wide chronological order, the only ordering input this project trusts) |
+| `PhaseOrdering.cs` | `PhaseOrdering.Derive` — the distinct phases in the corpus, ordered by each phase's earliest `Sequence` across every session (FR-19; the S-21 vocabulary pattern applied to phase labels) |
+| `PhaseChurnCheck.cs` | FR-19's check shape (issue #29): `PhaseChurnResult` (a session's returns, its own total intents, and the vocabulary/ordering that produced it), `PhaseChurnCheck.Run`, which derives the ordering once and evaluates each session independently |
 
 ## The invariant
 
@@ -227,14 +230,48 @@ A measured 9 aborts across 8 sessions is low volume (issue #28's edge case): two
 same reason string in different sessions are still two independent abandonments, and merging them
 by reason would make the finding look more recurring than the corpus measures.
 
+### The phase vocabulary and its ordering are corpus-wide, never per-session
+
+FR-19 requires "an earlier phase" to mean something, which needs a vocabulary and an ordering that
+neither implementation may hard-code. `PhaseOrdering.Derive` groups `DeclaredIntent` by `Phase` and
+orders by each phase's *earliest* `Sequence` across every session combined — a phase declared late
+in one session but early in another is ordered by whichever declaration came first corpus-wide, the
+same discipline `ToolVocabulary`/`ToolRoleDeriver` (S-21) apply to tool names. `PhaseChurnCheck.Run`
+derives this ordering exactly once per call and reuses it for every session, so two sessions in the
+same run are always judged against the same phase order.
+
+### A return is "below the highest phase reached so far", not "below the previous phase"
+
+`PhaseChurnCheck`'s per-session loop tracks `highestReached`, the largest ordering position seen so
+far in that session — not simply the position of the previous intent — and `highestReached` only
+advances when an intent's position is at or above it. A call to phase 2 then phase 0 then phase 1
+counts **two** returns, not one: phase 0 is below the high-water mark of 2 (a return), and phase 1 is
+*still* below that same high-water mark of 2 (a second return), because `highestReached` never
+dropped to 0 in the first place — only a new maximum moves it. `Each_return_below_the_highest_phase_
+reached_so_far_is_counted_separately` (`PhaseChurnCheckTests`) is this exact shape and asserts 2.
+Declaring the same phase again in place — whether or not it is the session's current high-water
+mark — is never a return, because "at or above" includes equal.
+
+### `PhaseChurnResult` carries its own denominator and the derivation that produced it
+
+Issue #29's edge case is a measured 104 returns across 352 intents in the worst session: an
+un-normalised return count always makes the longest session look worst. `PhaseChurnResult.Returns`
+never appears without `TotalIntents` — that session's own count, not the corpus's — and every
+result also carries `Vocabulary`, the same ordered list `PhaseOrdering.Derive` produced, so a
+rendered result is never separated from the derivation that could make two implementations disagree
+(Scenario 2). A session that declares no intents contributes no `PhaseChurnResult` at all, because
+grouping is over the intents themselves — there is no session-enumeration side channel that could
+produce a zero for it.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
-five entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
-`FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20) and
-`AbortedTurnCheck` (issue #28, FR-18). The shape they establish — plain per-call/per-session/per-turn
-input records in, structurally-required or structurally-paired results out, no branch on any
-specific tool name — is the pattern later checks in this project should follow.
+six entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+`FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
+`AbortedTurnCheck` (issue #28, FR-18) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
+establish — plain per-call/per-session/per-turn input records in, structurally-required or
+structurally-paired results out, no branch on any specific tool name — is the pattern later checks
+in this project should follow.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

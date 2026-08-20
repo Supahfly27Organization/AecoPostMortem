@@ -17,15 +17,19 @@ volume control (FR-10, FR-12, FR-13).
 | `SystemPromptExtractor.cs` | FR-12: pulls `system.message.data.content` out of a RAW event, hashes it, and dedupes a batch down to its distinct texts |
 | `RewindSnapshotSource.cs` | FR-13: reads `rewind-snapshots/index.json` as one whole-file RAW event at byte offset zero |
 | `ToolArguments.cs` | FR-4's polymorphic `tool.execution_start.data.arguments` parser: `Object` / `String` / `Unparsed`, never coerced |
+| `EventEnvelope.cs` | FR-8/FR-9 (issue #7): reads `id`/`parentId`/`agentId`/`data` out of a stored `RawEvent`'s own payload — separate from `EventEnvelopeParsers`, which only reads `type`/`ts` at RAW ingest time |
+| `ExecutionRecordBuilder.cs` | FR-8/FR-9: rebuilds one session's `RawEvent`s into `Data.Execution.Turn`/`ToolCall`/`Agent` rows plus the causality map, pure and deterministic over `RawEvent.Sequence` order |
+| `SpawnResolutionCheck.cs` | turns an `ExecutionRecordBuilder` agent-reconstruction pass into the `unresolvable-spawn` `CheckRegistryEntry` (issue #23, PRD §3.9's name for it) |
 
 ## References
 
-`Data` — it writes through the RAW store `Data` owns.
+`Data` — it writes through the RAW store `Data` owns, and `ExecutionRecordBuilder` returns
+`Data.Execution.Turn`/`ToolCall`/`Agent` records built from it.
 
-`Findings` — for exactly one purpose: `MalformedLineCheck` builds a `Findings.CheckRegistryEntry`
-so the malformed-line check registers itself (this story's own acceptance scenario). Ingestion does
-not call into `Rules` and does not read any other check or finding shape; reconstructing sessions
-from raw events still needs nothing from either.
+`Findings` — for two purposes: `MalformedLineCheck` builds a `Findings.CheckRegistryEntry` so the
+malformed-line check registers itself (S-02's own acceptance scenario), and `SpawnResolutionCheck`
+does the same for FR-9's spawn-resolution check (this story's Scenario 4). Ingestion does not call
+into `Rules` and does not read any other check or finding shape.
 
 ## Non-obvious decisions
 
@@ -126,6 +130,58 @@ called against the wrong `Kind`, rather than returning a default that would look
 `RawEvent`-to-`ToolCall` pipeline; a later story wires `ToolArguments.Parse` in where
 `tool.execution_start.data.arguments` is read.
 
+### The spawn resolution key is a `toolCallId`, not a separately allocated agent id
+
+The data map's non-circular derivation (Appendix) measured that Copilot reuses one value for both
+roles: the spawning `task` call's own `toolCallId` *is* the value `subagent.started.data.toolCallId`
+later reports for the agent it produced. `ExecutionRecordBuilder` resolves a spawn by looking that
+same id up in a map keyed by every `task` `tool.execution_start`'s own `toolCallId` — not by any
+other correlation — and nesting falls out of the same lookup: the value stored is the `agentId` that
+task call itself carried, `null` for a spawn from the main thread. A `subagent.started` whose
+`toolCallId` never appears as a `task` call's `toolCallId` is excluded from the returned agents
+(`Agent.SpawningToolCallId` is `required`, so an unresolved spawn cannot honestly populate it) and
+counted instead in `SpawnResolutionCheck` — reported, never silently dropped (Scenario 3).
+
+### `Agent.Outcome` reads `subagent.completed`'s four cost fields as one unit
+
+If none of `totalTokens`, `totalToolCalls`, `durationMs` and `model` are present, the outcome is
+`CompletedCostUnknown`, not `Completed` with zeroes — zero is a number a surface would print, and
+the measured 247 of 462 completions that carry none of the four would otherwise be priced at
+nothing. Any one of the four present is enough to call it `Completed`; the constraint that only
+`Completed` may carry non-null cost columns (`ck_agent_cost`, `NORMALIZED_MODEL.md`) does not require
+all four together, only that the other three outcomes carry none. `subagent.failed` takes priority
+over a `subagent.completed` for the same agent if both are somehow present in one session — not
+measured in the reference corpus, so this is a documented judgment call, not an observed rule.
+
+### A turn's tool calls are found by "what was open when", not by a field on the call
+
+Neither `tool.execution_start` nor `_complete` names a `turnId` — only `assistant.turn_start`/
+`turn_end` do. `ExecutionRecordBuilder` tracks the currently open turn while walking a session's
+events in `Sequence` order and records it per event; `ToolCall.TurnId` is that snapshot, and only
+for a main-thread call — the data map measured zero `agentId` on every turn boundary event, so a
+subagent's own tool calls have no turn to belong to and its `TurnId` is always `null`. An `abort`
+event closes the currently open turn as `Aborted`: the measured 9-event gap between 2,384 turn
+starts and 2,375 ends equals the measured 9 `abort` events one-for-one, which is why `abort` is read
+as "this turn's real end", not as an unrelated event.
+
+### `ResultSizeBytes` reads only `result.content`, not the `toolTelemetry` fallback
+
+The data map names two sources for a tool call's result size: `result.content` length (measured 98%
+coverage) and `toolTelemetry.metrics.resultLength` (measured 39%). `ExecutionRecordBuilder` reads
+only the first — a deliberate scope cut for this story, not an oversight, since no acceptance
+scenario needs the last few percent. A future story that needs `ResultSizeBytes` on a call missing
+`result.content` should add the `toolTelemetry` fallback to `GetResultSizeBytes` rather than treating
+its absence as a gap in this one.
+
+### `ExecutionRecordBuilder` is a pure in-memory builder, not yet wired into the store
+
+It takes `RawEvent`s and returns `Data.Execution` records plus a `CheckRegistryEntry` — nothing here
+opens a `PostMortemContext` or writes a derived table. None of this story's acceptance scenarios ask
+for persistence, and `DerivedSchema.Rebuild`/`EnsureCurrent` (`AecoPostMortem.Data/CLAUDE.md`)
+already leave the derived tables empty on purpose, pending a reader. Wiring this builder's output
+into those tables — the actual `rebuild`-populates-rows step — is left for whichever later story
+does that wiring; keeping the two concerns separate mirrors `SessionIngestor` staying RAW-only.
+
 ### The corpus round-trip is a build gate, not a unit test
 
 `test/AecoPostMortem.Ingestion.Tests/ApplyPatchCorpusRoundTripTests.cs` parses and re-serialises
@@ -143,9 +199,11 @@ and forwards its exit code, the same shape as `freeze-corpus-manifest.py --check
 Path discovery (`SessionDiscovery`), the event-line reader (`SessionEventReader`,
 `EventEnvelopeParsers`), RAW persistence (`SessionIngestor`), the malformed-line check
 (`MalformedLineCheck`), volume control (`ExcludedSources`, `SystemPromptExtractor`,
-`RewindSnapshotSource`) and the polymorphic `arguments` parser (`ToolArguments`) exist as composable
-building blocks (FR-1, FR-3, FR-4, FR-6, FR-10, FR-12, FR-13). `ToolArguments` is not yet wired into
-the event-line reader's `RawEvent`-to-`ToolCall` reconstruction. The `ingest` CLI command still
-reports "not implemented" (`AecoPostMortem.Cli`) — wiring these into an actual directory walk is a
-later story. The coverage report and self-exclusion (FR-7/FR-14) and execution-record reconstruction
-(FR-8/FR-9) land with the stories that follow.
+`RewindSnapshotSource`), the polymorphic `arguments` parser (`ToolArguments`) and execution-record
+reconstruction (`ExecutionRecordBuilder`, `EventEnvelope`, `SpawnResolutionCheck`) exist as composable
+building blocks (FR-1, FR-3, FR-4, FR-6, FR-8, FR-9, FR-10, FR-12, FR-13). `ExecutionRecordBuilder`
+is the first caller of `ToolArguments` — it uses it to pull `path` out of an object-shaped
+`arguments` value. The `ingest` CLI command still reports "not implemented" (`AecoPostMortem.Cli`) —
+wiring path discovery, the event reader, `SessionIngestor` and `ExecutionRecordBuilder` into an
+actual directory walk that also populates the derived tables is a later story. The coverage report
+and self-exclusion (FR-7/FR-14) land with the story that follows.

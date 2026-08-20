@@ -1,6 +1,15 @@
 using System.Globalization;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using AecoPostMortem.Api;
 using AecoPostMortem.Data;
 using AecoPostMortem.Data.Execution;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace AecoPostMortem.Cli.Tests;
 
@@ -17,6 +26,28 @@ public sealed class CommandRunnerTests
         return (exitCode, stdout.ToString(), stderr.ToString());
     }
 
+    /// <summary>Drives <c>serve</c> with a fake <c>runHost</c> so the test controls the host's
+    /// lifetime instead of blocking forever on the real <c>app.Run()</c>, and a throwaway Copilot
+    /// root so the result does not depend on whatever is really on the machine running the test.</summary>
+    static (int ExitCode, string Stdout, string Stderr) RunServe(
+        LocalStore store,
+        Func<WebApplication, TextWriter, int> runHost,
+        string? copilotSessionStateRoot = null,
+        params string[] portArguments)
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var arguments = new[] { "serve" }.Concat(portArguments).ToArray();
+        var exitCode = CommandRunner.Run(
+            arguments,
+            stdout,
+            stderr,
+            store,
+            runHost,
+            copilotSessionStateRoot ?? Path.Combine(Path.GetTempPath(), "no-such-copilot-root"));
+        return (exitCode, stdout.ToString(), stderr.ToString());
+    }
+
     [Fact]
     public void With_no_arguments_it_lists_the_commands_on_stdout_and_succeeds()
     {
@@ -30,15 +61,114 @@ public sealed class CommandRunnerTests
         Assert.Equal(string.Empty, stderr);
     }
 
+    /// <summary>Scenario "the three surfaces are routable" (issue #11) starts with the host coming
+    /// up at all: the URL goes to stdout, per its <see cref="CommandSpec.OutputChannel"/>, before
+    /// the host runs.</summary>
     [Fact]
-    public void Serve_reports_what_is_not_yet_implemented_rather_than_failing()
+    public void Serve_prints_the_listening_URL_and_runs_the_host()
     {
-        var (exitCode, stdout, stderr) = Run("serve");
+        using var temporary = new TemporaryStore();
+        WebApplication? captured = null;
+
+        var (exitCode, stdout, stderr) = RunServe(
+            temporary.Store,
+            (app, _) =>
+            {
+                captured = app;
+                return CommandRunner.Success;
+            },
+            portArguments: ["--port", "0"]);
 
         Assert.Equal(CommandRunner.Success, exitCode);
-        Assert.Contains("not implemented yet", stdout);
-        Assert.Contains("S-48", stdout);
+        Assert.StartsWith("http://127.0.0.1:", stdout, StringComparison.Ordinal);
+        Assert.NotNull(captured);
         Assert.Equal(string.Empty, stderr);
+    }
+
+    [Fact]
+    public void Serve_defaults_to_the_documented_default_port_when_none_is_given()
+    {
+        using var temporary = new TemporaryStore();
+
+        var (exitCode, stdout, _) = RunServe(temporary.Store, (_, _) => CommandRunner.Success);
+
+        Assert.Equal(CommandRunner.Success, exitCode);
+        Assert.Contains($":{CommandRunner.DefaultPort}", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serve_accepts_an_explicit_port()
+    {
+        using var temporary = new TemporaryStore();
+
+        var (exitCode, stdout, _) = RunServe(
+            temporary.Store, (_, _) => CommandRunner.Success, portArguments: ["--port", "54321"]);
+
+        Assert.Equal(CommandRunner.Success, exitCode);
+        Assert.Contains(":54321", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serve_rejects_a_non_numeric_port_and_never_builds_a_host()
+    {
+        using var temporary = new TemporaryStore();
+        var hostBuilt = false;
+
+        var (exitCode, stdout, stderr) = RunServe(
+            temporary.Store,
+            (_, _) =>
+            {
+                hostBuilt = true;
+                return CommandRunner.Success;
+            },
+            portArguments: ["--port", "not-a-number"]);
+
+        Assert.Equal(CommandRunner.InvalidArguments, exitCode);
+        Assert.Contains("--port", stderr, StringComparison.Ordinal);
+        Assert.False(hostBuilt);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    /// <summary>Scenario "with no Copilot directory, the app says that instead" (issue #11): the
+    /// endpoint the web shell reads is reachable through the exact host <c>serve</c> builds, not a
+    /// separate one constructed by the test.</summary>
+    [Fact]
+    public void The_app_state_endpoint_is_reachable_through_the_host_serve_builds()
+    {
+        using var temporary = new TemporaryStore();
+        AppStateReport? report = null;
+
+        var (exitCode, _, _) = RunServe(
+            temporary.Store,
+            (app, _) =>
+            {
+                app.Start();
+                try
+                {
+                    var address = app.Services.GetRequiredService<IServer>()
+                        .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+
+                    using var client = new HttpClient { BaseAddress = new Uri(address, UriKind.Absolute) };
+                    var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                    {
+                        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+                    };
+
+                    report = client.GetFromJsonAsync<AppStateReport>(ApiHost.AppStateRoute, options)
+                        .GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    app.StopAsync().GetAwaiter().GetResult();
+                }
+
+                return CommandRunner.Success;
+            },
+            portArguments: ["--port", "0"]);
+
+        Assert.Equal(CommandRunner.Success, exitCode);
+        Assert.NotNull(report);
+        Assert.Equal(AppStateKind.NoSourceFound, report!.Kind);
     }
 
     [Fact]

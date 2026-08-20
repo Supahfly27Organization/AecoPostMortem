@@ -1,0 +1,59 @@
+.app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 3rem;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  color: #1c1c1c;
+}
+
+.app-shell__header {
+  display: flex;
+  align-items: baseline;
+  gap: 2rem;
+  border-bottom: 1px solid #e2e2e2;
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.app-shell__brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.01em;
+}
+
+.app-shell__nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.app-shell__nav a {
+  color: #444;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.app-shell__nav a:hover {
+  color: #111;
+  text-decoration: underline;
+}
+
+.app-shell__nav a.active {
+  color: #111;
+  font-weight: 600;
+}
+
+.coming-soon {
+  border: 1px dashed #cfcfcf;
+  border-radius: 8px;
+  padding: 2rem;
+  color: #555;
+}
+
+.coming-soon h2 {
+  margin-top: 0;
+  color: #1c1c1c;
+}

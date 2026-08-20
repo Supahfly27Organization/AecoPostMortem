@@ -26,6 +26,14 @@ public static class ApiHost
     /// <summary>FR-41's digest route (S-36, issue #44), first served for real here.</summary>
     public const string DigestRoute = "/api/digest";
 
+    /// <summary>FR-40's Rules Inventory route (S-22, issue #35), first served for real here.</summary>
+    public const string RulesInventoryRoute = "/api/rules-inventory";
+
+    /// <summary>The query parameter naming which rule-set version to render — matches
+    /// <c>web/src/api/rulesInventory.ts</c>'s own <c>VersionParameter</c>. Omitted, the most recent
+    /// version in the selected repository is served.</summary>
+    public const string VersionParameter = "version";
+
     /// <summary>The route template <see cref="Build"/> registers for FR-21's session endpoint
     /// (S-08). Use <see cref="SessionRoute"/> to build the concrete request path for one session.</summary>
     public const string SessionRouteTemplate = "/api/sessions/{sessionId}";
@@ -82,6 +90,12 @@ public static class ApiHost
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
 
         app.MapGet(DigestRoute, () => Results.Ok(GetDigest(store)));
+
+        app.MapGet(RulesInventoryRoute, (string? version) =>
+        {
+            var envelope = GetRulesInventory(store, version);
+            return envelope is null ? Results.NotFound() : Results.Ok(envelope);
+        });
 
         app.MapGet(SessionRouteTemplate, (string sessionId) =>
         {
@@ -302,6 +316,57 @@ public static class ApiHost
                 .OrderBy(repository => repository, StringComparer.Ordinal)
                 .ToList(),
         };
+    }
+
+    /// <summary>
+    /// FR-40's real orchestration (S-22, issue #35): resolves the whole store's <see cref="RawEvent"/>s
+    /// into <see cref="SessionRuleSet"/>s (<see cref="SessionRuleSetLookup"/>), classifies every
+    /// distinct statement in the corpus once with <see cref="RulesInventoryClassifier"/>, and serves
+    /// <see cref="RulesInventory.Build"/>'s result for one version. The selected repository is the
+    /// same default <see cref="BuildRepositoryScope"/> gives <see cref="GetDigest"/> — this surface has
+    /// no repository selector of its own (<c>web/CLAUDE.md</c>) — so <paramref name="versionHash"/>
+    /// only ever needs to disambiguate a version within that one repository, never name one itself.
+    /// <see langword="null"/> when there is no version to select at all (an empty store, or a
+    /// <paramref name="versionHash"/> no session in the selected repository ever carried) — the same
+    /// "reported as 404, not a designed empty state" distinction <see cref="GetSession"/> draws for a
+    /// session id the store carries no row for.
+    /// </summary>
+    public static RulesInventoryEnvelope? GetRulesInventory(LocalStore store, string? versionHash)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        using var context = store.Open();
+
+        var sessions = context.Sessions.ToList();
+        var rawEvents = context.RawEvents.ToList();
+
+        var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
+        var repositoryScope = BuildRepositoryScope(sessions);
+
+        var selectedVersion = versionHash is null
+            ? RulesInventory.MostRecentVersion(ruleSets, repositoryScope.SelectedRepository)
+            : new RuleSetVersionId { Repository = repositoryScope.SelectedRepository, Hash = versionHash };
+
+        if (selectedVersion is null)
+        {
+            return null;
+        }
+
+        var statements = ruleSets
+            .SelectMany(set => set.Blocks)
+            .SelectMany(block => block.Statements)
+            .Distinct()
+            .ToList();
+        var classify = RulesInventoryClassifier.BuildClassifier(RuleShapeCatalogue.MatchAll(statements));
+
+        try
+        {
+            return RulesInventoryEnvelope.From(RulesInventory.Build(ruleSets, selectedVersion, classify));
+        }
+        catch (UnknownRuleSetVersionException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Builds the concrete request path for one session's <see cref="SessionRouteTemplate"/>

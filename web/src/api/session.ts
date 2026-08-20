@@ -46,6 +46,14 @@ export interface SessionMasthead {
   contextSize: SessionTokenFigures
 }
 
+/** Mirrors `AecoPostMortem.Api.SessionRecordingStatusEnvelope` (FR-21 part 3 of 3, S-53, issue
+ * #17). A closed three-shape union, the same discipline `SessionTokenFigures` already uses here —
+ * `'complete'` is the only kind a caller may render the tape from as the session's final picture. */
+export type SessionRecordingStatus =
+  | { kind: 'complete' }
+  | { kind: 'ingestIncomplete' }
+  | { kind: 'reconstructionFailed'; skipped: string[] }
+
 /** One chip on the Flight Recorder's chip row (FR-21 part 2 of 3, S-52, issue #16): a finding
  * affecting this session, plus how many sessions across the corpus it affects — "with its count"
  * (the story's own Gherkin wording). */
@@ -57,6 +65,7 @@ export interface SessionFindingChip {
 export interface SessionEnvelope {
   masthead: SessionMasthead
   steps: SessionTapeStep[]
+  status: SessionRecordingStatus
   /** Scenario 3's own designed state: an empty array *is* "no findings affect this session",
    * rendered explicitly by `SessionPage`, never a blank area. */
   findings: SessionFindingChip[]

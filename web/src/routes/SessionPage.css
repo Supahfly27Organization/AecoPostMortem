@@ -28,41 +28,9 @@
   font-weight: 600;
 }
 
-.session-tape {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.session-tape__step {
-  display: flex;
-  gap: 0.75rem;
-  align-items: baseline;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid #e2e2e2;
-  border-radius: 4px;
-}
-
-.session-tape__offset {
-  font-variant-numeric: tabular-nums;
-  color: #666;
-  min-width: 4.5rem;
-}
-
-.session-tape__kind {
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.03em;
-  color: #888;
-  min-width: 4.5rem;
-}
-
-.session-tape__empty {
-  color: #666;
-}
+/* .session-tape* rules moved to src/session/Tape.css (FR-21 part 3 of 3, S-53, issue #17) — the
+   tape itself moved out of this component, and its virtualised absolute-positioning layout would
+   collide with a second, older set of rules for the same class names here. */
 
 .session-page__alert {
   border: 1px solid #c0392b;
@@ -74,6 +42,27 @@
 
 .session-page__no-selection {
   color: #666;
+}
+
+.session-page__incomplete {
+  border: 1px solid #b7891f;
+  background: #fdf6ea;
+  color: #6b4e0e;
+  padding: 0.85rem 1.1rem;
+  border-radius: 6px;
+}
+
+.session-page__reconstruction-failed {
+  border: 1px solid #c0392b;
+  background: #fdecea;
+  color: #7b241c;
+  padding: 0.85rem 1.1rem;
+  border-radius: 6px;
+}
+
+.session-page__reconstruction-failed ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
 }
 
 .session-chips {
@@ -115,30 +104,6 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
-}
-
-.session-tape__step-button {
-  display: flex;
-  width: 100%;
-  gap: 0.75rem;
-  align-items: baseline;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid #e2e2e2;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-.session-tape__step-button[aria-pressed='true'] {
-  border-color: #2c6ecb;
-  background: #eaf1fc;
-}
-
-.session-tape .session-tape__step {
-  padding: 0;
-  border: none;
 }
 
 .inspector {

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import type { RawStepEventEnvelope, SessionEnvelope, SessionFindingChip, SessionTapeStep, ThinkingEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
 import { useStepEvidence } from '../api/useStepEvidence'
+import { Tape } from '../session/Tape'
 import './SessionPage.css'
 
 const numberFormat = new Intl.NumberFormat('en-US')
@@ -17,6 +18,10 @@ const KIND_LABEL: Record<SessionTapeStep['kind'], string> = {
 
 type InspectorTab = 'detail' | 'thinking' | 'raw'
 
+function formatOffset(offsetMs: number): string {
+  return `${(offsetMs / 1000).toFixed(1)}s`
+}
+
 function formatElapsed(elapsedMs: number | null): string {
   if (elapsedMs === null) {
     return 'unknown'
@@ -27,10 +32,6 @@ function formatElapsed(elapsedMs: number | null): string {
   const minutes = totalMinutes % 60
 
   return hours > 0 ? `${hours}h ${minutes}min` : `${minutes} min`
-}
-
-function formatOffset(offsetMs: number): string {
-  return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
 function formatContextSize(contextSize: SessionEnvelope['masthead']['contextSize']): string {
@@ -96,6 +97,32 @@ function Masthead({ masthead }: { masthead: SessionEnvelope['masthead'] }) {
   )
 }
 
+/** FR-21, part 3 of 3 (S-53, issue #17), Scenarios 3 and 4: a session whose masthead and tape are
+ * not yet final states that plainly, in its own words — never the generic load-failure message
+ * (`role="alert"`, above), and never the other non-final state's wording either. Both render in
+ * place of the masthead and tape: today's counts and steps would otherwise read as the session's
+ * finished picture when they are provisional or partly unrecoverable. */
+function NonFinalState({ status }: { status: Extract<SessionEnvelope['status'], { kind: 'ingestIncomplete' | 'reconstructionFailed' }> }) {
+  if (status.kind === 'ingestIncomplete') {
+    return (
+      <div className="session-page__incomplete">
+        <p>This session is still ingesting — it has not recorded its own end yet, so today&rsquo;s figures are not final.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="session-page__reconstruction-failed">
+      <p>Reconstruction failed for this session.</p>
+      <ul>
+        {status.skipped.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** FR-21 part 2 of 3, Scenario 3 (S-52, issue #16): "a chip row states each finding affecting this
  * session with its count." An empty chip row is the designed "no findings" state, not a blank
  * area — rendered explicitly rather than omitting the row entirely. */
@@ -110,43 +137,6 @@ function FindingChips({ chips }: { chips: SessionFindingChip[] }) {
         <li key={chip.finding.recurrence.key} className="session-chips__chip" data-provenance={chip.finding.provenance}>
           <b>{chip.sessionsAffected}×</b>
           <span>{chip.finding.recurrence.key}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/** FR-21 Scenario 2 (wall-clock order with offsets) and Scenario 3 (a session with no steps
- * states that plainly). The server has already ordered `steps` — this renders that order rather
- * than re-deriving it. Each row is a button (FR-21 part 2 of 3, S-52): selecting any step is how
- * the inspector gets its evidence. */
-function Tape({
-  steps,
-  selectedStepId,
-  onSelect,
-}: {
-  steps: SessionTapeStep[]
-  selectedStepId: string | null
-  onSelect: (step: SessionTapeStep) => void
-}) {
-  if (steps.length === 0) {
-    return <p className="session-tape__empty">No steps were recorded for this session.</p>
-  }
-
-  return (
-    <ul className="session-tape" aria-label="Tape">
-      {steps.map((step) => (
-        <li key={step.stepId} className="session-tape__step">
-          <button
-            type="button"
-            className="session-tape__step-button"
-            aria-pressed={step.stepId === selectedStepId}
-            onClick={() => onSelect(step)}
-          >
-            <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
-            <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
-            <span className="session-tape__label">{step.label}</span>
-          </button>
         </li>
       ))}
     </ul>
@@ -292,19 +282,26 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
   return (
     <div className="session-page">
       <Masthead masthead={envelope.masthead} />
-      <FindingChips chips={envelope.findings} />
-      <div className="session-page__body">
-        <Tape steps={envelope.steps} selectedStepId={selectedStep?.stepId ?? null} onSelect={setSelectedStep} />
-        <Inspector sessionId={sessionId} selectedStep={selectedStep} />
-      </div>
+      {envelope.status.kind === 'complete' ? (
+        <>
+          <FindingChips chips={envelope.findings} />
+          <div className="session-page__body">
+            <Tape steps={envelope.steps} onSelectStep={setSelectedStep} />
+            <Inspector sessionId={sessionId} selectedStep={selectedStep} />
+          </div>
+        </>
+      ) : (
+        <NonFinalState status={envelope.status} />
+      )}
     </div>
   )
 }
 
-/** The Session Flight Recorder (FR-21, part 1 of 3 — S-08 — and part 2 of 3 — S-52): the masthead,
- * the finding chips, the time-ordered tape and the inspector. `sessionId` comes from the route
- * (`/sessions/:sessionId`); the bare `/sessions` route carries none, since picking a session from a
- * list is a later story's job (part 3, S-53). */
+/** The Session Flight Recorder (FR-21: part 1 of 3 — S-08 — part 2 of 3 — S-52 — and part 3 of 3
+ * — S-53): the masthead, the finding chips, the virtualised and keyboard-navigable tape and the
+ * inspector, or one of two non-final states in place of the tape and chips (`NonFinalState`).
+ * `sessionId` comes from the route (`/sessions/:sessionId`); the bare `/sessions` route carries
+ * none, since picking a session from a list is a later story's job no part of FR-21 builds. */
 export function SessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
 

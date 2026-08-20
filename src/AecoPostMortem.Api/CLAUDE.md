@@ -13,7 +13,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetSession` and `GetStepEvidence` are the same three without a listener |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
-| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings` |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope` |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
 
@@ -43,6 +43,14 @@ plain inputs" split `Findings/CLAUDE.md` documents for its own checks, just perf
 inside `Findings` because nothing in `AecoPostMortem.Findings` may query the store on its own. See
 `SessionEnvelope.cs`'s own remarks below for why this reads the *derived* tables rather than
 re-deriving them from RAW in this project.
+
+S-53 (issue #17, FR-21 part 3 of 3) widens `GetSession` once more, narrowly: alongside the derived-
+table read above, it also reads this session's own `RawEvents` and runs them through
+`Ingestion.ExecutionRecordBuilder.Build` purely to read back its `SpawnResolutionCheck` — never for
+the `Turn`/`ToolCall`/`Agent` rows that same call also returns, which stay unused here. See
+`SessionEnvelope.cs`'s "`SessionRecordingStatusEnvelope`" remark below for why this second, narrow
+read does not reopen the "duplicate reconstruction path" question the paragraph above already
+settled against.
 
 `ApiHost.GetStepEvidence` (S-52, issue #16) reads `Data.RawEvent` directly instead — the inspector's
 Raw and Thinking tabs are provenance over the *event*, not the derived row, and neither `Turn` nor
@@ -317,6 +325,31 @@ the server on a `TimeSpan` text format. `DateTimeOffset` (`SessionTapeStepEnvelo
 left as-is — `MastheadEnvelope.SpanStart`/`SpanEnd` already establish that this type serialises
 losslessly and needs no format agreement of its own.
 
+### `SessionRecordingStatusEnvelope` widens `GetSession`'s read on purpose, and states why that is not the duplicate-reconstruction-path this project already ruled out
+
+FR-21 part 3 of 3 (S-53, issue #17): the "reconstruction failed, states what was skipped" scenario
+has exactly one real signal already built anywhere in this repository — `Ingestion.
+ExecutionRecordBuilder`'s `SpawnResolutionCheck` (FR-9), which counts a `subagent.started` event
+whose `toolCallId` never resolves against a spawning `task` call rather than silently dropping it.
+Nothing in `Data.Execution.Agent` records an unresolved spawn (an unresolved one is excluded from
+`Agent` entirely — `Ingestion/CLAUDE.md`), so there is no way to answer Scenario 4 from the derived
+tables `GetSession` already reads; the only place the signal exists is a fresh pass over the
+session's own RAW events. `GetSession` therefore reads `context.RawEvents` a second time, scoped to
+the one session being requested (bounded, not a corpus scan), and calls `ExecutionRecordBuilder.
+Build` — but reads only `.SpawnResolutionCheck` off the result, discarding the `Turns`/`ToolCalls`/
+`Agents` it also returns. That is the deliberate line: the "GetSession reads the derived tables ...
+rather than re-deriving them from RAW" remark above is about not maintaining two competing paths
+that both produce the masthead/tape's *rows* — this second read produces nothing that overlaps with
+that; it exists only to answer one yes/no diagnostic question the derived tables cannot answer today.
+
+`SessionRecordingStatusEnvelope` itself is a closed three-shape union behind a private constructor
+— `Complete`, `IngestIncomplete`, `ReconstructionFailed { Skipped }` — the same `[JsonPolymorphic]`/
+`[JsonDerivedType]` mechanism `SessionTokenFiguresEnvelope` and `SuggestionEnvelope` already use, so
+a client reads which of the three states applies from the wire `"kind"` discriminator
+(`"complete"`/`"ingestIncomplete"`/`"reconstructionFailed"`) rather than inferring it from which
+optional fields happen to be present. `SessionEnvelope.Status` is `required` — every served session
+carries one of the three, never an implicit fourth "unspecified" state.
+
 ### `SessionTapeStepEnvelope.Kind` and `OwnerKind` get their camelCase wire form from the global converter, not a per-property override
 
 Unlike `MastheadEnvelope.RuleCoverage`/`DigestEnvelope.State` (which opt out of the global naming
@@ -406,6 +439,12 @@ masthead with an empty `Steps` list. It now also serves `SessionEnvelope.Finding
 `ApiHost.GetSession` still passes an empty `Finding` list to it today, the same "not yet wired to a
 live corpus" gap `/api/digest` documents above: a chip row is real, but a real browser sees an empty
 one until a later story runs every check orchestrator against the live store.
+
+FR-21 part 3 of 3 (S-53, issue #17) added `Status` (`SessionRecordingStatusEnvelope`) to the same
+envelope: `GetSession` now also runs the session's own RAW events through `Ingestion.
+ExecutionRecordBuilder` for its `SpawnResolutionCheck` alone (see the non-obvious decision above),
+so a session with an unresolved subagent spawn is served as `reconstructionFailed` and one with no
+recorded end as `ingestIncomplete`, distinctly from the ordinary `complete` case.
 
 `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceEnvelope.cs`,
 `StepEvidenceLookup.cs`, `ApiHost.GetStepEvidence`, S-52, issue #16) is the third real endpoint:

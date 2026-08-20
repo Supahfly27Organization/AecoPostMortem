@@ -15,6 +15,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolVocabularyMismatchCheck.cs` | FR-35 (S-26, issue #40): `RuleToolMention` (a rule's source text, one named tool, and the `ToolRole` it targets — plain input), `ToolVocabularyMismatch` (sealed base) with `MinorToolNamed`/`NonExistentToolNamed`, and `ToolVocabularyMismatchCheck.Run`, which resolves each mention through `OperandResolver` and compares against the target role's `DominantTool` |
 | `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why `ToolVocabularyMismatchCheck` does not fit a prohibition |
 | `NeverReadPathCheck.cs` | Piece 3's `NeverReadPath` adherence check: `NeverReadPathMention` (a rule's source text and the one path it prohibits — plain input) and `NeverReadPathViolation` (the mention plus how many real `ReadEvent`s matched it and which sessions), and `NeverReadPathCheck.Run`, which matches each mention's path against the corpus on a path-segment boundary (never a bare substring) and reports only mentions with at least one match — no `OperandResolver` involved, since a path operand is not a tool-vocabulary lookup |
+| `UseAAfterBCheck.cs` | Piece 3's `UseAAfterB` adherence check: `UseAAfterBMention` (a rule's source text plus `LaterToolText`/`EarlierToolText` — plain input), `TimedToolCall` (a call's session, tool name and `StartedAt`, opaque and ordinally sortable — no `Data.Execution.ToolCall` reference), `UseAAfterBViolation` (the mention plus how many later-tool calls had no earlier prerequisite call and which sessions), and `UseAAfterBCheck.Run`, which resolves both operands via `OperandResolver.ResolveTwoOperands` (skipping a mention with either side `Unresolved`, the same "no clean case reported" shape `BannedToolCheck` follows) and orders each session's calls by `StartedAt` itself (never trusting caller order) before walking them for the ordering violation |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -412,6 +413,37 @@ vocabulary (`OperandResolver.Resolve`/`.ResolveTwoOperands`) because their opera
 is no tool-name resolution question to ask, so this check is a plain segment-boundary match over its
 own input with no dependency on `OperandResolver` at all.
 
+### `UseAAfterBCheck` needs ordering, so it takes `TimedToolCall` rather than `ToolInvocationShape`
+
+`ToolInvocationShape` (the corpus every other adherence check resolves operands against) carries no
+timing field at all — it is a per-call argument shape, not a session-scoped, orderable event. Real
+observed `Data.Execution.ToolCall.StartedAt` is an already-real, populated ISO-8601 timestamp string
+that sorts correctly under plain ordinal comparison (`Ingestion.ExecutionRecordBuilder` already
+builds its own `ToolCall` rows this way), so `UseAAfterBCheck` takes a second, generic plain-input
+shape — `TimedToolCall` (`SessionId`, `ToolCallId`, `ToolName`, `StartedAt`) — built straight from
+that column, the same "no new RAW parsing needed" story `NeverReadPathCheck` tells for
+`ToolCall.Path`. Operand resolution (which real tools each operand text names) still goes through
+`OperandResolver.ResolveTwoOperands` against the ordinary `ToolInvocationShape` corpus, exactly like
+`PreferAOverB` — the two corpora answer two different questions, "which tools" and "in what order",
+and neither can answer the other's.
+
+### `UseAAfterBCheck` orders each session by `StartedAt` itself, and any earlier prerequisite call satisfies the whole session
+
+Mirrors `AbortedTurnCheck`'s own "position is derived by ordering, not read off a field" discipline:
+`Run` never trusts the order `TimedToolCall`s arrive in — it groups by `SessionId` and sorts each
+group by `StartedAt` (ordinal), tie-broken by `ToolCallId` (ordinal, the same tie-break
+`ExecutionRecordBuilder.BuildToolCalls` already uses to produce that column in the first place), then
+walks the ordered sequence tracking only "has a prerequisite call been seen yet in this session" — a
+call to the later tool is a violation exactly when no earlier-tool call preceded it anywhere in that
+same session, not only the immediately preceding call. This was a deliberate choice among three
+readings scoped via `AskUserQuestion` before coding: requiring the prerequisite to be the
+*immediately* preceding call would flag nearly every real session (interleaved, unrelated calls sit
+between almost any two related ones), and requiring a *fresh* prerequisite before every reuse of the
+later tool adds bookkeeping no rule in the live corpus has been checked against. Once a prerequisite
+has been seen, it silently satisfies every later call to the later tool for the rest of that session —
+the same "one clean case can cover many violations that never happen" shape `BannedToolCheck`'s own
+zero-violation corpus result already established for a different check.
+
 ### `BannedToolUsage.CallCount` can never be zero for a returned result
 
 Every layer `OperandResolver.Resolve` can return (`ExactToolName`, `McpServerField`, `DerivedRole`)
@@ -705,12 +737,13 @@ through it, resolves the matched operands against that corpus's tools, or render
 that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
-nine entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+ten entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
 `AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19),
 `ToolVocabularyMismatchCheck` (issue #40, FR-35), `BannedToolCheck` (piece 3's second slice,
-FR-35's `ToolIsBanned` counterpart) and `NeverReadPathCheck` (piece 3's third slice, FR-35's
-`NeverReadPath` counterpart). The shape they establish — plain per-call/per-session/per-turn/
+FR-35's `ToolIsBanned` counterpart), `NeverReadPathCheck` (piece 3's third slice, FR-35's
+`NeverReadPath` counterpart) and `UseAAfterBCheck` (piece 3's fourth slice, FR-35's `UseAAfterB`
+counterpart). The shape they establish — plain per-call/per-session/per-turn/
 per-mention input records in, structurally-required or structurally-paired results out, no branch on
 any specific tool name — is the pattern later checks in this project should follow.
 
@@ -735,6 +768,23 @@ unless the task is explicitly about migrations `` — phrased two ways across ru
 the check found a real violation: 99 real accesses to that path across the corpus, now a genuine
 `RuleAdherenceToolChoice` finding — the first piece-3 adherence check on this corpus to find a real
 signal rather than an honest empty state.
+
+`UseAAfterBCheck` (piece 3's fourth slice) closes the last of piece 3's three remaining shapes:
+both operands resolve via `OperandResolver.ResolveTwoOperands` against the real `ToolInvocationShape`
+corpus, exactly like `PreferAOverB`, and ordering comes from a second, generic `TimedToolCall` shape
+built straight from the already-real `ToolCall.StartedAt` column — no new RAW parsing needed, unlike
+the "known complexity going in" this slice was originally scoped expecting (see this file's own
+remarks above for why `ToolInvocationShape` alone cannot answer an ordering question).
+`AecoPostMortem.Findings.UseAAfterBFinding` is the real caller, wired into `AecoPostMortem.Api.
+ApiHost.GetDigest` as a ninth check orchestrator, and `RulesInventoryClassifier` now watches a
+`UseAAfterB` match the same way it watches `PreferAOverB` — `Watched` only when both operands
+resolve. Verified against the live 35-session reference corpus: the dominant repository
+(`supahfly27/UpFront`) carries a real `UseAAfterB`-shaped statement (`` Use `get_code_snippet` after
+`search_graph` to read function source ``) — the catalogue matches it for real, but at least one
+operand stays `Unresolved` against this corpus' own tool vocabulary, so it renders
+`CheckableNotYetBuilt` honestly rather than `Watched`, the same "mechanism real, corpus doesn't
+happen to fully exercise it" story `PreferAOverB` and `ToolIsBanned` already told for their own real
+matches. `AlwaysPassParam` is the only piece-3 shape still with no built check.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

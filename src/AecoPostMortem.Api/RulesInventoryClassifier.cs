@@ -4,16 +4,17 @@ namespace AecoPostMortem.Api;
 
 /// <summary>
 /// FR-40's caller-supplied classify function (<see cref="RulesInventory.Build"/>'s own contract).
-/// <see cref="RuleShapeKind.PreferAOverB"/> and <see cref="RuleShapeKind.ToolIsBanned"/> are the two
-/// shapes this classifier actually watches: a <c>PreferAOverB</c> match's operand pair is resolved
-/// via <see cref="OperandResolver.ResolveTwoOperands"/> and watched when both operands resolve; a
+/// <see cref="RuleShapeKind.PreferAOverB"/>, <see cref="RuleShapeKind.ToolIsBanned"/> and
+/// <see cref="RuleShapeKind.UseAAfterB"/> are the shapes this classifier actually watches:
+/// a <c>PreferAOverB</c> or <c>UseAAfterB</c> match's operand pair is resolved via
+/// <see cref="OperandResolver.ResolveTwoOperands"/> and watched when both operands resolve; a
 /// <c>ToolIsBanned</c> match's single operand is resolved via <see cref="OperandResolver.Resolve"/>
 /// and watched when that one operand resolves — no <see cref="ToolRole"/> involved, since
 /// <c>BannedToolCheck</c> (<c>Rules/CLAUDE.md</c>) answers "was the named tool called at all" rather
 /// than a role comparison, the question <c>ToolVocabularyMismatchCheck</c>'s own <c>TargetRole</c>
 /// exists for. Every other matched shape is <see cref="RuleStatementStatus.CheckableNotYetBuilt"/> —
-/// <see cref="RuleShapeKind.NeverReadPath"/>/<see cref="RuleShapeKind.UseAAfterB"/>/
-/// <see cref="RuleShapeKind.AlwaysPassParam"/> have no built check at all. FR-34's own two unmatched
+/// <see cref="RuleShapeKind.NeverReadPath"/> is watched unconditionally instead (below), and
+/// <see cref="RuleShapeKind.AlwaysPassParam"/> has no built check at all. FR-34's own two unmatched
 /// dispositions map onto the two remaining statuses this piece can answer honestly:
 /// <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> (an obligation, no shape fits) is
 /// also <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, and
@@ -75,8 +76,9 @@ public static class RulesInventoryClassifier
         }
 
         // RuleShapeMatch's own contract guarantees OperandBText is non-null exactly for two-operand
-        // shapes, PreferAOverB among them, so this also narrows the nullable type for the call below.
-        if (match.Kind != RuleShapeKind.PreferAOverB || match.OperandBText is null)
+        // shapes, PreferAOverB and UseAAfterB among them, so this also narrows the nullable type for
+        // the call below. Both shapes classify identically: Watched only when both operands resolve.
+        if (match.Kind is not (RuleShapeKind.PreferAOverB or RuleShapeKind.UseAAfterB) || match.OperandBText is null)
         {
             return RuleStatementStatus.CheckableNotYetBuilt;
         }

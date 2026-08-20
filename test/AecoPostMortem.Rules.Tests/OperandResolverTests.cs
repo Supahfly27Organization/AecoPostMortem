@@ -39,16 +39,34 @@ public sealed class OperandResolverTests
     {
         ToolInvocationShape[] invocations =
         [
-            new() { ToolName = "grep-like", HasPattern = true },
-            new() { ToolName = "glob-like", HasPattern = true },
+            new() { ToolName = "pattern-tool-a", HasPattern = true },
+            new() { ToolName = "pattern-tool-b", HasPattern = true },
         ];
 
         var resolved = OperandResolver.Resolve(nameof(ToolRole.Search), invocations);
 
         Assert.Equal(OperandResolutionLayer.DerivedRole, resolved.Layer);
         Assert.Equal(
-            new HashSet<string> { "grep-like", "glob-like" },
+            new HashSet<string> { "pattern-tool-a", "pattern-tool-b" },
             resolved.Tools.ToHashSet());
+    }
+
+    [Fact]
+    public void The_server_field_is_preferred_over_the_derived_role_when_both_would_match()
+    {
+        // The operand text is simultaneously a real McpServerName (layer 2) and, coincidentally,
+        // a valid ToolRole member name (layer 3) — layer 2 must win.
+        ToolInvocationShape[] invocations =
+        [
+            new() { ToolName = "server-tool", HasPattern = true, McpServerName = nameof(ToolRole.Search) },
+            new() { ToolName = "role-only-tool", HasPattern = true },
+        ];
+
+        var resolved = OperandResolver.Resolve(nameof(ToolRole.Search), invocations);
+
+        Assert.Equal(OperandResolutionLayer.McpServerField, resolved.Layer);
+        Assert.Equal(["server-tool"], resolved.Tools);
+        Assert.DoesNotContain("role-only-tool", resolved.Tools);
     }
 
     [Fact]

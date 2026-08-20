@@ -15,9 +15,11 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
+| `Digest.cs` | FR-41 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking |
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
 | `FailedToolCallsFinding.cs` | FR-16 (S-14, issue #26): orchestrates `AecoPostMortem.Rules.FailedToolCallsCheck` into `Finding`s (`FindingClass.Waste`) and a `CheckRegistryEntry` |
+| `InterruptionLoadFinding.cs` | FR-20 (issue #30): reads `Permission` and `ToolCall` through `Data`, decides which tool calls are questions (`ToolName == "ask_user"`), calls `Rules.InterruptionLoadCheck`, and folds the result into one `FindingClass.Waste` finding plus a `CheckRegistryEntry` |
 | `SessionTokenFigures.cs` | FR-24 (S-11, issue #20): reads `Session`'s own token fields into the masthead's token-totals contract — not a `Finding`, no rule adherence involved — closed to `Observed` and `SessionTotalsNotRecorded` |
 
 ## References
@@ -31,9 +33,11 @@ orchestrator can name tools and repositories, the checker never sees them.
 The `Rules` reference is used by `HookFailureFinding` (issue #27), which calls
 `HookFailureCheck.Evaluate` for the paired denominators and builds `Finding`s from the result; by
 `RepeatedFileReadFindingCheck` (issue #25), which reads `AecoPostMortem.Data.Execution.ToolCall` and
-calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; and by
+calls `AecoPostMortem.Rules.RepeatedReadCheck` — the first real use of both references; by
 `FailedToolCallsFinding` (issue #26), which calls `FailedToolCallsCheck` and shapes its
-`ToolFailureRate` results into `Finding`s. The `Data` reference is still not used by
+`ToolFailureRate` results into `Finding`s; and by `InterruptionLoadFinding` (issue #30), which reads
+`AecoPostMortem.Data.Execution.Permission` and `ToolCall` and calls
+`AecoPostMortem.Rules.InterruptionLoadCheck`. The `Data` reference is still not used by
 `HookFailureFinding` or `FailedToolCallsFinding`: `HookFailureFinding.Build` takes plain inputs
 (`allSessionIds`, `sessionsWithToolCall`, `HookFailureEvent`s) rather than querying
 `PostMortemContext` directly, because no code in this repository yet turns `raw_event` into the
@@ -148,6 +152,39 @@ masthead (FR-21) is the story that will call `From` and render its two states; t
 publishes the shape and the presence rule, the same contract-first pattern `FindingEnvelope` and
 `SuggestionEnvelope` used for S-50.
 
+### `ProcessDigest.Build` takes plain, already-resolved inputs — the same reason it can prove it never scans
+
+S-36's own edge case says the masthead's totals are the one place this surface could scan the corpus,
+and it must not (counting a million rows measured 126 ms on SQLite and 118 ms on Postgres —
+`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`). `MastheadCounters`
+is therefore a plain input record — "the stored counters maintained at ingest", not a live count —
+the same reasoning `HookFailureFinding.Build` and `FailedToolCallsFinding` give for taking plain
+inputs instead of reading through `Data` directly: no code in this repository yet writes those
+counters at ingest time, so the caller (a later story) supplies them. `ProcessDigestStructureTests`
+proves the "no scan" guarantee structurally, the same way `SuggestionRendererStructureTests` proves
+"no model call": an allowlist of every type `ProcessDigest`'s public surface may mention has no room
+for an `IQueryable` or a `DbContext`, so a method that cannot accept a live data source cannot issue
+a query when it runs.
+
+### Two designed "nothing to show" states, and they do not collapse into each other
+
+`DigestState.NotYetAnalyzed` (no check has ever run — reusing `CheckRegistryEntry`'s own
+`Ran`/`Refused` distinction, issue #23 Scenario 5, at the digest level) and `DigestState.Incomplete`
+(`MastheadCounters.IngestInProgress`) answer different questions — "has analysis ever happened" versus
+"is analysis still running right now." `ProcessDigest.Build` checks `IngestInProgress` first, so a
+corpus that is both mid-ingest and has no check registered yet still reads `Incomplete`: the more
+urgent, more specific claim wins rather than the two states being merged or left to declare in
+whichever order a caller happens to check them.
+
+### `RuleCoverageStatus` has exactly one member today, on purpose
+
+FR-26 and FR-40 (rule extraction, the coverage bar's population) are Release 2. Rather than a
+nullable or boolean stand-in for "not yet analysed" that a Release-2 figure would later have to
+un-collide from a real zero, the enum simply has no other case yet — the same reasoning
+`FindingEnvelope`'s closed shapes give for making an unrepresentable state a compile-time fact
+instead of a runtime one. A Release-2 value is added here when FR-26/FR-40 land; nothing about
+`Masthead` needs to change to admit it.
+
 ### A refused check and a clean check are distinguished by null, not by a third status
 
 `CheckRegistryEntry.FindingCount` is `null` when `Status` is `Refused` and a real integer —
@@ -186,20 +223,51 @@ so there is structurally nowhere to inject a model client or a clock — proved 
 static field, every public method signature drawn from an explicit allowlist of already-resolved
 data types) rather than merely asserting the behaviour.
 
+### A question is a completed `ask_user` tool call; a permission prompt is its own entity
+
+`InterruptionLoadFinding` (issue #30, FR-20) is the first check to draw its two operand kinds from
+different `Data` entities: permission prompts come straight off `Permission` (already a distinct
+row per prompt, no tool name involved), while questions have to be filtered out of `ToolCall` by
+name the same way `RepeatedFileReadFindingCheck` filters `view` — `QuestionToolName = "ask_user"`
+is the one place in this project allowed to name it (Repo Rule 6 binds `AecoPostMortem.Rules`
+only). One `Finding` covers a whole analysis run rather than one per hook/path/tool identity,
+because there is no natural per-entity grouping for "how many times was the operator interrupted" —
+its `Recurrence.Key` is the fixed string `"interruption-load"`.
+
+### The result-kind breakdown groups by whatever the field says, never by a hardcoded denial string
+
+`InterruptionLoadFinding.PermissionOutcomeBreakdown` groups permission prompts by their literal
+`ResultKind` value (`ResultKind ?? "no outcome recorded"`) and quotes each group's count as
+`EvidenceItem { Field = "result_kind:<value>" }`. It never compares `ResultKind` against a literal
+like `"denied"`: this project does not know Copilot's exact enum values, and matching against a
+guessed string would turn FR-20's "Observed, not string-matched" claim into exactly the string
+match it is contrasted against. This is also what makes the edge case hold without special-casing
+it — an unresolved prompt (`ResultKind` is `null`) renders as its own literal group,
+`"no outcome recorded"`, and can never be merged into a resolved outcome's count by construction.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
-three real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
-`RepeatedFileReadFindingCheck` (issue #25, FR-15) and `FailedToolCallsFinding`
-(`CheckId = "failed-tool-calls"`, FR-16, issue #26) — all `FindingClass.Waste` detection logic. A
-fourth check registers a real id — `malformed-line`, built by
+four real checks: `HookFailureFinding` (issue #27, FR-17, `CheckId = "hook-failure"`),
+`RepeatedFileReadFindingCheck` (issue #25, FR-15), `FailedToolCallsFinding`
+(`CheckId = "failed-tool-calls"`, FR-16, issue #26) and `InterruptionLoadFinding`
+(`CheckId = "interruption-load"`, FR-20, issue #30) — all `FindingClass.Waste` detection logic. A
+fifth check registers a real id — `malformed-line`, built by
 `AecoPostMortem.Ingestion.MalformedLineCheck` from FR-6's per-file read stats (issue #3 / S-02) —
 but nothing in this project constructs it. No check exists in `AecoPostMortem.Rules` yet to bind a
 real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests` exercises the suggestion
 mechanism against a synthetic tool-choice check result standing in for the story that will supply a
-real one. Each of the three Waste-class checks is self-contained, but `FindingClassRegistry`'s
+real one. Each of the four Waste-class checks is self-contained, but `FindingClassRegistry`'s
 Waste `RecurrenceKeyDescription` is shared prose more than one touches, so expect it to need
 merging by hand.
+
+`ProcessDigest.Build` (issue #44, S-36, FR-41 part 1 of 2) ranks whatever findings are handed to it
+by distinct sessions affected and states the masthead's designed states
+(`NotYetAnalyzed`/`Incomplete`/`Analyzed`, `RuleCoverageStatus.NotYetAnalyzed`). It takes
+`MastheadCounters` as a plain input — nothing in this repository yet writes those counters at ingest
+time, the same not-yet-wired gap `HookFailureFinding` and `FailedToolCallsFinding` document for their
+own `Data` reads. Row expansion, the recurrence strip and the repository selector (FR-41 part 2 of 2)
+are S-54, not built here.
 
 `SessionTokenFigures` (issue #20, FR-24) is a non-`Finding` contract published ahead of the masthead
 that will consume it — S-08 (FR-21) is Must Have, not yet built, and this story only depended on the

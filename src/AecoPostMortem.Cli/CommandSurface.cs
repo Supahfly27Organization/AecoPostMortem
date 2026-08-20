@@ -31,7 +31,7 @@ public static class CommandSurface
             "serve",
             "[--port <n>]",
             "stdout — the listening URL",
-            "Start the local API and web shell.",
+            $"Start the local API and web shell (default port {CommandRunner.DefaultPort}); opens nothing by itself.",
             "S-48 (API host, web shell and the zero-data state)"),
     ];
 

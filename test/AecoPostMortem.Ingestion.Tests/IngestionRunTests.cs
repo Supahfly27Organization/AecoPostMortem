@@ -10,12 +10,12 @@ namespace AecoPostMortem.Ingestion.Tests;
 public sealed class IngestionRunTests
 {
     const string SessionStart =
-        """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"C:\\work\\feature-x"}}}""";
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"C:\\work\\feature-x"}}}""";
 
     const string ExcludedSessionStart =
-        """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"C:\\repo\\AecoPostMortem"}}}""";
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"C:\\repo\\AecoPostMortem"}}}""";
 
-    const string TurnStart = """{"type":"assistant.turn_start","ts":"2026-05-07T14:16:49.000Z"}""";
+    const string TurnStart = """{"type":"assistant.turn_start","timestamp":"2026-05-07T14:16:49.000Z"}""";
 
     [Fact]
     public void Sessions_found_counts_every_classified_directory()
@@ -117,7 +117,7 @@ public sealed class IngestionRunTests
 
         // Rewritten, not grown: line 1 is replaced by different bytes at the same byte offset (0).
         const string RewrittenSessionStart =
-            """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.9","version":1}}""";
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.9","version":1}}""";
         File.WriteAllBytes(
             file,
             System.Text.Encoding.UTF8.GetBytes(string.Join('\n', RewrittenSessionStart, TurnStart) + "\n"));

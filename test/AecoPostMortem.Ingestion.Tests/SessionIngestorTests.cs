@@ -194,7 +194,7 @@ public sealed class SessionIngestorTests
     }
 
     static string SessionStartAt(string cwd) =>
-        """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"""
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"""
         + JsonEncode(cwd) + "}}}";
 
     static string JsonEncode(string value) => "\"" + value.Replace(@"\", @"\\") + "\"";

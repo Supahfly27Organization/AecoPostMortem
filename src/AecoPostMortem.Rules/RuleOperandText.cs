@@ -26,6 +26,18 @@ public static class RuleOperandText
         + @"|instead\s+of|rather\s+than)\b.*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+    /// <summary>Same boundary words as <see cref="TrailingClause"/>, minus "and"/"or": those two
+    /// coordinate two nouns in a compound phrase far more often than this project's own corpus phrases
+    /// a genuine qualifying clause with either — a real corpus statement, "always pass build and type
+    /// checks...", joins two check names with "and", it does not introduce a clause the way "when"/
+    /// "because"/... do. Stripping at "and" there silently manufactures a single-word false operand
+    /// ("build"). <see cref="NormalizeForParameterNameShape"/> uses this instead of the ordinary
+    /// <see cref="TrailingClause"/>.</summary>
+    static readonly Regex TrailingClauseExcludingConjunctions = new(
+        @"\s+(?:when|unless|if|because|so|while|that|which|for|to|but|under|with"
+        + @"|instead\s+of|rather\s+than)\b.*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     static readonly Regex LeadingArticle = new(
         @"^(?:an?|the)\s+",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -66,6 +78,33 @@ public static class RuleOperandText
         }
 
         text = TrailingClause.Replace(text, string.Empty);
+        text = LeadingArticle.Replace(text, string.Empty);
+        text = LeadingGerund.Replace(text, string.Empty);
+        text = TrailingRoleNoun.Replace(text, string.Empty);
+
+        return text.Trim().Trim(Punctuation).Trim();
+    }
+
+    /// <summary>
+    /// A second reduction of the same raw span <see cref="Normalize"/> reduces, used only to *validate*
+    /// an <see cref="RuleShapeKind.AlwaysPassParam"/> candidate (never to produce the operand text
+    /// itself — that is still <see cref="Normalize"/>'s own result). Identical to <see cref="Normalize"/>
+    /// except it does not treat "and"/"or" as a clause boundary, so a compound noun phrase joined by
+    /// "and" stays multi-word here even though the ordinary path would collapse it to one word.
+    /// </summary>
+    public static string NormalizeForParameterNameShape(string raw)
+    {
+        ArgumentNullException.ThrowIfNull(raw);
+
+        var text = raw.Trim();
+
+        var code = CodeSpan.Match(text);
+        if (code.Success)
+        {
+            return code.Groups["op"].Value.Trim();
+        }
+
+        text = TrailingClauseExcludingConjunctions.Replace(text, string.Empty);
         text = LeadingArticle.Replace(text, string.Empty);
         text = LeadingGerund.Replace(text, string.Empty);
         text = TrailingRoleNoun.Replace(text, string.Empty);

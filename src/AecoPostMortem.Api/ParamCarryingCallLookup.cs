@@ -21,29 +21,46 @@ public static class ParamCarryingCallLookup
     /// One <see cref="ParamCarryingCall"/> per <paramref name="toolCalls"/> row. A call whose own
     /// <c>tool.execution_start</c> event is missing, or whose <c>arguments</c> is not object-shaped —
     /// the same <c>apply_patch</c> wrinkle <see cref="ToolInvocationShapeLookup"/> already guards
-    /// against — carries no argument keys at all, rather than guessing from the raw text.
+    /// against — reports <see cref="ParamCarryingCall.ArgumentsRecorded"/> as <see langword="false"/>
+    /// and carries no argument keys, rather than guessing from the raw text or letting an unrecorded
+    /// call read as one that was recorded empty.
     /// </summary>
     public static IReadOnlyList<ParamCarryingCall> BuildAll(
         IReadOnlyList<ToolCall> toolCalls,
         IReadOnlyList<Agent> agents,
         IReadOnlyList<RawEvent> rawEvents)
     {
+        ArgumentNullException.ThrowIfNull(rawEvents);
+
+        return BuildAll(toolCalls, agents, RawToolArguments.ByCall(rawEvents));
+    }
+
+    /// <summary>
+    /// Overload for a caller that already built the shared RAW-arguments dictionary — today,
+    /// <see cref="ApiHost.GetDigest"/>, which needs the identical dictionary for this lookup and for
+    /// <see cref="ToolInvocationShapeLookup"/> and would otherwise parse every <c>tool.execution_start</c>
+    /// payload in scope twice.
+    /// </summary>
+    internal static IReadOnlyList<ParamCarryingCall> BuildAll(
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents,
+        IReadOnlyDictionary<(string SessionId, string ToolCallId), ToolArguments> argumentsByCall)
+    {
         ArgumentNullException.ThrowIfNull(toolCalls);
         ArgumentNullException.ThrowIfNull(agents);
-        ArgumentNullException.ThrowIfNull(rawEvents);
+        ArgumentNullException.ThrowIfNull(argumentsByCall);
 
         var spawningCallIds = agents
             .Select(agent => (agent.SessionId, agent.SpawningToolCallId))
             .ToHashSet();
 
-        var argumentsByCall = RawToolArguments.ByCall(rawEvents);
-
         return toolCalls
             .Select(call =>
             {
                 var arguments = argumentsByCall.GetValueOrDefault((call.SessionId, call.ToolCallId));
-                var argumentKeys = arguments is { Kind: ToolArgumentKind.Object }
-                    ? arguments.PropertyNames.ToHashSet(StringComparer.Ordinal)
+                var argumentsRecorded = arguments is { Kind: ToolArgumentKind.Object };
+                var argumentKeys = argumentsRecorded
+                    ? arguments!.PropertyNames.ToHashSet(StringComparer.Ordinal)
                     : new HashSet<string>(StringComparer.Ordinal);
 
                 return new ParamCarryingCall
@@ -51,6 +68,7 @@ public static class ParamCarryingCallLookup
                     SessionId = call.SessionId,
                     ToolCallId = call.ToolCallId,
                     SpawnsAgent = spawningCallIds.Contains((call.SessionId, call.ToolCallId)),
+                    ArgumentsRecorded = argumentsRecorded,
                     ArgumentKeys = argumentKeys,
                 };
             })

@@ -11,12 +11,14 @@ namespace AecoPostMortem.Rules.Tests;
 /// </summary>
 public sealed class AlwaysPassParamCheckTests
 {
-    static ParamCarryingCall Call(string sessionId, string toolCallId, bool spawnsAgent, params string[] argumentKeys) =>
+    static ParamCarryingCall Call(
+        string sessionId, string toolCallId, bool spawnsAgent, bool argumentsRecorded, params string[] argumentKeys) =>
         new()
         {
             SessionId = sessionId,
             ToolCallId = toolCallId,
             SpawnsAgent = spawnsAgent,
+            ArgumentsRecorded = argumentsRecorded,
             ArgumentKeys = argumentKeys.ToHashSet(StringComparer.Ordinal),
         };
 
@@ -31,7 +33,7 @@ public sealed class AlwaysPassParamCheckTests
                 ParamName = "model",
             },
         };
-        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, "description", "prompt") };
+        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: true, "description", "prompt") };
 
         var results = AlwaysPassParamCheck.Run(mentions, calls);
 
@@ -45,7 +47,7 @@ public sealed class AlwaysPassParamCheckTests
     public void A_spawn_call_carrying_the_named_parameter_produces_no_violation()
     {
         var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
-        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, "model") };
+        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: true, "model") };
 
         var results = AlwaysPassParamCheck.Run(mentions, calls);
 
@@ -56,7 +58,7 @@ public sealed class AlwaysPassParamCheckTests
     public void A_non_spawn_call_missing_the_parameter_is_never_counted()
     {
         var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
-        var calls = new[] { Call("s1", "tc1", spawnsAgent: false) };
+        var calls = new[] { Call("s1", "tc1", spawnsAgent: false, argumentsRecorded: true) };
 
         var results = AlwaysPassParamCheck.Run(mentions, calls);
 
@@ -73,11 +75,44 @@ public sealed class AlwaysPassParamCheckTests
         Assert.Empty(results);
     }
 
+    /// <summary>Code review caught this: a call whose own RAW arguments were never recorded at all (no
+    /// matching <c>tool.execution_start</c> event, or a non-object-shaped value) is a different fact
+    /// from a call whose arguments were recorded and genuinely omitted the key — "we don't know" must
+    /// never read as "it violated", the same "Unresolved is its own state, not an empty Tools set"
+    /// discipline <c>OperandResolver</c> already documents.</summary>
+    [Fact]
+    public void A_spawn_call_with_no_recorded_arguments_produces_no_violation()
+    {
+        var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
+        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: false) };
+
+        var results = AlwaysPassParamCheck.Run(mentions, calls);
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void A_mix_of_recorded_and_unrecorded_calls_counts_only_the_recorded_violation()
+    {
+        var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
+        var calls = new[]
+        {
+            Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: true),
+            Call("s2", "tc2", spawnsAgent: true, argumentsRecorded: false),
+        };
+
+        var results = AlwaysPassParamCheck.Run(mentions, calls);
+
+        var violation = Assert.Single(results);
+        Assert.Equal(1, violation.ViolationCount);
+        Assert.Equal(["s1"], violation.SessionIds);
+    }
+
     [Fact]
     public void Matching_is_case_sensitive_because_argument_keys_are_provider_defined_json_fields()
     {
         var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
-        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, "Model") };
+        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: true, "Model") };
 
         var results = AlwaysPassParamCheck.Run(mentions, calls);
 
@@ -91,8 +126,8 @@ public sealed class AlwaysPassParamCheckTests
         var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
         var calls = new[]
         {
-            Call("s1", "tc1", spawnsAgent: true),
-            Call("s2", "tc2", spawnsAgent: true),
+            Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: true),
+            Call("s2", "tc2", spawnsAgent: true, argumentsRecorded: true),
         };
 
         var results = AlwaysPassParamCheck.Run(mentions, calls);
@@ -106,7 +141,7 @@ public sealed class AlwaysPassParamCheckTests
     public void A_mention_with_no_matching_kind_of_call_produces_no_result_rather_than_a_zero_violation()
     {
         var mentions = new[] { new AlwaysPassParamMention { SourceText = "...", ParamName = "model" } };
-        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, "model") };
+        var calls = new[] { Call("s1", "tc1", spawnsAgent: true, argumentsRecorded: true, "model") };
 
         var results = AlwaysPassParamCheck.Run(mentions, calls);
 

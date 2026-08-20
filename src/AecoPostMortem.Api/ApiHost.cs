@@ -250,11 +250,15 @@ public static class ApiHost
                 .SelectMany(block => block.Statements)
                 .Distinct()
                 .ToList()).Matches;
-        var invocations = ToolInvocationShapeLookup.BuildAll(scopedToolCalls, scopedAgents, scopedRawEvents);
+        // Computed once and shared: ToolInvocationShapeLookup and ParamCarryingCallLookup both need
+        // every scoped call's own RAW arguments, and would otherwise each parse the identical
+        // tool.execution_start payloads a second time.
+        var scopedArgumentsByCall = RawToolArguments.ByCall(scopedRawEvents);
+        var invocations = ToolInvocationShapeLookup.BuildAll(scopedToolCalls, scopedAgents, scopedArgumentsByCall);
         var bannedTool = BannedToolFinding.Run(ruleShapeMatches, invocations, scopedToolCalls);
         var neverReadPath = NeverReadPathFinding.Run(ruleShapeMatches, scopedToolCalls);
         var useAAfterB = UseAAfterBFinding.Run(ruleShapeMatches, invocations, scopedToolCalls);
-        var paramCarryingCalls = ParamCarryingCallLookup.BuildAll(scopedToolCalls, scopedAgents, scopedRawEvents);
+        var paramCarryingCalls = ParamCarryingCallLookup.BuildAll(scopedToolCalls, scopedAgents, scopedArgumentsByCall);
         var alwaysPassParam = AlwaysPassParamFinding.Run(ruleShapeMatches, paramCarryingCalls);
 
         var findings = repeatedReads.Findings

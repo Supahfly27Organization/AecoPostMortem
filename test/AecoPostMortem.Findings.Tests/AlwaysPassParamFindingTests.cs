@@ -16,12 +16,14 @@ public sealed class AlwaysPassParamFindingTests
         OperandAText = paramName,
     };
 
-    static ParamCarryingCall Call(string sessionId, string toolCallId, bool spawnsAgent, params string[] argumentKeys) =>
+    static ParamCarryingCall Call(
+        string sessionId, string toolCallId, bool spawnsAgent, bool argumentsRecorded, params string[] argumentKeys) =>
         new()
         {
             SessionId = sessionId,
             ToolCallId = toolCallId,
             SpawnsAgent = spawnsAgent,
+            ArgumentsRecorded = argumentsRecorded,
             ArgumentKeys = argumentKeys.ToHashSet(StringComparer.Ordinal),
         };
 
@@ -32,7 +34,7 @@ public sealed class AlwaysPassParamFindingTests
         {
             AlwaysPassParamMatch("Always pass an explicit `model` param when dispatching a subagent.", "model"),
         };
-        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true, "prompt") };
+        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true, argumentsRecorded: true, "prompt") };
 
         var result = AlwaysPassParamFinding.Run(matches, calls);
 
@@ -53,7 +55,7 @@ public sealed class AlwaysPassParamFindingTests
         {
             AlwaysPassParamMatch("Always pass an explicit `model` param when dispatching a subagent.", "model"),
         };
-        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true, "model") };
+        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true, argumentsRecorded: true, "model") };
 
         var result = AlwaysPassParamFinding.Run(matches, calls);
 
@@ -68,7 +70,7 @@ public sealed class AlwaysPassParamFindingTests
         {
             AlwaysPassParamMatch("Always pass an explicit `model` param when dispatching a subagent.", "model"),
         };
-        var calls = new[] { Call("session-1", "tc1", spawnsAgent: false) };
+        var calls = new[] { Call("session-1", "tc1", spawnsAgent: false, argumentsRecorded: true) };
 
         var result = AlwaysPassParamFinding.Run(matches, calls);
 
@@ -87,7 +89,23 @@ public sealed class AlwaysPassParamFindingTests
                 OperandAText = "grep",
             },
         };
-        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true) };
+        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true, argumentsRecorded: true) };
+
+        var result = AlwaysPassParamFinding.Run(matches, calls);
+
+        Assert.Empty(result.Findings);
+    }
+
+    /// <summary>Code review caught this: a call with no recorded arguments must not read as a
+    /// violation — see <see cref="ParamCarryingCall.ArgumentsRecorded"/>'s own remarks.</summary>
+    [Fact]
+    public void A_spawn_call_with_no_recorded_arguments_produces_no_finding()
+    {
+        var matches = new[]
+        {
+            AlwaysPassParamMatch("Always pass an explicit `model` param when dispatching a subagent.", "model"),
+        };
+        var calls = new[] { Call("session-1", "tc1", spawnsAgent: true, argumentsRecorded: false) };
 
         var result = AlwaysPassParamFinding.Run(matches, calls);
 
@@ -103,8 +121,8 @@ public sealed class AlwaysPassParamFindingTests
         };
         var calls = new[]
         {
-            Call("session-1", "tc1", spawnsAgent: true, "model"),
-            Call("session-2", "tc2", spawnsAgent: false),
+            Call("session-1", "tc1", spawnsAgent: true, argumentsRecorded: true, "model"),
+            Call("session-2", "tc2", spawnsAgent: false, argumentsRecorded: true),
         };
 
         var result = AlwaysPassParamFinding.Run(matches, calls);

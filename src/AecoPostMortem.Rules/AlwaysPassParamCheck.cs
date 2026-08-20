@@ -14,7 +14,15 @@ public sealed record AlwaysPassParamMention
 /// spawned a subagent (a structural fact, not a name read from its own arguments — the same signal
 /// <see cref="ToolInvocationShape.SpawnsAgent"/> already carries) and which argument keys its own
 /// <c>tool.execution_start.data.arguments</c> named. <see cref="ArgumentKeys"/> is opaque provider
-/// text, never interpreted as meaning here.</summary>
+/// text, never interpreted as meaning here.
+///
+/// <para><see cref="ArgumentsRecorded"/> keeps "we have no record of this call's own arguments at
+/// all" (no matching RAW event, or a non-object-shaped value) from being indistinguishable from
+/// "we recorded them, and the named key genuinely was not there" — the same reasoning
+/// <see cref="OperandResolutionLayer.Unresolved"/> is its own enum member for rather than an empty
+/// <c>Tools</c> set on a layer that claims to have matched. A call with <c>ArgumentsRecorded == false</c>
+/// always carries an empty <see cref="ArgumentKeys"/>, but the two are not the same fact, and
+/// <see cref="AlwaysPassParamCheck"/> must never read the first as the second.</para></summary>
 public sealed record ParamCarryingCall
 {
     public required string SessionId { get; init; }
@@ -22,6 +30,8 @@ public sealed record ParamCarryingCall
     public required string ToolCallId { get; init; }
 
     public required bool SpawnsAgent { get; init; }
+
+    public required bool ArgumentsRecorded { get; init; }
 
     public required IReadOnlySet<string> ArgumentKeys { get; init; }
 }
@@ -61,7 +71,9 @@ public static class AlwaysPassParamCheck
         ArgumentNullException.ThrowIfNull(mentions);
         ArgumentNullException.ThrowIfNull(calls);
 
-        var spawnCalls = calls.Where(call => call.SpawnsAgent).ToArray();
+        // A call whose own arguments were never recorded carries nothing to test the mention
+        // against — skipping it here is what keeps "we don't know" from reading as "it violated".
+        var spawnCalls = calls.Where(call => call.SpawnsAgent && call.ArgumentsRecorded).ToArray();
 
         var results = new List<AlwaysPassParamViolation>();
 

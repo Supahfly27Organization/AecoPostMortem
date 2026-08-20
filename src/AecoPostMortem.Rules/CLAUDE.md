@@ -16,7 +16,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why `ToolVocabularyMismatchCheck` does not fit a prohibition |
 | `NeverReadPathCheck.cs` | Piece 3's `NeverReadPath` adherence check: `NeverReadPathMention` (a rule's source text and the one path it prohibits — plain input) and `NeverReadPathViolation` (the mention plus how many real `ReadEvent`s matched it and which sessions), and `NeverReadPathCheck.Run`, which matches each mention's path against the corpus on a path-segment boundary (never a bare substring) and reports only mentions with at least one match — no `OperandResolver` involved, since a path operand is not a tool-vocabulary lookup |
 | `UseAAfterBCheck.cs` | Piece 3's `UseAAfterB` adherence check: `UseAAfterBMention` (a rule's source text plus `LaterToolText`/`EarlierToolText` — plain input), `TimedToolCall` (a call's session, tool name and `StartedAt`, opaque and ordinally sortable — no `Data.Execution.ToolCall` reference), `UseAAfterBViolation` (the mention plus how many later-tool calls had no earlier prerequisite call and which sessions), and `UseAAfterBCheck.Run`, which resolves both operands via `OperandResolver.ResolveTwoOperands` (skipping a mention with either side `Unresolved`, the same "no clean case reported" shape `BannedToolCheck` follows) and orders each session's calls by `StartedAt` itself (never trusting caller order) before walking them for the ordering violation |
-| `AlwaysPassParamCheck.cs` | Piece 3's fifth and final slice, `AlwaysPassParam`'s adherence check: `AlwaysPassParamMention` (a rule's source text and the one argument key it requires — plain input), `ParamCarryingCall` (a call's session, tool call id, `SpawnsAgent` and the opaque `ArgumentKeys` set its own RAW arguments carried), `AlwaysPassParamViolation` (the mention plus how many subagent-dispatch calls omitted the key and which sessions), and `AlwaysPassParamCheck.Run`, which filters to `SpawnsAgent` calls only — the one structural, Repo-Rule-6-safe population this shape's own operand can name without guessing (see below) — and reports a mention only when at least one such call is missing the key, the same "no clean case reported" shape `BannedToolCheck`/`NeverReadPathCheck` already follow |
+| `AlwaysPassParamCheck.cs` | Piece 3's fifth and final slice, `AlwaysPassParam`'s adherence check: `AlwaysPassParamMention` (a rule's source text and the one argument key it requires — plain input), `ParamCarryingCall` (a call's session, tool call id, `SpawnsAgent`, `ArgumentsRecorded` and the opaque `ArgumentKeys` set its own RAW arguments carried), `AlwaysPassParamViolation` (the mention plus how many subagent-dispatch calls omitted the key and which sessions), and `AlwaysPassParamCheck.Run`, which filters to `SpawnsAgent && ArgumentsRecorded` calls only — the one structural, Repo-Rule-6-safe population this shape's own operand can name without guessing (see below), narrowed further to calls this project actually has a record of — and reports a mention only when at least one such call is missing the key, the same "no clean case reported" shape `BannedToolCheck`/`NeverReadPathCheck` already follow |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -35,7 +35,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RulesInventory.cs` | FR-40 (S-22, issue #35): `RuleStatementStatus` (the closed four-shape status union), `RuleRetirement` (in force / retired at a date), `RulesInventoryRow`, `RulesInventoryStatusCounts`, `RulesInventoryState`, `RulesInventory.Build`/`.MostRecentVersion`, and `UnknownRuleSetVersionException` — one rule-set version's statements, each with exactly one status, its origin, its reach, its in-force window and its retirement |
 | `RuleShape.cs` | FR-34 (S-25, issue #39): `RuleShapeKind` (the closed five-member shape enum), `RuleShapeMatch` (a statement, its shape, and the operand text lifted from it), `UnmatchedStatementDisposition`/`UnmatchedStatement` (FR-40's two middle inventory statuses, each with a reason), and `RuleShapeMatching` (the partition, with a computed `StatementCount`) |
 | `RuleShapeCatalogue.cs` | FR-34's catalogue itself: `RuleShapeCatalogue.Shapes`, `.TryMatch` and `.MatchAll` — eight phrasing patterns across five shapes, matched in precedence order, with operands read from the matched statement's own text |
-| `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only), `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows), and `.LooksLikeParameterName` (a single-token test — a real JSON argument key is always one token, so a multi-word capture is rejected rather than matched with unearned confidence) |
+| `RuleOperandText.cs` | `RuleOperandText.Normalize` (a captured span reduced to the operand: code span, article, gerund, subordinate clause, role noun — grammar only), `.NormalizeForParameterNameShape` (the same reduction, minus "and"/"or" as a clause boundary — `AlwaysPassParam`'s own operand-shape guard uses this second reduction so a compound phrase joined by "and" is not silently collapsed to one spurious word), `.LooksLikePath` (a test of the operand's own characters, never a comparison against a path this project knows), and `.LooksLikeParameterName` (a single-token test — a real JSON argument key is always one token, so a multi-word capture is rejected rather than matched with unearned confidence) |
 | `ContradictionCheck.cs` | FR-43 (S-38, issue #47): `ContradictionCandidate` (a pair of statements plus their shared, negation-stripped wording) and `ContradictionCheck.Run` — pairwise keyword-polarity detection over whatever statements the caller hands in, `i < j` only so no statement is ever compared against itself |
 | `RuleSetVersionAdjacency.cs` | FR-39 (S-35, issue #43): `RuleSetVersionAdjacency.RequireAdjacentPair` — confirms two `RuleSetVersionId`s are the same repository and immediately consecutive within a repository's own chronologically ordered `RuleSetVersion`s, returning both as `(Before, After)`, or throws `MixedRuleSetVersionException` (different repositories), `UnknownRuleSetVersionException` (a hash the repository never carried) or `NonAdjacentRuleSetVersionsException` (naming every intervening version) — the primitive the Monitor comparison scopes itself with before computing anything |
 
@@ -462,20 +462,38 @@ with false positives (most tools have no reason to carry an arbitrary key like `
 `AskUserQuestion` before coding, the same "settle the design fork, don't guess" precedent
 `UseAAfterBCheck`'s own ordering-semantics decision set.
 
-### A known, un-fixed gap: `TrailingClause`'s "and" stripping can turn a multi-word operand into a spuriously valid single word
+### `ParamCarryingCall.ArgumentsRecorded` keeps "we don't know" from reading as "it violated"
 
-`RuleOperandText.LooksLikeParameterName` rejects a multi-word capture, but it only ever sees the
-*already-normalized* operand — `RuleShapeCatalogue.OperandSuitsShape` has no access to the raw span
-`Normalize` reduced it from. A real ambiguity this project's own live corpus surfaced during scoping:
-"always pass build and type checks before committing" means "pass a CI check", not "pass an argument",
-but `TrailingClause` treats "and" as a subordinate-clause boundary the same way it treats "when" or
-"for", stripping " and type checks before committing" and leaving the single word "build" — which
-passes the parameter-name guard and would be watched as a (spurious) real parameter obligation. This is
-a pre-existing limitation of shared grammar-stripping machinery every shape depends on, not something
-`AlwaysPassParam` introduces, and fixing it would mean auditing "and"'s effect on every other shape's
-own operand captures too — out of scope for this slice. Flagged here rather than silently accepted:
-a future story that wants to close it should give `OperandSuitsShape` access to the pre-normalization
-span, not add a second heuristic on top of the already-normalized text.
+Also caught in code review, before merge: `ArgumentKeys` alone cannot distinguish "this call's own RAW
+arguments were never recorded at all" (no matching `tool.execution_start` event, or a non-object-shaped
+value) from "arguments were recorded, and the named key genuinely was not among them" — both produce an
+empty set. `AlwaysPassParamCheck.Run` filters its spawn-call population to `ArgumentsRecorded && SpawnsAgent`
+rather than `SpawnsAgent` alone, so an unrecorded call contributes no violation at all — the same
+"`Unresolved` is its own state, never an empty `Tools` set on a layer that claims to have matched"
+discipline `OperandResolver` already documents, applied here to argument-key presence instead of tool
+resolution.
+
+### `AlwaysPassParam`'s operand guard is two checks, not one — closed in code review
+
+`RuleOperandText.LooksLikeParameterName` alone only rejects an *already multi-word* operand — it has
+no way to notice that `TrailingClause`'s own "and" stripping had already manufactured a single word out
+of a real compound phrase before the guard ever saw it. A real ambiguity this project's own live corpus
+surfaced during scoping: "always pass build and type checks before committing" means "pass a CI check",
+not "pass an argument", but `TrailingClause` treats "and" as a subordinate-clause boundary the same way
+it treats "when" or "for", stripping " and type checks before committing" and leaving the single word
+"build" — which the parameter-name guard alone would have accepted. Code review caught this before
+merge (the deferral this entry originally recorded overstated its own fix cost: `TryMatch` already
+holds the pre-normalization span at the exact point it calls `OperandSuitsShape`). The real fix needed
+no audit of every other shape's own operand captures, only a second, `AlwaysPassParam`-only reduction:
+`RuleOperandText.NormalizeForParameterNameShape` mirrors `Normalize` but excludes "and"/"or" from its
+own clause-stripping regex (`TrailingClauseExcludingConjunctions`) — "and" coordinates two nouns in a
+compound phrase far more often than this corpus phrases a genuine qualifying clause with it.
+`OperandSuitsShape` now requires *both* the ordinary normalized operand and this second reduction of
+the raw span to pass `LooksLikeParameterName`, so a compound phrase stays multi-word under at least one
+of the two and is rejected. Also closed in the same pass: a path-shaped single-token operand
+(`` `CHANGELOG.md` ``) is not a JSON argument key either — `AlwaysPassParam` now also requires
+`!LooksLikePath(operandA)`, the same discrimination `ToolIsBanned` already makes in the other
+direction.
 
 ### `BannedToolUsage.CallCount` can never be zero for a returned result
 

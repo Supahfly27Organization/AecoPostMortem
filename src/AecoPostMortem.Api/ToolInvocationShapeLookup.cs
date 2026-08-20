@@ -32,15 +32,29 @@ public static class ToolInvocationShapeLookup
         IReadOnlyList<Agent> agents,
         IReadOnlyList<RawEvent> rawEvents)
     {
+        ArgumentNullException.ThrowIfNull(rawEvents);
+
+        return BuildAll(toolCalls, agents, RawToolArguments.ByCall(rawEvents));
+    }
+
+    /// <summary>
+    /// Overload for a caller that already built the shared RAW-arguments dictionary — today,
+    /// <see cref="ApiHost.GetDigest"/>, which needs the identical dictionary for this lookup and for
+    /// <see cref="ParamCarryingCallLookup"/> and would otherwise parse every <c>tool.execution_start</c>
+    /// payload in scope twice.
+    /// </summary>
+    internal static IReadOnlyList<ToolInvocationShape> BuildAll(
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents,
+        IReadOnlyDictionary<(string SessionId, string ToolCallId), ToolArguments> argumentsByCall)
+    {
         ArgumentNullException.ThrowIfNull(toolCalls);
         ArgumentNullException.ThrowIfNull(agents);
-        ArgumentNullException.ThrowIfNull(rawEvents);
+        ArgumentNullException.ThrowIfNull(argumentsByCall);
 
         var spawningCallIds = agents
             .Select(agent => (agent.SessionId, agent.SpawningToolCallId))
             .ToHashSet();
-
-        var argumentsByCall = RawToolArguments.ByCall(rawEvents);
 
         return toolCalls
             .Select(call =>

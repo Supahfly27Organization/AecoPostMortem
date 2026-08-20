@@ -77,23 +77,28 @@ public sealed class ParamCarryingCallLookupTests
         var call = Assert.Single(ParamCarryingCallLookup.BuildAll(toolCalls, [], rawEvents));
 
         Assert.Equal(new HashSet<string> { "prompt", "model" }, call.ArgumentKeys);
+        Assert.True(call.ArgumentsRecorded);
     }
 
+    /// <summary>Code review caught this: "no matching RAW event" must not be indistinguishable from
+    /// "recorded, and the key genuinely wasn't there" — <see cref="ParamCarryingCall.ArgumentsRecorded"/>
+    /// is <see langword="false"/> here, not merely an empty <see cref="ParamCarryingCall.ArgumentKeys"/>.</summary>
     [Fact]
-    public void A_call_with_no_matching_raw_start_event_carries_no_argument_keys()
+    public void A_call_with_no_matching_raw_start_event_has_unrecorded_arguments()
     {
         var toolCalls = new[] { ACall("tc1", "task") };
 
         var call = Assert.Single(ParamCarryingCallLookup.BuildAll(toolCalls, [], []));
 
         Assert.Empty(call.ArgumentKeys);
+        Assert.False(call.ArgumentsRecorded);
     }
 
     /// <summary>The same real wrinkle <see cref="ToolInvocationShapeLookup"/> already guards against:
     /// <c>apply_patch</c>'s own <c>arguments</c> is a JSON string, not an object — there are no field
-    /// names to read off it.</summary>
+    /// names to read off it, and no key presence question can honestly be answered either.</summary>
     [Fact]
-    public void A_string_shaped_arguments_value_carries_no_argument_keys()
+    public void A_string_shaped_arguments_value_has_unrecorded_arguments()
     {
         var toolCalls = new[] { ACall("tc1", "apply_patch") };
         var rawEvents = new[]
@@ -104,5 +109,6 @@ public sealed class ParamCarryingCallLookupTests
         var call = Assert.Single(ParamCarryingCallLookup.BuildAll(toolCalls, [], rawEvents));
 
         Assert.Empty(call.ArgumentKeys);
+        Assert.False(call.ArgumentsRecorded);
     }
 }

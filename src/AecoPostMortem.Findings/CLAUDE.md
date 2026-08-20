@@ -28,6 +28,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
 | `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
+| `ContradictionCheck.cs` | FR-43 (S-38, issue #47): orchestrates `Rules.ContradictionCheck` — groups sessions by rule-set version before calling in (never comparing statements from two versions), wraps the result in `ContradictionCheck.Result` (`Candidates`, a required `Provenance` always `Inferred`, and the `CheckRegistryEntry`), `CheckId = "contradiction-check"`. Not a `Finding`-producing check — see below |
 
 ## References
 
@@ -74,6 +75,13 @@ supply once that ETL exists, the same way `ToolCallOutcome` is reused directly b
 `AecoPostMortem.Ingestion` references this project the other way — for `CheckRegistryEntry` only —
 so `MalformedLineCheck` can register FR-6's check without `Findings` needing to know anything about
 ingestion. See `AecoPostMortem.Ingestion/CLAUDE.md`.
+
+`ContradictionCheck` (issue #47, S-38) is the fourth caller of `Rules`, and the first whose `Rules`
+call takes `Rules.SessionRuleSet`s rather than a plain per-call/per-session operand: FR-43's second
+scenario needs the rule-set-version grouping `Rules.RuleSetVersioning`/`RuleSetVersionScope` already
+established the identity for (repository + `RuleSetVersionHasher.ComputeHash`), and
+`Rules.RuleStatementDeduplication.Deduplicate` for each version's own in-force statement set, before
+`Rules.ContradictionCheck.Run` ever sees them.
 
 `ToolFailureClusterFinding` (issue #51, S-40) is the second caller of `FailedToolCallsCheck`,
 alongside `FailedToolCallsFinding` — both read the identical `ToolFailureRate` result and diverge
@@ -488,6 +496,36 @@ Inferred`, `FindingClass.MissingCapability` — Epic E8, "the highest-value find
 provenance," PRD Phase D). Two `CheckId`s (`"failed-tool-calls"` vs. `"tool-failure-clusters"`) over
 one shared computation, not one check registered twice.
 
+### `ContradictionCheck` produces no `Finding` — it is a special-purpose check, like `MalformedLineCheck` and `SpawnResolutionCheck`
+
+`CheckRegistryEntry`'s own remarks name three "PRD §3.9 special-purpose checks" that use the
+abstract `CheckId` string rather than one of `FindingClassRegistry`'s four closed classes:
+contradiction, unresolvable-spawn, malformed-line. The other two (`Ingestion.MalformedLineCheck`,
+`Ingestion.SpawnResolutionCheck`) already register a `CheckRegistryEntry` directly with no `Finding`
+in between — a contradiction is not rule adherence, waste, or a missing capability (PRD §3.3's own
+four-item table), so forcing one onto an existing `FindingClass` would either misrepresent what it
+is or require widening the closed set for one check. `ContradictionCheck.Result.Provenance` carries
+FR-43's "never Observed" requirement directly instead, as a `required` member on this project's own
+result type set unconditionally to `Provenance.Inferred` — the same "fails construction by being
+required, not by validating" reasoning `Finding.Provenance` already documents above — because this
+check can only ever confirm that two statements' surface keyword polarity conflicts, never that
+their meaning genuinely does.
+
+### `ContradictionCheck.Run` groups by rule-set version, never comparing across one
+
+FR-43 Scenario 2 ("it compares only statements in force together") is a stronger requirement than
+`RuleSetVersionScope.RequireSingleVersion`'s refusal: a corpus spans many rule-set versions over
+time by design, and the check has to find contradictions *within* each one, not refuse the moment
+more than one version is present in its input. `ContradictionCheck.Run` therefore groups the
+sessions it is handed by `RuleSetVersionId` (`Repository` + `RuleSetVersionHasher.ComputeHash`,
+the identical identity `RuleSetVersioning.Compute` already uses) and calls
+`Rules.ContradictionCheck.Run` once per group — a statement from one version's block set is
+therefore never even placed in the same list as a statement from another, structurally, not by a
+version-equality check inside the pairwise loop. `Population` on the resulting
+`CheckRegistryEntry` is the total session count across every version in the input (matching PRD
+§3.9's own worked phrasing, "a measured 0 contradictions found across 35 sessions checked" — sessions,
+not statements), while `FindingCount` sums candidates found across all versions combined.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
@@ -545,3 +583,12 @@ step by wall-clock time with its offset from session start, and states plainly w
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
 `web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
 path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+
+`ContradictionCheck` (issue #47, S-38, FR-43) publishes the third of PRD §3.9's special-purpose
+checks, alongside `Ingestion.MalformedLineCheck` and `Ingestion.SpawnResolutionCheck`: pairwise,
+self-match-excluding, keyword-polarity detection (`Rules.ContradictionCheck`) scoped to one
+rule-set version at a time and registered on the "checks that found nothing" surface FR-42 (S-37,
+issue #46) already published a `"contradiction-check"`-shaped test for ahead of this story landing.
+No corpus-wide caller wires a real store's sessions into it yet — like every other check-shape
+story in this project, it publishes the contract the eventual analysis-run orchestrator (the `run`
+CLI command, not yet built) will call.

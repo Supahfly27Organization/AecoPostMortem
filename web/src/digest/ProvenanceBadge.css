@@ -1,0 +1,24 @@
+.provenance-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.provenance-badge[data-provenance='observed'] {
+  background: #dff3e3;
+  color: #1e6b34;
+}
+
+.provenance-badge[data-provenance='derived'] {
+  background: #dde8fb;
+  color: #1c4d9c;
+}
+
+.provenance-badge[data-provenance='inferred'] {
+  background: #fbe8d6;
+  color: #9c5a1c;
+}

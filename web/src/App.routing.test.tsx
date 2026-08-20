@@ -2,17 +2,33 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import type { AppStateReport } from './api/appState'
+import { AppStateRoute, type AppStateReport } from './api/appState'
+import { DigestRoute } from './api/digest'
 
 /** S-48, Scenario 1: "The three surfaces are routable." Every route resolves under a shared
- * shell, and a surface with no real content yet names the release it arrives in. */
+ * shell. The digest (S-36/S-54) now has real content; the other two remain named placeholders
+ * until their own stories build them. */
 describe('App routing', () => {
   const ready: AppStateReport = { kind: 'ready', message: 'Ready.', fixCommand: null }
 
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify(ready), { status: 200 })),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+
+        if (url.includes(AppStateRoute)) {
+          return new Response(JSON.stringify(ready), { status: 200 })
+        }
+
+        if (url.includes(DigestRoute)) {
+          // No real /api/digest endpoint exists yet (web/src/api/digest.ts) — routing only cares
+          // that DigestPage renders its own content, not that a digest loads successfully here.
+          return new Response('', { status: 404 })
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`)
+      }),
     )
   })
 
@@ -28,7 +44,6 @@ describe('App routing', () => {
     )
 
     expect(screen.getByRole('heading', { name: 'Process Digest' })).toBeInTheDocument()
-    expect(screen.getByText(/arrives in Release 1 \(S-36 \/ S-54\)/)).toBeInTheDocument()
   })
 
   it('reaches the session view with no session selected', () => {

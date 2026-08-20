@@ -65,12 +65,39 @@ public enum DigestState
     Analyzed,
 }
 
-/// <summary>The masthead: <see cref="MastheadCounters"/> plus the rule-coverage bar's current state.</summary>
+/// <summary>
+/// FR-41 part 2 (S-54)'s repository scope: PRD Part 8 Q5 decided the digest shows one repository at
+/// a time by default, selectable — ranking findings across repositories would mix rule sets that
+/// were never in force together (FR-28's reasoning applied to this surface). Like
+/// <see cref="MastheadCounters"/>, this is an already-resolved plain input: the caller has already
+/// picked which repository's findings were handed to <see cref="ProcessDigest.Build"/>, and this
+/// type only states which one that was and which others exist to select — the seam for a later
+/// cross-repository view, not that view itself (the measured corpus holds 3 repositories with one
+/// dominant at 25 of 35 sessions, so a cross-repository view is a later option, not the default).
+/// </summary>
+public sealed record RepositoryScope
+{
+    /// <summary>The repository the caller resolved <see cref="Finding"/>s for. Null when no session
+    /// in the store carries a repository at all (<c>Session.Repository</c> is nullable) — an honest
+    /// "no repository information" rather than a fabricated default.</summary>
+    public required string? SelectedRepository { get; init; }
+
+    /// <summary>Every repository the store holds, for the selector. A single-entry list is the
+    /// common shape this story ships; more than one is the seam a later cross-repository story
+    /// switches through — this type does not itself re-filter <see cref="ProcessDigest.RankedFindings"/>
+    /// when more than one is present.</summary>
+    public required IReadOnlyList<string> AvailableRepositories { get; init; }
+}
+
+/// <summary>The masthead: <see cref="MastheadCounters"/> plus the rule-coverage bar's current state
+/// and FR-41 part 2's repository scope.</summary>
 public sealed record Masthead
 {
     public required MastheadCounters Counters { get; init; }
 
     public required RuleCoverageStatus RuleCoverage { get; init; }
+
+    public required RepositoryScope RepositoryScope { get; init; }
 }
 
 /// <summary>
@@ -108,11 +135,13 @@ public sealed record ProcessDigest
     public static ProcessDigest Build(
         MastheadCounters counters,
         CheckRegistry checkRegistry,
-        IReadOnlyList<Finding> findings)
+        IReadOnlyList<Finding> findings,
+        RepositoryScope repositoryScope)
     {
         ArgumentNullException.ThrowIfNull(counters);
         ArgumentNullException.ThrowIfNull(checkRegistry);
         ArgumentNullException.ThrowIfNull(findings);
+        ArgumentNullException.ThrowIfNull(repositoryScope);
 
         var state = counters.IngestInProgress
             ? DigestState.Incomplete
@@ -131,7 +160,12 @@ public sealed record ProcessDigest
 
         return new ProcessDigest
         {
-            Masthead = new Masthead { Counters = counters, RuleCoverage = RuleCoverageStatus.NotYetAnalyzed },
+            Masthead = new Masthead
+            {
+                Counters = counters,
+                RuleCoverage = RuleCoverageStatus.NotYetAnalyzed,
+                RepositoryScope = repositoryScope,
+            },
             State = state,
             RankedFindings = ranked,
             InferredFindings = inferred,

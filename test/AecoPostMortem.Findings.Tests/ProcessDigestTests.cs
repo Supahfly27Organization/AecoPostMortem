@@ -18,6 +18,12 @@ public sealed class ProcessDigestTests
         IngestInProgress = ingestInProgress,
     };
 
+    static RepositoryScope SingleRepoScope() => new()
+    {
+        SelectedRepository = "aeco/AecoPostMortem",
+        AvailableRepositories = ["aeco/AecoPostMortem"],
+    };
+
     static CheckRegistry EmptyRegistry() => new() { Entries = [] };
 
     static CheckRegistry RanCleanRegistry() => new()
@@ -64,7 +70,7 @@ public sealed class ProcessDigestTests
         var observedOrDerived = WasteFinding("src/hot.cs", [.. Enumerable.Range(1, 30).Select(i => $"session-{i}")]);
         var inferred = InferredFinding("web_fetch", "session-1");
 
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [observedOrDerived, inferred]);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [observedOrDerived, inferred], SingleRepoScope());
 
         Assert.DoesNotContain(digest.RankedFindings, f => f.Provenance == Provenance.Inferred);
         Assert.Single(digest.RankedFindings);
@@ -77,7 +83,7 @@ public sealed class ProcessDigestTests
     [Fact]
     public void A_corpus_with_only_inferred_findings_has_an_empty_ranked_list()
     {
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [InferredFinding("web_fetch", "session-1")]);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [InferredFinding("web_fetch", "session-1")], SingleRepoScope());
 
         Assert.Empty(digest.RankedFindings);
         Assert.Single(digest.InferredFindings);
@@ -99,7 +105,8 @@ public sealed class ProcessDigestTests
         var digest = ProcessDigest.Build(
             Counters(),
             RanCleanRegistry(),
-            [inferredA, tiedFirst, touchedThirty, inferredB, tiedSecond]);
+            [inferredA, tiedFirst, touchedThirty, inferredB, tiedSecond],
+            SingleRepoScope());
 
         Assert.Equal(
             ["src/hot.cs", "src/first.cs", "src/second.cs"],
@@ -121,7 +128,8 @@ public sealed class ProcessDigestTests
         var digest = ProcessDigest.Build(
             Counters(),
             RanCleanRegistry(),
-            [touchedOne, touchedThirty, touchedFive]);
+            [touchedOne, touchedThirty, touchedFive],
+            SingleRepoScope());
 
         Assert.Equal(
             ["src/hot.cs", "src/warm.cs", "src/rare.cs"],
@@ -136,7 +144,7 @@ public sealed class ProcessDigestTests
         var first = WasteFinding("src/first.cs", "session-1", "session-2");
         var second = WasteFinding("src/second.cs", "session-3", "session-4");
 
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [first, second]);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [first, second], SingleRepoScope());
 
         Assert.Equal(
             ["src/first.cs", "src/second.cs"],
@@ -151,7 +159,7 @@ public sealed class ProcessDigestTests
 
         // The "recent" finding (touchedOne) arrives first in the input; the ranking must not treat
         // input order as a proxy for recency or severity — only the session count decides.
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [touchedOne, touchedThirty]);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [touchedOne, touchedThirty], SingleRepoScope());
 
         Assert.Equal("src/hot.cs", digest.RankedFindings[0].Recurrence.Key);
     }
@@ -159,7 +167,7 @@ public sealed class ProcessDigestTests
     [Fact]
     public void The_masthead_states_sessions_span_repositories_events_tool_calls_and_rule_coverage()
     {
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
 
         Assert.Equal(35, digest.Masthead.Counters.SessionCount);
         Assert.NotNull(digest.Masthead.Counters.SpanStart);
@@ -174,7 +182,7 @@ public sealed class ProcessDigestTests
     public void An_empty_store_reads_as_not_yet_analyzed_not_as_finding_nothing()
     {
         // No check has ever run — CheckRegistry has no Ran entry.
-        var digest = ProcessDigest.Build(Counters(sessionCount: 0), EmptyRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(sessionCount: 0), EmptyRegistry(), [], SingleRepoScope());
 
         Assert.Equal(DigestState.NotYetAnalyzed, digest.State);
         Assert.Empty(digest.RankedFindings);
@@ -184,7 +192,7 @@ public sealed class ProcessDigestTests
     public void A_corpus_where_every_check_ran_and_found_nothing_reads_as_analyzed_not_not_yet_analyzed()
     {
         // Distinct from the empty-store scenario above: the checks ran, they just found nothing.
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
 
         Assert.Equal(DigestState.Analyzed, digest.State);
         Assert.Empty(digest.RankedFindings);
@@ -193,7 +201,7 @@ public sealed class ProcessDigestTests
     [Fact]
     public void A_session_mid_ingest_reads_as_incomplete_rather_than_a_final_count()
     {
-        var digest = ProcessDigest.Build(Counters(ingestInProgress: true), RanCleanRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(ingestInProgress: true), RanCleanRegistry(), [], SingleRepoScope());
 
         Assert.Equal(DigestState.Incomplete, digest.State);
     }
@@ -204,7 +212,7 @@ public sealed class ProcessDigestTests
         // Even with no check registered yet, a mid-ingest corpus reads "incomplete", not
         // "not yet analysed" — the two designed states answer different questions and must not
         // collapse into one when both conditions happen to hold at once.
-        var digest = ProcessDigest.Build(Counters(ingestInProgress: true), EmptyRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(ingestInProgress: true), EmptyRegistry(), [], SingleRepoScope());
 
         Assert.Equal(DigestState.Incomplete, digest.State);
     }
@@ -214,7 +222,7 @@ public sealed class ProcessDigestTests
     {
         // Release 1 ships exactly one RuleCoverageStatus value — there is no case here that could
         // be mistaken for "zero violations found" (FR-26/FR-40 are Release 2).
-        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
 
         Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
     }
@@ -225,5 +233,35 @@ public sealed class ProcessDigestTests
         var finding = WasteFinding("src/dup.cs", "session-1", "session-1", "session-2");
 
         Assert.Equal(2, ProcessDigest.SessionsAffected(finding));
+    }
+
+    [Fact]
+    public void The_masthead_states_which_repository_is_selected_and_that_it_is_the_only_one_available()
+    {
+        // PRD Part 8 Q5: default to one repository. A single-repository corpus has nothing else to
+        // select, so the available list is exactly the selected one.
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
+
+        Assert.Equal("aeco/AecoPostMortem", digest.Masthead.RepositoryScope.SelectedRepository);
+        Assert.Equal(["aeco/AecoPostMortem"], digest.Masthead.RepositoryScope.AvailableRepositories);
+    }
+
+    [Fact]
+    public void A_multi_repository_store_still_names_exactly_one_selected_repository_with_the_rest_offered_not_shown()
+    {
+        // The measured corpus holds 3 repositories with one dominant (PRD Part 8 Q5's own figure).
+        // The digest defaults to the dominant one; the other two are offered by the selector's seam,
+        // not ranked or rendered as findings.
+        var scope = new RepositoryScope
+        {
+            SelectedRepository = "aeco/AecoPostMortem",
+            AvailableRepositories = ["aeco/AecoLedger", "aeco/AecoPostMortem", "aeco/Upfront"],
+        };
+
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], scope);
+
+        Assert.Equal("aeco/AecoPostMortem", digest.Masthead.RepositoryScope.SelectedRepository);
+        Assert.Equal(3, digest.Masthead.RepositoryScope.AvailableRepositories.Count);
+        Assert.Contains("aeco/AecoPostMortem", digest.Masthead.RepositoryScope.AvailableRepositories);
     }
 }

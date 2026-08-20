@@ -18,6 +18,7 @@ public sealed class ProcessDigestStructureTests
         typeof(CheckRegistry),
         typeof(Finding),
         typeof(IReadOnlyList<Finding>),
+        typeof(RepositoryScope),
         typeof(ProcessDigest),
         typeof(int),
         typeof(void),

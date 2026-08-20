@@ -1,0 +1,13 @@
+.suggestion-block {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #4a7dc9;
+  background: #f2f6fc;
+}
+
+.suggestion-block--absent {
+  border-left-color: #9aa4af;
+  background: #f4f5f6;
+  color: #5b6470;
+  font-style: italic;
+}

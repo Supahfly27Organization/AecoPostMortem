@@ -122,6 +122,7 @@ describe('App routing', () => {
               contextSize: { kind: 'notRecorded' },
             },
             steps: [],
+            findings: [],
           }),
           { status: 200 },
         )

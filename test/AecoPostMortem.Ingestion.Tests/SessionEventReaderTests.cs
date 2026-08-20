@@ -5,9 +5,9 @@ namespace AecoPostMortem.Ingestion.Tests;
 public sealed class SessionEventReaderTests
 {
     const string SessionStart =
-        """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""";
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""";
 
-    const string TurnStart = """{"type":"assistant.turn_start","ts":"2026-05-07T14:16:49.000Z"}""";
+    const string TurnStart = """{"type":"assistant.turn_start","timestamp":"2026-05-07T14:16:49.000Z"}""";
 
     [Fact]
     public void Provider_version_is_read_from_line_1s_session_start_event()
@@ -50,7 +50,7 @@ public sealed class SessionEventReaderTests
     {
         using var workspace = new IngestionTestWorkspace();
         var completeLines = string.Join('\n', SessionStart, TurnStart) + "\n";
-        var partialTail = """{"type":"assistant.message","ts":"2026-05-07T""";
+        var partialTail = """{"type":"assistant.message","timestamp":"2026-05-07T""";
         var file = workspace.WriteEventsFile(
             "session-1",
             System.Text.Encoding.UTF8.GetBytes(completeLines + partialTail));
@@ -104,7 +104,7 @@ public sealed class SessionEventReaderTests
     {
         using var workspace = new IngestionTestWorkspace();
         const string futureVersion =
-            """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.999","version":1}}""";
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.999","version":1}}""";
         var file = workspace.WriteEventsFile("session-1", trailingNewline: true, futureVersion);
 
         var result = SessionEventReader.Read("session-1", file);
@@ -118,7 +118,7 @@ public sealed class SessionEventReaderTests
     {
         using var workspace = new IngestionTestWorkspace();
         const string futureSchema =
-            """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.99","version":99}}""";
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.99","version":99}}""";
         var file = workspace.WriteEventsFile("session-1", trailingNewline: true, futureSchema, TurnStart);
 
         var result = SessionEventReader.Read("session-1", file);

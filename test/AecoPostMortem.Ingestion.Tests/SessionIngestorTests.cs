@@ -9,9 +9,9 @@ namespace AecoPostMortem.Ingestion.Tests;
 public sealed class SessionIngestorTests
 {
     const string SessionStart =
-        """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""";
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""";
 
-    const string TurnStart = """{"type":"assistant.turn_start","ts":"2026-05-07T14:16:49.000Z"}""";
+    const string TurnStart = """{"type":"assistant.turn_start","timestamp":"2026-05-07T14:16:49.000Z"}""";
 
     [Fact]
     public void Ingesting_a_session_file_persists_its_events_to_RAW()
@@ -114,7 +114,7 @@ public sealed class SessionIngestorTests
         // byte offset (0), which is what a truncate-and-rewrite looks like, as opposed to a
         // resumed session continuing the same byte stream.
         const string RewrittenSessionStart =
-            """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.9","version":1}}""";
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.9","version":1}}""";
         File.WriteAllBytes(file, Encoding.UTF8.GetBytes(string.Join('\n', RewrittenSessionStart, TurnStart) + "\n"));
 
         var secondRun = SessionIngestor.Ingest(context, "session-1", file);
@@ -124,4 +124,78 @@ public sealed class SessionIngestorTests
         Assert.Equal(0, secondRun.EventsInserted);
         Assert.Equal(countBeforeRewrite, context.RawEvents.Count());
     }
+
+    /// <summary>Issue #6, Scenario 1: a session whose start context cwd falls under an
+    /// operator-configured excluded root never enters the store.</summary>
+    [Fact]
+    public void A_session_whose_cwd_falls_under_an_excluded_root_is_never_persisted()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        var file = workspace.WriteEventsFile(
+            "session-1", trailingNewline: true, SessionStartAt(@"C:\repo\AecoPostMortem"), TurnStart);
+
+        using var context = workspace.Store.Open();
+        var result = SessionIngestor.Ingest(context, "session-1", file, [@"C:\repo\AecoPostMortem"]);
+
+        Assert.True(result.Exclusion.Excluded);
+        Assert.Equal(0, result.EventsInserted);
+        Assert.Empty(context.RawEvents);
+    }
+
+    /// <summary>Issue #6, Scenario 1's second half: the exclusion is reported with its reason.</summary>
+    [Fact]
+    public void An_excluded_session_reports_its_cwd_and_the_matching_root_as_the_reason()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        var file = workspace.WriteEventsFile(
+            "session-1", trailingNewline: true, SessionStartAt(@"C:\repo\AecoPostMortem\src"));
+
+        using var context = workspace.Store.Open();
+        var result = SessionIngestor.Ingest(context, "session-1", file, [@"C:\repo\AecoPostMortem"]);
+
+        Assert.Contains(@"C:\repo\AecoPostMortem\src", result.Exclusion.Reason);
+        Assert.Contains(@"C:\repo\AecoPostMortem", result.Exclusion.Reason);
+    }
+
+    [Fact]
+    public void A_session_outside_every_excluded_root_ingests_normally()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        var file = workspace.WriteEventsFile(
+            "session-1", trailingNewline: true, SessionStartAt(@"C:\work\feature-x"), TurnStart);
+
+        using var context = workspace.Store.Open();
+        var result = SessionIngestor.Ingest(context, "session-1", file, [@"C:\repo\AecoPostMortem"]);
+
+        Assert.False(result.Exclusion.Excluded);
+        Assert.Equal(2, result.EventsInserted);
+        Assert.Equal(2, context.RawEvents.Count());
+    }
+
+    /// <summary>Issue #6's edge case: exclusion has to work retroactively over an already-ingested
+    /// store, not only prospectively — a session ingested before its cwd was added to the exclusion
+    /// list is purged the next time ingestion runs over it.</summary>
+    [Fact]
+    public void A_previously_ingested_session_is_purged_once_its_cwd_is_added_to_the_exclusion_list()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        var file = workspace.WriteEventsFile(
+            "session-1", trailingNewline: true, SessionStartAt(@"C:\repo\AecoPostMortem"), TurnStart);
+
+        using var context = workspace.Store.Open();
+        SessionIngestor.Ingest(context, "session-1", file);
+        Assert.Equal(2, context.RawEvents.Count());
+
+        var secondRun = SessionIngestor.Ingest(context, "session-1", file, [@"C:\repo\AecoPostMortem"]);
+
+        Assert.True(secondRun.Exclusion.Excluded);
+        Assert.Equal(2, secondRun.PurgedEventCount);
+        Assert.Empty(context.RawEvents);
+    }
+
+    static string SessionStartAt(string cwd) =>
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1,"context":{"cwd":"""
+        + JsonEncode(cwd) + "}}}";
+
+    static string JsonEncode(string value) => "\"" + value.Replace(@"\", @"\\") + "\"";
 }

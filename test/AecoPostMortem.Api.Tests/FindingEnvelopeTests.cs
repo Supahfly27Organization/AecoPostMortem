@@ -38,9 +38,35 @@ public sealed class FindingEnvelopeTests
         Resolution = new Resolution { OperandLayer = "NORMALIZED", CallCount = 12 },
     };
 
+    // FR-44's worked example: the parallel-tool-calling rule measured a 43.6% single-call rate
+    // across 7,449 tool-issuing messages (3,249 of them), and whether a second independent call
+    // was available at each point was never measured — presenting that as disobedience is the
+    // exact failure PRD §3.9 lists. Provenance is Inferred, not Observed: the count itself is a
+    // plain fact, but treating it as bearing on the rule at all assumes the unmeasured condition
+    // held.
+    static Finding SampleConditionalRuleFinding() => new()
+    {
+        Class = FindingClass.RuleAdherenceToolChoice,
+        Provenance = Provenance.Inferred,
+        Evidence =
+        [
+            new EvidenceItem { Field = "single_call_messages", Value = "3249" },
+            new EvidenceItem { Field = "tool_issuing_messages", Value = "7449" },
+        ],
+        Recurrence = new Recurrence
+        {
+            Key = "USE PARALLEL TOOL CALLING — when you need to perform multiple independent operations, make ALL tool calls in a SINGLE response",
+            Occurrences = [new RecurrenceOccurrence { SessionId = "session-1" }],
+        },
+    };
+
+    const string ParallelCallAvailabilityUnevaluated =
+        "whether a second independent call was available at each point was never measured";
+
     [Theory]
     [InlineData(typeof(FindingEnvelope.General))]
     [InlineData(typeof(FindingEnvelope.Adherence))]
+    [InlineData(typeof(FindingEnvelope.BaseRate))]
     public void Provenance_is_a_required_member_on_every_shape(Type envelopeType)
     {
         var property = envelopeType.GetProperty(nameof(FindingEnvelope.Provenance));
@@ -107,5 +133,111 @@ public sealed class FindingEnvelopeTests
         var roundTripped = JsonSerializer.Deserialize<FindingEnvelope>(json);
         var adherenceRoundTripped = Assert.IsType<FindingEnvelope.Adherence>(roundTripped);
         Assert.Equal("v3", adherenceRoundTripped.RuleVersion);
+    }
+
+    // FR-44, Scenario 1 ("A conditional rule is labelled as a base rate"): the base-rate shape has
+    // no Resolution or RuleVersion members at all — the same structural move General already makes
+    // — so a conditional rule's figure can never be assembled as though it were a resolved
+    // adherence percentage.
+    [Fact]
+    public void The_base_rate_shape_has_no_resolution_or_rule_version_members()
+    {
+        Assert.Null(typeof(FindingEnvelope.BaseRate).GetProperty("Resolution"));
+        Assert.Null(typeof(FindingEnvelope.BaseRate).GetProperty("RuleVersion"));
+    }
+
+    [Fact]
+    public void UnevaluatedCondition_is_a_required_member_on_the_base_rate_shape()
+    {
+        var property = typeof(FindingEnvelope.BaseRate).GetProperty(nameof(FindingEnvelope.BaseRate.UnevaluatedCondition));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    [Fact]
+    public void FromBaseRate_states_the_unevaluated_condition_alongside_the_measured_figure()
+    {
+        var finding = SampleConditionalRuleFinding();
+
+        var envelope = FindingEnvelope.FromBaseRate(finding, ParallelCallAvailabilityUnevaluated);
+
+        Assert.Equal(FindingClass.RuleAdherenceToolChoice, envelope.Class);
+        Assert.Equal(Provenance.Inferred, envelope.Provenance);
+        Assert.Equal(ParallelCallAvailabilityUnevaluated, envelope.UnevaluatedCondition);
+        Assert.Contains(envelope.Evidence, item => item.Field == "single_call_messages" && item.Value == "3249");
+        Assert.Contains(envelope.Evidence, item => item.Field == "tool_issuing_messages" && item.Value == "7449");
+    }
+
+    // FR-44, Scenario 2 ("A base rate is never ranked as a violation"): the wire discriminator is
+    // the visual/structural distinction a client renders on — "baseRate" can never collide with
+    // "adherence", the shape a measured violation like the navigation-rule finding uses.
+    [Fact]
+    public void FindingEnvelope_serialises_the_base_rate_kind_distinct_from_adherence_and_general()
+    {
+        FindingEnvelope baseRate = FindingEnvelope.FromBaseRate(SampleConditionalRuleFinding(), ParallelCallAvailabilityUnevaluated);
+
+        var json = JsonSerializer.Serialize(baseRate);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.True(document.RootElement.TryGetProperty("kind", out var kind));
+        Assert.Equal("baseRate", kind.GetString());
+        Assert.NotEqual("adherence", kind.GetString());
+        Assert.NotEqual("general", kind.GetString());
+
+        var roundTripped = JsonSerializer.Deserialize<FindingEnvelope>(json);
+        var baseRateRoundTripped = Assert.IsType<FindingEnvelope.BaseRate>(roundTripped);
+        Assert.Equal(ParallelCallAvailabilityUnevaluated, baseRateRoundTripped.UnevaluatedCondition);
+    }
+
+    /// <summary>FR-48 (issue #52, S-42): the provenance label is required on every shape, exactly
+    /// the guarantee <see cref="Provenance_is_a_required_member_on_every_shape"/> gives
+    /// <c>Provenance</c> itself — a served finding cannot omit the text that distinguishes it.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(FindingEnvelope.General))]
+    [InlineData(typeof(FindingEnvelope.Adherence))]
+    public void ProvenanceLabel_is_a_required_member_on_every_shape(Type envelopeType)
+    {
+        var property = envelopeType.GetProperty(nameof(FindingEnvelope.ProvenanceLabel));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    /// <summary>The edge case named in issue #52: a hypothesis has to read as one in its own text,
+    /// since styling does not survive being quoted elsewhere — an Inferred finding's served label
+    /// names it a hypothesis, and the other two levels' labels do not.</summary>
+    [Fact]
+    public void An_inferred_findings_served_label_reads_as_a_hypothesis()
+    {
+        var finding = SampleWasteFinding() with { Provenance = Provenance.Inferred };
+
+        var envelope = FindingEnvelope.From(finding);
+
+        Assert.Contains("hypothesis", envelope.ProvenanceLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void An_observed_or_derived_findings_served_label_does_not_read_as_a_hypothesis()
+    {
+        var envelope = FindingEnvelope.From(SampleWasteFinding());
+
+        Assert.DoesNotContain("hypothesis", envelope.ProvenanceLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void The_provenance_label_survives_serialisation_independent_of_any_styling()
+    {
+        var finding = SampleWasteFinding() with { Provenance = Provenance.Inferred };
+        var envelope = FindingEnvelope.From(finding);
+
+        var json = JsonSerializer.Serialize<FindingEnvelope>(envelope);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.Contains(
+            "hypothesis",
+            document.RootElement.GetProperty("ProvenanceLabel").GetString(),
+            StringComparison.OrdinalIgnoreCase);
     }
 }

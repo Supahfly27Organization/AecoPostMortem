@@ -6,12 +6,13 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General` and `FindingEnvelope.Adherence`, and the `From`/`FromAdherence` factories that assemble them from a `Finding` |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
-| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope` |
+| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`) and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` is the same diagnosis without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` and `GetSession` are the same two without a listener |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording` |
 
 ## References
 
@@ -25,9 +26,17 @@ second `Directory.Exists` check). This is a genuine widening of the "thin host" 
 not an oversight — S-48 is one of the stories `FindingEnvelope.cs`'s own doc comment named as
 building "real endpoints," and the app-state endpoint is not a finding endpoint at all.
 
+`ApiHost.GetSession` (S-08) widens the same `Data` reference further: it opens a `PostMortemContext`
+and reads `Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks` directly by session id, then hands
+the plain rows to `Findings.SessionRecording.Build` — the same "read through `Data`, feed `Findings`
+plain inputs" split `Findings/CLAUDE.md` documents for its own checks, just performed here instead of
+inside `Findings` because nothing in `AecoPostMortem.Findings` may query the store on its own. See
+`SessionEnvelope.cs`'s own remarks below for why this reads the *derived* tables rather than
+re-deriving them from RAW in this project.
+
 ## Non-obvious decisions
 
-### `FindingEnvelope` is two closed shapes, not one type with a nullable resolution
+### `FindingEnvelope` is three closed shapes, not one type with a nullable resolution
 
 `Finding.Resolution` is nullable because only adherence classes carry one (FR-33). The response
 envelope makes that distinction structural rather than repeating the nullable field: `General` has no
@@ -38,10 +47,64 @@ therefore lives here, structurally, at build time; `S-24` is the story that exer
 behaviour at the API boundary — this contract only has to make the bare figure unrepresentable, not
 implement the refusal itself.
 
-Both shapes derive from `FindingEnvelope` through a private constructor, so nothing outside this file
-can add a third shape — the same closed-hierarchy trick `SuggestionEnvelope` uses. `[JsonPolymorphic]`
-/ `[JsonDerivedType]` carry a `"kind"` discriminator (`"general"` / `"adherence"`) so a client can tell
-the two apart without inspecting which optional fields happen to be present.
+All three shapes derive from `FindingEnvelope` through a private constructor, so nothing outside this
+file can add a fourth shape — the same closed-hierarchy trick `SuggestionEnvelope` uses.
+`[JsonPolymorphic]` / `[JsonDerivedType]` carry a `"kind"` discriminator (`"general"` / `"adherence"`
+/ `"baseRate"`) so a client can tell the shapes apart without inspecting which optional fields happen
+to be present.
+
+### `FindingEnvelope.BaseRate` labels a conditional rule's figure, and cannot be mistaken for a resolved one (FR-44, issue #41)
+
+A conditional rule — the parallel-tool-calling rule's worked example: a measured 43.6% single-call
+rate across 7,449 tool-issuing messages, whose *availability of a second independent call* was never
+measured — is not a violation rate, and PRD §3.9 names presenting it as one as the exact failure to
+avoid. `BaseRate` structurally cannot carry `Resolution` or `RuleVersion` (same as `General` — a base
+rate is not a resolved adherence percentage FR-33 could attach a layer to), and instead carries a
+`required string UnevaluatedCondition` stating what the logs could not check. Assembling one without
+that condition is the same CS9035 compile error `Adherence` gives for its own two required fields —
+Scenario 1's "the unevaluated condition is stated" is therefore not optional prose a caller could
+forget to add.
+
+Scenario 2 ("A base rate is never ranked as a violation") turned out to be satisfied more strongly
+than this story alone set out to: every `BaseRate` finding carries `Provenance.Inferred` (this
+story's own worked example), and FR-48 (issue #52, S-42, landed after this one) partitions
+`ProcessDigest.Build`'s *entire* input by provenance — every `Inferred` finding, `BaseRate` included,
+is structurally excluded from `RankedFindings` and served through `DigestEnvelope.InferredFindings`
+instead, never interleaved by rank at all. `DigestEnvelopeTests.A_base_rate_item_never_appears_in_
+ranked_findings_and_serialises_a_distinct_kind_in_inferred_findings` proves both halves together: a
+base rate is absent from `RankedFindings` and, wherever it is served, still carries the `"baseRate"`
+wire discriminator distinct from `"adherence"` — belt and suspenders, not a fallback on the
+discriminator alone. `FromBaseRate` still sets that discriminator regardless of which list a caller
+eventually serves the envelope through, since this contract has no way to know FR-48 would add a
+second list when it was written.
+
+`FromBaseRate(Finding, string unevaluatedCondition)` follows `FromAdherence`'s own precedent:
+`unevaluatedCondition` is a required parameter, not read off the `Finding` (which has no field for
+it — the same reasoning `FromAdherence` gives for taking `resolution`/`ruleVersion` as parameters
+rather than trusting `Finding.Resolution` alone). `SampleConditionalRuleFinding` in both
+`FindingEnvelopeTests` and `DigestEnvelopeTests` gives the finding `Provenance.Inferred`, not
+`Observed`: the message count itself is a plain fact, but treating it as bearing on the rule at all
+assumes the unmeasured condition held, the same reasoning FR-48 gives for labelling the
+MCP-unreliability-causes-disobedience hypothesis Inferred even though its two failure rates are each
+Observed on their own.
+
+### `ProvenanceLabel` rides alongside `Provenance`, not in place of it
+
+FR-48 (issue #52, S-42) requires the three provenance levels to be distinguishable without reading
+the enum's own name, and an Inferred finding's distinguishing text to survive being quoted out of
+its original styling. `FindingEnvelope.ProvenanceLabel` is a second, `required` string field —
+`Findings.ProvenanceLabel.For(finding.Provenance)` — carried next to the existing `Provenance` enum
+member rather than replacing it: `Provenance` stays the machine-readable value a client branches on,
+`ProvenanceLabel` is the fixed human sentence a client can render or quote verbatim. Both `From` and
+`FromAdherence` set it from the same finding's `Provenance`, so the two can never disagree.
+
+`ProvenanceLabel` only supplies the *textual* half of FR-48's Scenario 2 ("distinguishable without
+reading the label"), which read literally also asks for a non-textual discriminator — an icon or
+shape a client could use without parsing the sentence at all. That half is not defined on this
+contract: `Provenance` itself is still served, so a future client can map it to a shape/icon, but no
+such mapping exists here because no rendering surface consumes this contract yet. See
+`Findings/CLAUDE.md`'s matching note under "`InferredFindings` is a separate, deliberately unranked
+field."
 
 ### `SuggestionEnvelope` makes "no suggestion" a value, not an absence
 
@@ -135,7 +198,10 @@ so a machine that has only built the .NET solution has no web shell to serve; `s
 finding maps through `FindingEnvelope.From` — an adherence finding needs `FromAdherence` with its
 resolution and rule version instead (FR-33), and only the caller (which already has the resolution)
 knows which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
-the ranking already happened in `Findings`, this only converts each entry to its wire shape.
+the ranking already happened in `Findings`, this only converts each entry to its wire shape. The
+same mapper is reused for `ProcessDigest.InferredFindings` (FR-48, issue #52, S-42) — there is no
+second, Inferred-only mapping function, because an Inferred finding needs exactly the same
+`General`/`Adherence` shape decision any other finding does.
 
 ### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
 
@@ -146,15 +212,72 @@ stay serialisation-agnostic, the same separation `FindingEnvelope`/`SuggestionEn
 rather than an opaque integer for a state whose entire point (S-36's Gherkin) is to be stated in
 words.
 
+### `GetSession` reads the derived tables as they are today — empty — rather than re-deriving from RAW here
+
+`AecoPostMortem.Ingestion.ExecutionRecordBuilder` can rebuild `Turn`/`ToolCall`/`Agent` (not
+`Skill`/`Hook`, which it does not parse) from a session's `RawEvent`s, but nothing in this
+repository yet writes any of the six shapes `GetSession` needs into the store at ingest time
+(`AecoPostMortem.Ingestion/CLAUDE.md`, "not yet wired into the store"). Two options existed: have
+this endpoint replay RAW through `ExecutionRecordBuilder` itself, or read the already-mapped but
+still-empty `Data.Execution` tables and let a later story's writer populate them. This project took
+the second path — `GetSession` queries `context.Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks`
+exactly the way it would once a writer exists, rather than duplicating a second, partial (no
+`Skill`/`Hook`) reconstruction path inside `Api` that the eventual ETL story would have to reconcile
+with or replace. `SessionRouteTests` seeds those tables directly through `PostMortemContext` — the
+same stand-in `OwnershipTests` (`AecoPostMortem.Data.Tests`) already uses — to exercise the read path
+ahead of the writer that will populate it for real.
+
+### `SessionTokenFiguresEnvelope` closes the same gap `SuggestionEnvelope` closed for FR-56
+
+`Findings.SessionTokenFigures` was published (S-11, issue #20) ahead of anything that would render
+it, deliberately left unwrapped by any envelope until "S-08's masthead is the story that will call
+`From` and render its two states" (`Findings/CLAUDE.md`). This is that story: `SessionTokenFiguresEnvelope`
+is a closed two-shape union behind a private constructor — `Observed` and `NotRecorded` — the same
+`[JsonPolymorphic]`/`[JsonDerivedType]` mechanism `SuggestionEnvelope` uses, so "context size at end"
+is never a nullable field a client could misread as zero.
+
+### `SessionMastheadEnvelope.ElapsedMs`/`SessionTapeStepEnvelope.OffsetMs` carry milliseconds, not a serialised `TimeSpan`
+
+The domain layer (`Findings.SessionMasthead.Elapsed`, `SessionTapeStep.Offset`) uses `TimeSpan`;
+the envelope converts both to `long`/`long?` milliseconds instead of letting `System.Text.Json`
+serialise `TimeSpan` directly, so a client reads a plain number rather than needing to agree with
+the server on a `TimeSpan` text format. `DateTimeOffset` (`SessionTapeStepEnvelope.Timestamp`) is
+left as-is — `MastheadEnvelope.SpanStart`/`SpanEnd` already establish that this type serialises
+losslessly and needs no format agreement of its own.
+
+### `SessionTapeStepEnvelope.Kind` and `OwnerKind` get their camelCase wire form from the global converter, not a per-property override
+
+Unlike `MastheadEnvelope.RuleCoverage`/`DigestEnvelope.State` (which opt out of the global naming
+policy via an explicit, un-parameterised `[JsonConverter(typeof(JsonStringEnumConverter))]` so a
+client reads the exact word, e.g. `"NotYetAnalyzed"`), `SessionTapeStepKind` and
+`AecoPostMortem.Data.Execution.OwnerKind` carry no such override — there is no "must read as this
+exact English word" requirement here, so both fall through to the
+`JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` `ApiHost.Build` already registers globally,
+the same as `AppStateKind`. A step reads `"toolCall"`/`"mcpCall"`/etc., never `"ToolCall"`.
+
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
-`DigestEnvelope`, `MastheadEnvelope`, `RepositoryScopeEnvelope`) — still unconsumed by any real
-endpoint in `ApiHost`. The app-state endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds
-are the first (and still only) real endpoint this project ships: `serve` (`AecoPostMortem.Cli`)
-builds and runs this host, and `web/`'s `AppStateBanner` is the client that reads it. No finding or
-digest endpoint exists yet — `web/`'s `DigestPage` (S-54, issue #45) already targets `/api/digest`
-ahead of it, the same seam `AppStateBanner` used for `/api/app-state` before S-48 wired it, but
-`ApiHost.Build` does not `MapGet` it: assembling a real `ProcessDigest` from the live store (a
-`MastheadCounters` populated at ingest, a `CheckRegistry`, and every `Finding` from every check
-orchestrator) is later, unwired work no story has done yet.
+`DigestEnvelope`, `MastheadEnvelope`, `RepositoryScopeEnvelope`) — still unconsumed by any live
+`/api/digest` endpoint in `ApiHost`. The app-state endpoint and host (`AppStateReport`, `ApiHost`)
+that S-48 adds are the first real endpoint this project ships: `serve` (`AecoPostMortem.Cli`) builds
+and runs this host, and `web/`'s `AppStateBanner` is the client that reads it. No digest endpoint
+exists yet — `web/`'s `DigestPage` (S-54, issue #45) already targets `/api/digest` ahead of it, the
+same seam `AppStateBanner` used for `/api/app-state` before S-48 wired it, but `ApiHost.Build` does
+not `MapGet` it: assembling a real `ProcessDigest` from the live store (a `MastheadCounters`
+populated at ingest, a `CheckRegistry`, and every `Finding` from every check orchestrator) is later,
+unwired work no story has done yet.
+
+FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on every shape) and
+`DigestEnvelope.InferredFindings` (served separately from `RankedFindings`, mirroring
+`ProcessDigest`'s own split). Both are contract-only from this project's side — no endpoint serves
+either through a live store — but `web/src/digest/ProvenanceBadge.tsx` (S-54, issue #45) is a real
+consumer of the shape once `DigestPage` does have data to render, closing the gap that was still
+open when S-42 alone had landed.
+
+`GET /api/sessions/{sessionId}` (`SessionEnvelope.cs`, `ApiHost.GetSession`, S-08, issue #15) is the
+second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by
+`Findings.SessionRecording.Build`. `web/src/routes/SessionPage.tsx` is the client. Returns 404 for a
+session id the store carries no `Session` row for; a session with rows but no steps still serves its
+masthead with an empty `Steps` list. Finding chips (a different data path — findings joined per
+session) and the inspector are S-52/S-53, not served here.

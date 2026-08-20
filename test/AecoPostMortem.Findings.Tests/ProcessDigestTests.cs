@@ -52,6 +52,72 @@ public sealed class ProcessDigestTests
         },
     };
 
+    static Finding InferredFinding(string toolName, params string[] sessionIds) => new()
+    {
+        Class = FindingClass.MissingCapability,
+        Provenance = Provenance.Inferred,
+        Evidence = [new EvidenceItem { Field = "data.toolName", Value = toolName }],
+        Recurrence = new Recurrence
+        {
+            Key = toolName,
+            Occurrences = [.. sessionIds.Select(id => new RecurrenceOccurrence { SessionId = id })],
+        },
+    };
+
+    [Fact]
+    public void Inferred_findings_are_excluded_from_the_ranked_list_and_appear_in_their_own_section()
+    {
+        var observedOrDerived = WasteFinding("src/hot.cs", [.. Enumerable.Range(1, 30).Select(i => $"session-{i}")]);
+        var inferred = InferredFinding("web_fetch", "session-1");
+
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [observedOrDerived, inferred], SingleRepoScope());
+
+        Assert.DoesNotContain(digest.RankedFindings, f => f.Provenance == Provenance.Inferred);
+        Assert.Single(digest.RankedFindings);
+        Assert.Equal("src/hot.cs", digest.RankedFindings[0].Recurrence.Key);
+
+        Assert.Single(digest.InferredFindings);
+        Assert.Equal("web_fetch", digest.InferredFindings[0].Recurrence.Key);
+    }
+
+    [Fact]
+    public void A_corpus_with_only_inferred_findings_has_an_empty_ranked_list()
+    {
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [InferredFinding("web_fetch", "session-1")], SingleRepoScope());
+
+        Assert.Empty(digest.RankedFindings);
+        Assert.Single(digest.InferredFindings);
+    }
+
+    /// <summary>Combines multiple ranked findings (including a tie) with Inferred findings in one
+    /// input, rather than exercising ranking and exclusion in isolation: an Inferred finding present
+    /// anywhere in the input must not shift the rank or the tie-break order of the Observed/Derived
+    /// findings around it.</summary>
+    [Fact]
+    public void Ranking_of_observed_and_derived_findings_is_unaffected_by_inferred_findings_present_in_the_same_input()
+    {
+        var touchedThirty = WasteFinding("src/hot.cs", [.. Enumerable.Range(1, 30).Select(i => $"session-{i}")]);
+        var tiedFirst = WasteFinding("src/first.cs", "session-1", "session-2");
+        var tiedSecond = WasteFinding("src/second.cs", "session-3", "session-4");
+        var inferredA = InferredFinding("web_fetch", "session-1");
+        var inferredB = InferredFinding("search_code", "session-2", "session-3");
+
+        var digest = ProcessDigest.Build(
+            Counters(),
+            RanCleanRegistry(),
+            [inferredA, tiedFirst, touchedThirty, inferredB, tiedSecond],
+            SingleRepoScope());
+
+        Assert.Equal(
+            ["src/hot.cs", "src/first.cs", "src/second.cs"],
+            digest.RankedFindings.Select(f => f.Recurrence.Key));
+        Assert.DoesNotContain(digest.RankedFindings, f => f.Provenance == Provenance.Inferred);
+
+        Assert.Equal(
+            ["web_fetch", "search_code"],
+            digest.InferredFindings.Select(f => f.Recurrence.Key));
+    }
+
     [Fact]
     public void Findings_are_ranked_by_distinct_sessions_affected_descending()
     {

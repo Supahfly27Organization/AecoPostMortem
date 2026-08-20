@@ -105,6 +105,11 @@ public sealed record Masthead
 /// sessions it touched — the ranking's entire purpose (S-36's edge case) is to make a finding
 /// touching one session visually subordinate to one touching thirty, so the order this type
 /// publishes is itself the point, not a pass-through of whatever order findings arrived in.
+/// <see cref="RankedFindings"/> never carries an <see cref="Provenance.Inferred"/> finding
+/// (FR-48, S-42/issue #52): a hypothesis has no session-count claim to rank on, and ranking one
+/// beside an Observed or Derived finding is exactly the "guess laundered into a process change"
+/// the PRD's own risk table (§3.8) names. Every Inferred finding is in
+/// <see cref="InferredFindings"/> instead — its own section, never interleaved by rank.
 /// </summary>
 public sealed record ProcessDigest
 {
@@ -112,7 +117,17 @@ public sealed record ProcessDigest
 
     public required DigestState State { get; init; }
 
+    /// <summary>Observed and Derived findings only, ranked by <see cref="SessionsAffected"/>
+    /// descending. Never contains a <see cref="Provenance.Inferred"/> finding — see
+    /// <see cref="InferredFindings"/>.</summary>
     public required IReadOnlyList<Finding> RankedFindings { get; init; }
+
+    /// <summary>Every <see cref="Provenance.Inferred"/> finding, in the order <see cref="Build"/>
+    /// received them — FR-48's own section, deliberately unranked: applying
+    /// <see cref="SessionsAffected"/> to a hypothesis would dress it up with the same
+    /// measured-looking figure that ranks Observed and Derived findings, which is the exact
+    /// conflation FR-48 exists to prevent.</summary>
+    public required IReadOnlyList<Finding> InferredFindings { get; init; }
 
     /// <summary>Builds the digest from plain, already-resolved inputs. FR-41 needs no individual
     /// finding story to be complete (S-36's own dependency note): it renders whatever findings
@@ -135,7 +150,12 @@ public sealed record ProcessDigest
                 : DigestState.NotYetAnalyzed;
 
         var ranked = findings
+            .Where(finding => finding.Provenance != Provenance.Inferred)
             .OrderByDescending(SessionsAffected)
+            .ToList();
+
+        var inferred = findings
+            .Where(finding => finding.Provenance == Provenance.Inferred)
             .ToList();
 
         return new ProcessDigest
@@ -148,6 +168,7 @@ public sealed record ProcessDigest
             },
             State = state,
             RankedFindings = ranked,
+            InferredFindings = inferred,
         };
     }
 

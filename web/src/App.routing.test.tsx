@@ -46,7 +46,7 @@ describe('App routing', () => {
     expect(screen.getByRole('heading', { name: 'Process Digest' })).toBeInTheDocument()
   })
 
-  it('reaches the session view and names its own arrival release', () => {
+  it('reaches the session view with no session selected', () => {
     render(
       <MemoryRouter initialEntries={['/sessions']}>
         <App />
@@ -54,7 +54,47 @@ describe('App routing', () => {
     )
 
     expect(screen.getByRole('heading', { name: 'Session Flight Recorder' })).toBeInTheDocument()
-    expect(screen.getByText(/arrives in Release 1 \(S-08\)/)).toBeInTheDocument()
+    expect(screen.getByText(/no session selected/i)).toBeInTheDocument()
+  })
+
+  it('reaches one session\'s Flight Recorder at /sessions/:sessionId (S-08)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.includes('/api/app-state')) {
+          return new Response(JSON.stringify(ready), { status: 200 })
+        }
+
+        return new Response(
+          JSON.stringify({
+            masthead: {
+              sessionId: 'session-1',
+              repository: null,
+              branch: null,
+              copilotVersion: '0.0.339',
+              elapsedMs: null,
+              turnCount: 0,
+              toolCallCount: 0,
+              subagentCount: 0,
+              skillCount: 0,
+              modelCount: null,
+              contextSize: { kind: 'notRecorded' },
+            },
+            steps: [],
+          }),
+          { status: 200 },
+        )
+      }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/sessions/session-1']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('region', { name: 'Masthead' })).toHaveTextContent('session-1')
   })
 
   it('reaches the Rules Inventory and names a different arrival release', () => {

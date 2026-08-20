@@ -11,7 +11,9 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetSession` and `GetStepEvidence` are the same three without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetSession` and `GetStepEvidence` are the same four without a listener |
+| `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
+| `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles) |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
@@ -62,6 +64,17 @@ Raw and Thinking tabs are provenance over the *event*, not the derived row, and 
 existing `Ingestion` reference (S-48, above) to call `Ingestion.EventEnvelopeReader.TryRead` — the
 same envelope parsing `Ingestion.ExecutionRecordBuilder` already does to build the tape's own rows —
 rather than duplicating it a second time.
+
+`ApiHost.GetDigest` (S-36, issue #44) widens the `Data`/`Ingestion`/`Findings` references a third way:
+it reads `Session`/`RawEvent`/`ToolCall`/`Turn`/`Permission` corpus-wide, calls six of the seven waste/
+missing-capability check orchestrators (`Findings.RepeatedFileReadFindingCheck`,
+`FailedToolCallsFinding`, `AbortedTurnFinding`, `HookFailureFinding`, `InterruptionLoadFinding`,
+`PhaseChurnFinding`), and — for the two check inputs no derived table carries yet —
+`HookFailureEventLookup`/`DeclaredIntentLookup` (this project, reusing `Ingestion.EventEnvelopeReader`
+and `Ingestion.ToolArguments` the same way `StepEvidenceLookup` reuses the reader). `Rules` gains its
+second real caller here too: `ToToolCallOutcomes` builds `Rules.ToolCallOutcome` from `ToolCall`
+directly, the query S-14's own remarks named as later work. `ToolFailureClusterFinding` is not run —
+it needs a mandating rule, which real rule extraction at scale (S-20) does not populate yet.
 
 ## Non-obvious decisions
 
@@ -276,15 +289,24 @@ from two different rules.
 
 `AecoPostMortem.Findings`' own `ProcessDigestStructureTests` proves `ProcessDigest.Build` cannot be
 handed a live data source — but that project has no `Data` reference at all, so the guarantee costs
-it nothing. **This** project does reference `Data` (`DiagnoseAppState`, `GetSession`), which makes
-`MastheadEnvelope` the first point on the masthead's path where a live `COUNT` could plausibly be
-introduced by a later story wiring `/api/digest`. `MastheadEnvelopeStructureTests` reflects over
-`MastheadEnvelope`'s public surface (properties, method parameters and return types, following
-generic arguments down) and fails if any of it mentions an `IQueryable`, an `Expression`, or any type
-out of `AecoPostMortem.Data` / `Microsoft.EntityFrameworkCore`. Counting a million rows measured
-126 ms on SQLite and 118 ms on Postgres (`docs/product-superpowers/research/2026-08-16-sqlite-vs-
-postgres-query-latency.md`), so this is not an engine problem to tune away later — the masthead reads
-counters maintained at ingest, and the alternative is made unrepresentable rather than discouraged.
+it nothing. **This** project does reference `Data` (`DiagnoseAppState`, `GetSession`, `GetDigest`),
+which makes `MastheadEnvelope` the point on the masthead's path where a live `COUNT` could plausibly
+leak in. `MastheadEnvelopeStructureTests` reflects over `MastheadEnvelope`'s public surface
+(properties, method parameters and return types, following generic arguments down) and fails if any
+of it mentions an `IQueryable`, an `Expression`, or any type out of `AecoPostMortem.Data` /
+`Microsoft.EntityFrameworkCore` — that guarantee is about the *served wire shape*, and still holds:
+`MastheadEnvelope` itself carries only plain numbers and dates, never a live query object.
+
+`ApiHost.GetDigest`'s own `BuildMastheadCounters` is the deliberate, narrower scope decision this
+project made instead of "counters maintained at ingest" (the aspiration `Findings.MastheadCounters`'
+own doc comment states): nothing under `AecoPostMortem.Data`/`Ingestion` persists a running total
+anywhere (no `StoreMetadata` column for it), so building that would mean a second piece of unbuilt
+infrastructure ahead of the digest actually rendering anything. `GetDigest` instead reads
+`Sessions`/`RawEvents`/`ToolCalls` into memory once per request and reduces them in C# — a real
+corpus-wide read, not a query-time `COUNT`, but still well inside the measured 126 ms/million-row
+budget (`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`) at this
+corpus' actual scale (a measured 56,138 RAW rows). Revisit with a real ingest-time counter if the
+corpus ever approaches the 500-session/1M-event design target this measurement was taken against.
 
 ### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
 
@@ -457,31 +479,35 @@ two shapes elsewhere in this app needs no new parsing logic to render this one.
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
-`DigestEnvelope`, `MastheadEnvelope`, `RepositoryScopeEnvelope`) — still unconsumed by any live
-`/api/digest` endpoint in `ApiHost`. The app-state endpoint and host (`AppStateReport`, `ApiHost`)
-that S-48 adds are the first real endpoint this project ships: `serve` (`AecoPostMortem.Cli`) builds
-and runs this host, and `web/`'s `AppStateBanner` is the client that reads it. No digest endpoint
-exists yet — `web/`'s `DigestPage` (S-54, issue #45) already targets `/api/digest` ahead of it, the
-same seam `AppStateBanner` used for `/api/app-state` before S-48 wired it, but `ApiHost.Build` does
-not `MapGet` it: assembling a real `ProcessDigest` from the live store (a `MastheadCounters`
-populated at ingest, a `CheckRegistry`, and every `Finding` from every check orchestrator) is later,
-unwired work no story has done yet.
+`DigestEnvelope`, `MastheadEnvelope`, `RepositoryScopeEnvelope`) is now served for real:
+`GET /api/digest` (`ApiHost.GetDigest`) assembles a live `ProcessDigest` from the store — six of the
+seven waste/missing-capability check orchestrators, `MastheadCounters` computed corpus-wide at
+request time (not maintained at ingest — see `GetDigest`'s own remarks on why that is still inside
+budget at this corpus' scale), and a `RepositoryScope` defaulting to whichever repository carries the
+most sessions. Verified end to end against the live 35-session reference corpus: 295 ranked findings
+across all six checks, including the real `sessionStart` hook failure (25 of 25 sessions, error text
+read straight from RAW) and a real two-repository corpus exercising the scope's own filtering — and a
+real browser renders `web/`'s `DigestPage` against it with no frontend change, the exact promise
+`web/CLAUDE.md` recorded ahead of this wiring. `ToolFailureClusterFinding` is not run here — it needs
+a mandating rule, which real rule extraction at scale (S-20) does not populate yet, so it stays a
+documented gap alongside the Rules Inventory and Monitor comparison endpoints below. The app-state
+endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds were the first real endpoint this
+project shipped; `GetDigest` is the second.
 
 FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on every shape) and
 `DigestEnvelope.InferredFindings` (served separately from `RankedFindings`, mirroring
-`ProcessDigest`'s own split). Both are contract-only from this project's side — no endpoint serves
-either through a live store — but `web/src/digest/ProvenanceBadge.tsx` (S-54, issue #45) is a real
-consumer of the shape once `DigestPage` does have data to render, closing the gap that was still
-open when S-42 alone had landed.
+`ProcessDigest`'s own split) — both now live through `GetDigest`, and `web/src/digest/ProvenanceBadge.tsx`
+(S-54, issue #45) is a real consumer of the shape against real data.
 
-FR-33 (issue #38, S-24) made the adherence shape carry one `required AdherenceFigure Figure`. It is
-contract-only from this project's side for the same reason FR-48's additions were: `ApiHost` still
-serves no finding endpoint, so there is no live route to wire a figure into — the "wherever figures
-are currently served" this story asks about is, today, this contract and nothing else. That is not a
-gap in the refusal: because the figure's percentage is computed from its operands and the envelope
-member is `required`, any endpoint added later (including S-35's Monitor comparison) inherits the
-guarantee without opting into it. `web/src/digest/AdherenceFigureBlock.tsx` is the real rendering
-consumer, reached through `FindingRow` once `/api/digest` has data.
+FR-33 (issue #38, S-24) made the adherence shape carry one `required AdherenceFigure Figure`. None of
+the six checks `GetDigest` runs today produces an adherence finding — every served finding maps
+through `FindingEnvelope.From` (the `General` shape) — so this remains contract-only in practice even
+though a live route now exists: an adherence check needs real rule extraction at scale (S-20), the
+same gap `ToolFailureClusterFinding` is blocked on above. Because the figure's percentage is computed
+from its operands and the envelope member is `required`, the endpoint that eventually produces one
+(including S-35's Monitor comparison) inherits the guarantee without opting into it.
+`web/src/digest/AdherenceFigureBlock.tsx` is the real rendering consumer, reached through `FindingRow`
+once a check produces one.
 
 `RulesInventoryEnvelope.cs` (S-22, issue #35, FR-40) is contract-only in the same sense the digest
 contract was before S-54: `web/src/routes/RulesInventoryPage.tsx` is a real consumer of the shape,

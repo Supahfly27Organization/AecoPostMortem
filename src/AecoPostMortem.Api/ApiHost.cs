@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AecoPostMortem.Data;
+using AecoPostMortem.Data.Execution;
 using AecoPostMortem.Findings;
 using AecoPostMortem.Ingestion;
+using AecoPostMortem.Rules;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -19,6 +21,9 @@ namespace AecoPostMortem.Api;
 public static class ApiHost
 {
     public const string AppStateRoute = "/api/app-state";
+
+    /// <summary>FR-41's digest route (S-36, issue #44), first served for real here.</summary>
+    public const string DigestRoute = "/api/digest";
 
     /// <summary>The route template <see cref="Build"/> registers for FR-21's session endpoint
     /// (S-08). Use <see cref="SessionRoute"/> to build the concrete request path for one session.</summary>
@@ -75,6 +80,8 @@ public static class ApiHost
 
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
 
+        app.MapGet(DigestRoute, () => Results.Ok(GetDigest(store)));
+
         app.MapGet(SessionRouteTemplate, (string sessionId) =>
         {
             var envelope = GetSession(store, sessionId);
@@ -116,6 +123,176 @@ public static class ApiHost
         var storeHasBeenIngested = StoreHasBeenIngested(store);
 
         return AppStateReport.Diagnose(copilotSourceFound, storeHasBeenIngested);
+    }
+
+    /// <summary>
+    /// FR-41's real orchestration (S-36, issue #44): assembles a live <see cref="ProcessDigest"/> from
+    /// the store — six of the seven waste/missing-capability check orchestrators
+    /// (<see cref="RepeatedFileReadFindingCheck"/>, <see cref="FailedToolCallsFinding"/>,
+    /// <see cref="AbortedTurnFinding"/>, <see cref="HookFailureFinding"/>,
+    /// <see cref="InterruptionLoadFinding"/>, <see cref="PhaseChurnFinding"/>) plus
+    /// <see cref="Findings.MastheadCounters"/> and a resolved <see cref="Findings.RepositoryScope"/>.
+    /// <see cref="ToolFailureClusterFinding"/> is not run here — it needs a mandating rule
+    /// (<c>Findings/CLAUDE.md</c>), which real rule extraction at scale (S-20) does not populate yet.
+    ///
+    /// Every table this reads is queried once, corpus-wide, and held in memory rather than filtered by
+    /// repository in SQL — a measured 126 ms per million rows (S-36's own edge case,
+    /// `docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`) is well
+    /// inside budget for this corpus' actual scale (a measured 56,138 RAW rows, PRD §3.1).
+    /// <see cref="Findings.MastheadCounters"/> is built from every session regardless of repository —
+    /// it is a fact about the whole corpus, not the repository currently selected for ranking — while
+    /// every check runs only over the selected repository's own sessions, per
+    /// <see cref="Findings.RepositoryScope"/>'s own contract ("the caller has already filtered
+    /// findings to one repository before calling it").
+    ///
+    /// <see cref="Findings.MastheadCounters.IngestInProgress"/> is always <see langword="false"/>:
+    /// <c>ingest</c> is a synchronous CLI command that runs to completion before this process ever
+    /// opens the store, so there is no live "still ingesting" signal for a separate <c>serve</c>
+    /// process to read.
+    /// </summary>
+    public static DigestEnvelope GetDigest(LocalStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        using var context = store.Open();
+
+        var sessions = context.Sessions.ToList();
+        var rawEvents = context.RawEvents.ToList();
+        var toolCalls = context.ToolCalls.ToList();
+        var turns = context.Turns.ToList();
+        var permissions = context.Permissions.ToList();
+
+        var repositoryScope = BuildRepositoryScope(sessions);
+        var scopedSessionIds = (repositoryScope.SelectedRepository is null
+                ? sessions
+                : sessions.Where(session => session.Repository == repositoryScope.SelectedRepository))
+            .Select(session => session.SessionId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var scopedToolCalls = toolCalls.Where(call => scopedSessionIds.Contains(call.SessionId)).ToList();
+        var scopedTurns = turns.Where(turn => scopedSessionIds.Contains(turn.SessionId)).ToList();
+        var scopedPermissions = permissions.Where(p => scopedSessionIds.Contains(p.SessionId)).ToList();
+        var scopedRawEvents = rawEvents.Where(e => scopedSessionIds.Contains(e.SessionId)).ToList();
+
+        var sessionsWithToolCall = scopedToolCalls.Select(call => call.SessionId).ToHashSet(StringComparer.Ordinal);
+
+        var hookFailures = scopedRawEvents
+            .GroupBy(e => e.SessionId, StringComparer.Ordinal)
+            .SelectMany(group => HookFailureEventLookup.Find(group.Key, group.ToList()))
+            .ToList();
+
+        var declaredIntents = scopedRawEvents
+            .GroupBy(e => e.SessionId, StringComparer.Ordinal)
+            .SelectMany(group => DeclaredIntentLookup.Find(group.Key, group.ToList()))
+            .ToList();
+
+        var repeatedReads = RepeatedFileReadFindingCheck.Run(scopedToolCalls);
+        var failedCalls = FailedToolCallsFinding.Run(ToToolCallOutcomes(scopedToolCalls));
+        var aborted = AbortedTurnFinding.Build(scopedTurns);
+        var hookFailureResult = HookFailureFinding.Build(scopedSessionIds.ToList(), sessionsWithToolCall, hookFailures);
+        var interruption = InterruptionLoadFinding.Run(scopedPermissions, scopedToolCalls);
+        var phaseChurn = PhaseChurnFinding.Run(declaredIntents);
+
+        var findings = repeatedReads.Findings
+            .Concat(failedCalls.Findings)
+            .Concat(aborted.Findings)
+            .Concat(hookFailureResult.Findings)
+            .Concat(interruption.Findings)
+            .Concat(phaseChurn.Findings)
+            .ToList();
+
+        var checkRegistry = new CheckRegistry
+        {
+            Entries =
+            [
+                repeatedReads.RegistryEntry,
+                failedCalls.RegistryEntry,
+                aborted.Registry,
+                hookFailureResult.Registry,
+                interruption.RegistryEntry,
+                phaseChurn.RegistryEntry,
+            ],
+        };
+
+        var digest = ProcessDigest.Build(
+            BuildMastheadCounters(sessions, rawEvents, toolCalls), checkRegistry, findings, repositoryScope);
+
+        return DigestEnvelope.From(digest, FindingEnvelope.From);
+    }
+
+    /// <summary>The plain operand <see cref="FailedToolCallsCheck"/> takes: a call with no recorded
+    /// completion (<see cref="ToolCall.Success"/> is <see langword="null"/>) is excluded rather than
+    /// guessed at, the same "null means not completed, never completed-outcome-unknown" reading the
+    /// entity's own remarks give. <see cref="ToolCallOutcome.ToolIdentity"/> is <see cref="ToolCall.ToolName"/>
+    /// verbatim — <see cref="FailedToolCallsCheck.Run"/> groups by it with exact, ordinal equality
+    /// only, the same convention <see cref="ToolFailureClusterFinding"/>'s own remarks document.</summary>
+    static List<ToolCallOutcome> ToToolCallOutcomes(IReadOnlyList<ToolCall> toolCalls) =>
+        toolCalls
+            .Where(call => call.Success is not null)
+            .Select(call => new ToolCallOutcome
+            {
+                SessionId = call.SessionId,
+                ToolIdentity = call.ToolName,
+                Succeeded = call.Success!.Value,
+            })
+            .ToList();
+
+    /// <summary>FR-41's corpus-scope figures (S-36's edge case), built over the whole corpus
+    /// regardless of which repository is currently selected — see <see cref="GetDigest"/>'s own
+    /// remarks for why. <see cref="MastheadCounters.IngestInProgress"/> is always
+    /// <see langword="false"/> for the same reason stated there.</summary>
+    static MastheadCounters BuildMastheadCounters(
+        IReadOnlyList<Session> sessions, IReadOnlyList<RawEvent> rawEvents, IReadOnlyList<ToolCall> toolCalls) =>
+        new()
+        {
+            SessionCount = sessions.Count,
+            SpanStart = sessions.Count == 0
+                ? null
+                : sessions.Select(session => DateTimeOffset.Parse(session.StartedAt)).Min(),
+            SpanEnd = sessions.Count == 0
+                ? null
+                : sessions.Select(session => DateTimeOffset.Parse(session.EndedAt ?? session.StartedAt)).Max(),
+            RepositoryCount = sessions
+                .Select(session => session.Repository)
+                .Where(repository => repository is not null)
+                .Distinct(StringComparer.Ordinal)
+                .Count(),
+            EventCount = rawEvents.Count,
+            ToolCallCount = toolCalls.Count,
+            IngestInProgress = false,
+        };
+
+    /// <summary>
+    /// FR-41 part 2 (S-54)'s default: the repository carrying the most sessions, ties broken
+    /// ordinally for a deterministic pick (PRD §3.8) — PRD Part 8 Q5 decided the digest shows one
+    /// repository at a time, selectable, and the measured corpus has one dominant repository (25 of
+    /// 35 sessions) for this default to land on in practice. <see langword="null"/> only when no
+    /// session in the store carries a repository at all, matching <see cref="RepositoryScope.SelectedRepository"/>'s
+    /// own documented meaning for that value.
+    /// </summary>
+    static RepositoryScope BuildRepositoryScope(IReadOnlyList<Session> sessions)
+    {
+        var repositories = sessions
+            .Select(session => session.Repository)
+            .Where(repository => repository is not null)
+            .Select(repository => repository!)
+            .ToList();
+
+        var selected = repositories
+            .GroupBy(repository => repository, StringComparer.Ordinal)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => group.Key)
+            .FirstOrDefault();
+
+        return new RepositoryScope
+        {
+            SelectedRepository = selected,
+            AvailableRepositories = repositories
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(repository => repository, StringComparer.Ordinal)
+                .ToList(),
+        };
     }
 
     /// <summary>Builds the concrete request path for one session's <see cref="SessionRouteTemplate"/>

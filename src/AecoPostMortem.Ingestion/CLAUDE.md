@@ -30,7 +30,8 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `SessionBuilder.cs` | builds one `Data.Execution.Session` row from a session's own `session.start` (identity, `context.*`) and, when present, `session.shutdown` (`EndedAt`, token totals summed across every model) |
 | `SkillBuilder.cs` | builds one `Data.Execution.Skill` row per `skill.invoked` event, keyed by that event's own envelope id |
 | `HookBuilder.cs` | builds one `Data.Execution.Hook` row per `hook.start`/`hook.end` pair, matched by their shared `data.hookInvocationId` |
-| `NormalizedLayerWriter.cs` | ties `SessionBuilder`, `ExecutionRecordBuilder`, `SkillBuilder` and `HookBuilder` together: derives one session's rows across all six tables, deleting whatever that session already carried first — what `ingest` and `rebuild` both call |
+| `PermissionBuilder.cs` | builds one `Data.Execution.Permission` row per `permission.requested`/`permission.completed` pair, matched by their shared `data.requestId` — the pair's own natural key, unlike `Hook`'s `hookInvocationId` correlation |
+| `NormalizedLayerWriter.cs` | ties `SessionBuilder`, `ExecutionRecordBuilder`, `SkillBuilder`, `HookBuilder` and `PermissionBuilder` together: derives one session's rows across seven of the eight derived tables, deleting whatever that session already carried first — what `ingest` and `rebuild` both call |
 
 ## References
 
@@ -238,6 +239,17 @@ CommandRunner.Rebuild` calls it once per session RAW still holds, after `Derived
 Keeping this separate from `ExecutionRecordBuilder` itself mirrors `SessionIngestor` staying
 RAW-only: reconstruction and persistence stay two concerns, not one.
 
+### `PermissionBuilder` pairs by `data.requestId`, a real correlation id — unlike `Hook`'s `hookInvocationId`
+
+`permission.requested` and `permission.completed` share one `data.requestId` field directly (measured
+on the real corpus: both events carry it verbatim), so `PermissionBuilder.Build` needs no synthetic
+correlation the way `HookBuilder` needs `hookInvocationId` to tie an otherwise-unlinked pair together
+— the two builders still follow the identical "start with no end is unfinished, end with no start
+produces no row" shape. `ToolCallId` prefers the completion's own top-level `data.toolCallId`, falling
+back to the request's nested `data.permissionRequest.toolCallId` for a request that never resolved —
+the only field either event carries it on before a completion exists. `ResultKind` reads the nested
+`data.result.kind` object only a completion carries; a request alone has neither.
+
 ### `SessionBuilder`, `SkillBuilder` and `HookBuilder` complete the picture `ExecutionRecordBuilder` leaves open
 
 `ExecutionRecordBuilder` only ever built `Turn`/`ToolCall`/`Agent` — it never parsed `session.start`/
@@ -384,11 +396,13 @@ FR-14, FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` �
 `path` out of an object-shaped `arguments` value. The `ingest` CLI command (`AecoPostMortem.Cli`,
 `CommandRunner.Ingest`) now calls `IngestionRun.Run` and writes the resulting `CoverageReport` to
 stdout per FR-58 — the RAW-persistence half of the wiring this section used to call outstanding.
-`ExecutionRecordBuilder`, `SessionBuilder`, `SkillBuilder` and `HookBuilder` are now all called from
-the CLI, through `NormalizedLayerWriter`: both `ingest` (per session, after a successful non-excluded
-ingest) and `rebuild` (per session RAW still holds, after `DerivedSchema.Rebuild`) populate all six
-tables `ApiHost.GetSession` reads. Verified end to end against the live 35-session reference corpus —
-2,384 turns, 16,085 tool calls, 470 agents, 794 skills, 3,027 hooks, matching the RAW census exactly,
+`ExecutionRecordBuilder`, `SessionBuilder`, `SkillBuilder`, `HookBuilder` and `PermissionBuilder` are
+now all called from the CLI, through `NormalizedLayerWriter`: both `ingest` (per session, after a
+successful non-excluded ingest) and `rebuild` (per session RAW still holds, after
+`DerivedSchema.Rebuild`) populate seven of the eight derived tables — every one `ApiHost.GetSession`
+and `ApiHost.GetDigest` read, `WriteUnit` (Phase E) the sole holdout. Verified end to end against the
+live 35-session reference corpus — 2,384 turns, 16,085 tool calls, 470 agents, 794 skills, 3,027
+hooks, 1,033 permission requests (1,031 with a matched completion), matching the RAW census exactly,
 and the Flight Recorder renders a real session's masthead, tape and inspector against it. Getting
 there surfaced a real defect in already-shipped code: `Turn`'s original key, `(SessionId, TurnId)`,
 assumed `data.turnId` is unique within a session — measurably false on 27 of 35 real sessions, since

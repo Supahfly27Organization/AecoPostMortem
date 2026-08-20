@@ -18,6 +18,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `RuleStatement.cs` | FR-26 (S-19, issue #32): `RuleStatement` (source file + verbatim text) and `InstructionBlock` (a block's source file plus the statements its list items yielded) |
 | `RuleStatementExtractor.cs` | FR-26's `<custom_instruction>` parser: `RuleStatementExtractor.ExtractBlocks` takes a system prompt's own text and returns its blocks — pure, no file, no session |
 | `RuleStatementDeduplication.cs` | `SessionInstructionBlocks` (one session's blocks, plus `HasInstructionBlocks`), `RuleStatementOccurrence` (a statement plus every session that carried it), and `RuleStatementDeduplication.Deduplicate`, which collapses identical statements across sessions |
+| `AbortedTurnCheck.cs` | FR-18 (S-16, issue #28): `TurnRecord` (the plain per-turn input, aborted or not), `AbortedTurnOccurrence` (reason paired with its 1-based position and the session's own turn count), and `AbortedTurnCheck.Run`, which orders each session's turns and reports only the ones that aborted |
 
 ## The invariant
 
@@ -208,14 +209,32 @@ shape, the same kind of input every other check in this project takes — rather
 sessions to plain shapes and hands them in; the reduction over many sessions' worth of shapes is a
 pure function of its input and belongs where every other pure check-shape reduction already lives.
 
+### Position is derived by ordering, not read off a field
+
+`AbortedTurnCheck.Run` groups `TurnRecord`s by `SessionId`, orders each session's turns by
+`StartedAt` (ties broken by `TurnId`, ordinal string comparison, for a deterministic result
+regardless of input order — PRD §3.8), and reports each aborted turn's 1-based index in that
+ordering alongside the session's total turn count. Copilot's own event log carries no ordinal turn
+number, so "position in the session" (issue #28, Scenario 1) only exists once every turn in the
+session — not only the aborted ones — has been placed in order; that is why `TurnRecord` covers
+every turn, `Aborted` and all, rather than taking a list of already-known aborts.
+
+### One occurrence per abort, never grouped by reason
+
+Unlike `HookFailureCheck` (grouped by hook identity) or `FailedToolCallsCheck` (grouped by tool
+identity), `AbortedTurnCheck` groups only by session — the reason text plays no role in identity.
+A measured 9 aborts across 8 sessions is low volume (issue #28's edge case): two aborts sharing the
+same reason string in different sessions are still two independent abandonments, and merging them
+by reason would make the finding look more recurring than the corpus measures.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
-four entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
-`FailedToolCallsCheck` (issue #26, FR-16) and `InterruptionLoadCheck` (issue #30, FR-20). The shape
-they establish — plain per-call/per-session input records in, structurally-required or
-structurally-paired results out, no branch on any specific tool name — is the pattern later checks
-in this project should follow.
+five entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+`FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20) and
+`AbortedTurnCheck` (issue #28, FR-18). The shape they establish — plain per-call/per-session/per-turn
+input records in, structurally-required or structurally-paired results out, no branch on any
+specific tool name — is the pattern later checks in this project should follow.
 
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and

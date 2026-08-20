@@ -8,6 +8,7 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | File | What it holds |
 |---|---|
 | `SourceFiles.cs` | the only door onto `~/.copilot/`; refuses `ExcludedSources`-excluded paths before any OS-level open |
+| `CopilotSourceLocation.cs` | S-48: the default per-user Copilot session-state root (`~/.copilot/session-state`), resolved the same way `AecoPostMortem.Data.StoreLocation` resolves the store's own path. Names the path only — `SessionDiscovery` is what asks whether it is really there |
 | `SessionDiscovery.cs` | FR-1: finds every session directory under the session-state root and classifies its files (`events.jsonl`, `session.db`, `rewind-snapshots/index.json`, `workspace.yaml`) without reading any of them; a missing root is reported, not thrown |
 | `SessionEventReader.cs` | FR-3/FR-6: reads one `events.jsonl` line by line into `RawEvent`s — provider version and event-schema version from line 1 only, malformed lines skipped and counted, a trailing unterminated line stops the read and reports the high-water offset |
 | `EventEnvelopeParsers.cs` | `IEventEnvelopeParser`, the envelope-field (`type`/`ts`) reader, and the version-keyed registry `SessionEventReader` selects from — falls back to the one shape measured today for a schema version it has not seen |
@@ -38,6 +39,11 @@ resolved from a `RawEvent`, so `<custom_instruction>` parsing itself stays in `R
 project's own CLAUDE.md, "Rule-set extraction and the check-shape catalogue") while the RAW-reading
 half of the job — which events to feed it, and unioning a session's own blocks across all of
 them — stays here, the same split `Findings` uses for every other check shape.
+
+`AecoPostMortem.Api` references this project the other way, for `CopilotSourceLocation` and
+`SessionDiscovery` — S-48's app-state diagnosis needs to know whether the Copilot session-state
+root exists, and reuses FR-1's own discovery rather than a second, parallel `Directory.Exists`
+check. See `AecoPostMortem.Api/CLAUDE.md`.
 
 ## Non-obvious decisions
 

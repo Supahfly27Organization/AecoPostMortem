@@ -99,6 +99,78 @@
   color: #666;
 }
 
+/* FR-22 (S-09, issue #18): each subagent's own lane, with the report it actually produced. */
+.agent-lanes {
+  margin: 0 0 1.5rem;
+}
+
+.agent-lanes__heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+}
+
+.agent-lanes__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-lane {
+  border: 1px solid #d0d0d0;
+  border-left: 3px solid #7b5ea7;
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  background: #fff;
+}
+
+.agent-lane[data-outcome='failed'] {
+  border-left-color: #c0392b;
+}
+
+.agent-lane__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin-bottom: 0.35rem;
+}
+
+.agent-lane__name {
+  font-weight: 600;
+}
+
+.agent-lane__outcome {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+}
+
+.agent-lane[data-outcome='failed'] .agent-lane__outcome {
+  color: #c0392b;
+}
+
+.agent-lane__output-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.agent-lane__output-empty {
+  margin: 0;
+  color: #666;
+}
+
+.agent-lane__output-failed {
+  margin: 0;
+  color: #7b241c;
+}
+
 .session-page__body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

@@ -190,7 +190,17 @@ public static class ApiHost
         // designed "no findings" state is real, not a placeholder skipped by short-circuiting here.
         var findings = SessionFindings.For(sessionId, []);
 
-        return SessionEnvelope.From(recording, findings, FindingEnvelope.From);
+        // FR-22 (S-09, issue #18): one lane per subagent, each carrying the report it actually
+        // produced — resolved from the same `rawEvents` read above, ordered by `StartedAt` so the
+        // served list is deterministic rather than whatever order the store happened to return rows
+        // in.
+        var lanes = agents
+            .OrderBy(agent => agent.StartedAt, StringComparer.Ordinal)
+            .ThenBy(agent => agent.AgentId, StringComparer.Ordinal)
+            .Select(agent => SessionAgentLaneEnvelope.From(agent, SubagentOutputLookup.Find(rawEvents, agent)))
+            .ToList();
+
+        return SessionEnvelope.From(recording, findings, FindingEnvelope.From, lanes);
     }
 
     /// <summary>

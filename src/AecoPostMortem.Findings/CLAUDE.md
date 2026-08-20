@@ -32,6 +32,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SessionFindings.cs` | FR-21, part 2 of 3 (S-52, issue #16): `SessionFindingChip`, `SessionFindings` — the chip row's own data path, joining `Finding.Recurrence.Occurrences` to one session id, distinct from `SessionRecording`'s tape |
 | `ContradictionCheck.cs` | FR-43 (S-38, issue #47): orchestrates `Rules.ContradictionCheck` — groups sessions by rule-set version before calling in (never comparing statements from two versions), wraps the result in `ContradictionCheck.Result` (`Candidates`, a required `Provenance` always `Inferred`, and the `CheckRegistryEntry`), `CheckId = "contradiction-check"`. Not a `Finding`-producing check — see below |
 | `SubagentAttribution.cs` | FR-49 (S-43, issue #53): `SubagentRuleDisplay` — closed to `Nothing` (the default) or an explicit, caller-stated `AssumedInherited` (always `Provenance.Inferred`, computed not settable) — and `SubagentObservedContext.From(Agent, taskPrompt, sessionSkills)`, the subagent's own spawn description, task prompt and skill invocations, always `Provenance.Observed`. Neither type infers or guesses a rule set; not a `Finding` |
+| `MonitorComparison.cs` | FR-39 (S-35, issue #43): "the Monitor comparison" — `MonitorComparison` (`BeforeVersion`/`AfterVersion`, each a full `Rules.RuleSetVersion`, paired with `Before`/`After`, each an `AdherenceFigure`) and `MonitorComparison.Compare`, which calls `Rules.RuleSetVersionAdjacency.RequireAdjacentPair` first (no averaged figure is ever offered for a refused pair), then resolves the operand pair exactly once via `Rules.OperandResolver.ResolveTwoOperands` against both sides' invocations combined and reuses that one `TwoOperandResolution` to build both figures. Not a `Finding` — see below |
 
 ## References
 
@@ -93,6 +94,13 @@ only in what they build from it (`FindingClass.Waste`/`Provenance.Derived` vs.
 says it does not recompute failure rates from scratch. It also uses `Rules.RuleStatement` (FR-26,
 S-19) as the shape a "mandated tool" names the rule that mandates it — no new type duplicates what
 `RuleStatement` already carries (`SourceFile`, `Text`).
+
+`MonitorComparison` (issue #43, S-35) is the third caller of `OperandResolver`, alongside
+`AdherenceFigure.FromTwoOperands`'s own tests — and the first to call
+`Rules.RuleSetVersionAdjacency.RequireAdjacentPair`, the sibling primitive to
+`RuleSetVersionScope.RequireSingleVersion` this file's own remarks anticipated ("the reusable
+primitive any future figure scopes itself with"), except here the scoping is a two-version
+adjacency check rather than a single-version refusal.
 
 ## Non-obvious decisions
 
@@ -647,6 +655,44 @@ version-equality check inside the pairwise loop. `Population` on the resulting
 §3.9's own worked phrasing, "a measured 0 contradictions found across 35 sessions checked" — sessions,
 not statements), while `FindingCount` sums candidates found across all versions combined.
 
+### `MonitorComparison.Compare` resolves the operand pair once, never per side
+
+FR-39's "under a single stated resolution" (Scenario 1) is what a naive two-figure implementation
+would get wrong: calling `AdherenceFigure.FromTwoOperands` independently for each side would resolve
+the same operand text against two different invocation lists, and `OperandResolver.Resolve` builds
+its tool vocabulary from whichever corpus it is handed — so the two sides could land on two
+different layers, or the identical layer resolving to two different tool sets, purely because one
+side's sessions happened to exercise a different vocabulary than the other's. `Compare` resolves
+`operandAText`/`operandBText` exactly once, against `beforeInvocations.Concat(afterInvocations)`,
+and reuses that one `TwoOperandResolution` (via `AdherenceFigure.FromTwoOperands`) to build both
+`Before` and `After` — only the call counts each side's own invocations produced can differ; the
+layer and the tool set an operand resolved to cannot.
+
+### `MonitorComparison` carries the full `RuleSetVersion` on each side, not a bare id
+
+FR-39 Scenario 2 requires the session count to be "as visible as the percentage" — a bare
+`RuleSetVersionId` (repository + hash) has no session count at all, so `BeforeVersion`/
+`AfterVersion` are `Rules.RuleSetVersion` values (identity, window, *and*
+`RuleSetVersion.SessionCount`), the exact type `Rules.RuleSetVersionAdjacency.RequireAdjacentPair`
+already returns. `AecoPostMortem.Api.MonitorComparisonEnvelope` reuses this structural guarantee
+rather than re-deriving a session count on the wire.
+
+### The comparison refuses before it resolves anything
+
+`Compare` calls `RuleSetVersionAdjacency.RequireAdjacentPair` first, before touching
+`OperandResolver` at all (Scenario 3: "no averaged figure is offered"). A non-adjacent or
+cross-repository pair therefore never reaches operand resolution or call-counting — there is no
+code path in this method that computes a figure and then discards it because the versions turned
+out to be non-adjacent; the refusal is the first thing that can happen.
+
+### Not a `Finding` — same reasoning `SessionTokenFigures`/`SessionRecording` give for their own types
+
+A Monitor comparison is not evidence of one session's own waste or rule adherence; it is two
+already-computed `AdherenceFigure`s placed side by side. `MonitorComparison` therefore carries none
+of `Finding`'s seven fields (no `Provenance`, no `Recurrence`, no `Suggestion`) — the same "this is a
+display fact, not a judgment about a session" split `SessionTokenFigures.cs`'s own remarks give,
+applied here to a comparison across two rule-set versions rather than one session's token totals.
+
 ## Status
 
 The finding record, check-registry shapes, and FR-56's generic suggestion-template mechanism, plus
@@ -758,3 +804,20 @@ contract-first pattern for a subagent's rules and its own context: no CLI comman
 decides to construct an `AssumedInherited` display, are later work (plausibly S-52/S-53's own
 inspector tabs, which already own the session-page rendering this would slot into) this story only
 makes possible.
+
+`MonitorComparison` (issue #43, S-35, FR-39) publishes "the Monitor comparison" this file's own
+opening line already named ahead of any story building it: `Compare` refuses a non-adjacent or
+cross-repository pair before computing anything (`Rules.RuleSetVersionAdjacency.
+RequireAdjacentPair`), then resolves the rule's operand pair exactly once and reuses that shared
+resolution to build both sides' `AdherenceFigure`s, so the two sides can never be served under two
+different resolutions. `AecoPostMortem.Api.MonitorComparisonEnvelope` is the wire shape, and
+`web/src/digest/MonitorComparisonBlock.tsx` renders it, giving each side's `RuleSetVersion.
+SessionCount` the identical visual prominence its `AdherenceFigureBlock`'s own percentage gets.
+`AdherenceFigureTests`/`MonitorComparisonTests` reproduce the reference corpus's own measured
+41.8% → 71.7% edit (3 sessions, then 4) from a synthetic call-count fixture shaped to match those
+published figures — the frozen corpus's raw session bytes are not committed
+(`fixtures/README.md`), so this is the same "shape that produced the published numbers, not a
+replay of the original files" every other test in this repository that reproduces a measured PRD
+figure already does. No CLI command or `AecoPostMortem.Api` endpoint wires a real store's rule-set
+versions and invocations into `Compare` yet — like every check-shape story in this project, it
+publishes the contract the eventual analysis-run orchestrator will call.

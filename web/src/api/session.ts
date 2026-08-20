@@ -67,6 +67,31 @@ export interface SessionFindingChip {
   sessionsAffected: number
 }
 
+/** Mirrors `AecoPostMortem.Data.Execution.Agent.AgentOutcome`. */
+export type AgentOutcome = 'running' | 'completed' | 'completedCostUnknown' | 'failed'
+
+/** FR-22 (S-09, issue #18): a subagent lane's own report — "the report it actually produced" (the
+ * story's own wording), never the parent's truncated `read_agent` completion. A closed three-shape
+ * union, the same discipline `SessionRecordingStatus` already uses here: which of "a real report",
+ * "nothing recorded" or "the subagent failed" applies is a stated value, never inferred from which
+ * fields happen to be present. */
+export type SubagentOutputEnvelope =
+  | { kind: 'present'; text: string }
+  | { kind: 'notRecorded'; reason: string }
+  | { kind: 'failed'; error: string }
+
+/** FR-22 (S-09, issue #18): one subagent's own lane — its identity, how it finished, and the report
+ * resolved from its own message stream. */
+export interface SessionAgentLane {
+  agentId: string
+  parentAgentId: string | null
+  name: string
+  displayName: string
+  outcome: AgentOutcome
+  error: string | null
+  output: SubagentOutputEnvelope
+}
+
 export interface SessionEnvelope {
   masthead: SessionMasthead
   steps: SessionTapeStep[]
@@ -74,6 +99,9 @@ export interface SessionEnvelope {
   /** Scenario 3's own designed state: an empty array *is* "no findings affect this session",
    * rendered explicitly by `SessionPage`, never a blank area. */
   findings: SessionFindingChip[]
+  /** FR-22 (S-09, issue #18): one entry per subagent this session spawned. An empty array is the
+   * designed "no subagents" state, the same discipline `findings` already establishes. */
+  lanes: SessionAgentLane[]
 }
 
 export function sessionRoute(sessionId: string): string {

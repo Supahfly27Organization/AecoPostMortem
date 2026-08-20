@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SessionEnvelope, StepEvidenceEnvelope } from '../api/session'
+import type { SessionAgentLane, SessionEnvelope, StepEvidenceEnvelope } from '../api/session'
 import { SessionPage } from './SessionPage'
 
 function respondWith(envelope: SessionEnvelope) {
@@ -56,6 +56,7 @@ describe('The masthead states what this session was', () => {
       steps: [],
       status: { kind: 'complete' },
       findings: [],
+      lanes: [],
     })
   })
 
@@ -103,6 +104,7 @@ describe('The tape is ordered by real time', () => {
       ],
       status: { kind: 'complete' },
       findings: [],
+      lanes: [],
     })
   })
 
@@ -146,6 +148,7 @@ describe('A session with no tool calls still renders', () => {
       steps: [],
       status: { kind: 'complete' },
       findings: [],
+      lanes: [],
     })
   })
 
@@ -192,6 +195,7 @@ describe('A skill invocation is its own step', () => {
       ],
       status: { kind: 'complete' },
       findings: [],
+      lanes: [],
     })
   })
 
@@ -250,6 +254,7 @@ describe('A session still ingesting says so', () => {
       ],
       status: { kind: 'ingestIncomplete' },
       findings: [],
+      lanes: [],
     })
 
     renderAtSession('session-mid-ingest')
@@ -284,6 +289,7 @@ describe('A session that failed to reconstruct says why', () => {
         skipped: ['2 of 5 subagent spawn(s) could not be resolved to their originating tool call'],
       },
       findings: [],
+      lanes: [],
     })
 
     renderAtSession('session-broken')
@@ -328,6 +334,7 @@ const ONE_STEP_ENVELOPE: SessionEnvelope = {
       sessionsAffected: 3,
     },
   ],
+  lanes: [],
 }
 
 /** Sends a session/step-evidence-aware fetch mock: the session route resolves `sessionEnvelope`,
@@ -466,5 +473,136 @@ describe('A step whose raw event was skipped at ingest', () => {
     await user.click(screen.getByRole('tab', { name: 'Raw' }))
 
     expect(await screen.findByText(/skipped at ingest/i)).toBeInTheDocument()
+  })
+})
+
+/** FR-22 (S-09, issue #18): each subagent's own lane, with the report it actually produced. */
+function envelopeWithLanes(lanes: SessionAgentLane[]): SessionEnvelope {
+  return {
+    masthead: {
+      sessionId: 'session-lanes',
+      repository: null,
+      branch: null,
+      copilotVersion: '0.0.339',
+      elapsedMs: null,
+      turnCount: 0,
+      toolCallCount: 0,
+      subagentCount: lanes.length,
+      skillCount: 0,
+      modelCount: null,
+      contextSize: { kind: 'notRecorded' },
+    },
+    steps: [],
+    status: { kind: 'complete' },
+    findings: [],
+    lanes,
+  }
+}
+
+/** Scenario: "A subagent's output is read from its own stream" — the report shown is the last
+ * assistant message bearing that agent's id. */
+describe("A subagent's real output", () => {
+  it('shows the report actually produced by the subagent', async () => {
+    respondWith(
+      envelopeWithLanes([
+        {
+          agentId: 'a1',
+          parentAgentId: null,
+          name: 'general-purpose',
+          displayName: 'General Purpose Agent',
+          outcome: 'completed',
+          error: null,
+          output: { kind: 'present', text: 'The subagent finished the fix and all tests pass.' },
+        },
+      ]),
+    )
+
+    renderAtSession('session-lanes')
+
+    expect(await screen.findByText('General Purpose Agent')).toBeInTheDocument()
+    expect(await screen.findByText('The subagent finished the fix and all tests pass.')).toBeInTheDocument()
+  })
+
+  it("never shows the parent's truncated read_agent stub as the output", async () => {
+    respondWith(
+      envelopeWithLanes([
+        {
+          agentId: 'a1',
+          parentAgentId: null,
+          name: 'general-purpose',
+          displayName: 'General Purpose Agent',
+          outcome: 'completed',
+          error: null,
+          output: { kind: 'present', text: 'The subagent finished the fix and all tests pass.' },
+        },
+      ]),
+    )
+
+    renderAtSession('session-lanes')
+
+    await screen.findByText('The subagent finished the fix and all tests pass.')
+    expect(screen.queryByText(/Full response provided to agent/i)).not.toBeInTheDocument()
+  })
+})
+
+/** Scenario: "A subagent with no output of its own says so" — never a fall-back to the parent's
+ * stub. */
+describe('A subagent with no output of its own', () => {
+  it('states that no output was recorded', async () => {
+    respondWith(
+      envelopeWithLanes([
+        {
+          agentId: 'a1',
+          parentAgentId: null,
+          name: 'general-purpose',
+          displayName: 'General Purpose Agent',
+          outcome: 'completed',
+          error: null,
+          output: { kind: 'notRecorded', reason: 'No output was recorded for this subagent.' },
+        },
+      ]),
+    )
+
+    renderAtSession('session-lanes')
+
+    expect(await screen.findByText(/no output was recorded/i)).toBeInTheDocument()
+  })
+})
+
+/** Scenario: "A failed subagent renders as failed" — the failure and its recorded error are
+ * shown. */
+describe('A failed subagent', () => {
+  it('renders the failure and its recorded error', async () => {
+    respondWith(
+      envelopeWithLanes([
+        {
+          agentId: 'a1',
+          parentAgentId: null,
+          name: 'general-purpose',
+          displayName: 'General Purpose Agent',
+          outcome: 'failed',
+          error: 'MCP tool timed out',
+          output: { kind: 'failed', error: 'MCP tool timed out' },
+        },
+      ]),
+    )
+
+    renderAtSession('session-lanes')
+
+    expect(await screen.findByText(/failed/i)).toBeInTheDocument()
+    expect(await screen.findByText('MCP tool timed out')).toBeInTheDocument()
+  })
+})
+
+/** Scenario: "Lanes are visually separable from the main thread" — a session with no subagents
+ * renders no lane section at all, the designed "nothing to show" state. */
+describe('A session with no subagents', () => {
+  it('renders no subagent lane section', async () => {
+    respondWith(envelopeWithLanes([]))
+
+    renderAtSession('session-lanes')
+
+    await screen.findByRole('region', { name: 'Masthead' })
+    expect(screen.queryByRole('region', { name: 'Subagent lanes' })).not.toBeInTheDocument()
   })
 })

@@ -6,12 +6,13 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-41 (issue #44, S-36) added `SessionsAffected`, the served ranking key; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetSession` and `GetStepEvidence` are the same three without a listener |
+| `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings` |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope` |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
@@ -27,6 +28,13 @@ session-state root exists (`Ingestion.SessionDiscovery`, reusing FR-1's own disc
 second `Directory.Exists` check). This is a genuine widening of the "thin host" description below,
 not an oversight — S-48 is one of the stories `FindingEnvelope.cs`'s own doc comment named as
 building "real endpoints," and the app-state endpoint is not a finding endpoint at all.
+
+`Rules` — added by S-22 (issue #35, FR-40), and the first direct reference this project has to it.
+`RulesInventoryEnvelope` maps `Rules`' own `RulesInventory`/`RuleStatementStatus`/`RuleRetirement`
+shapes onto the wire, so the reference is stated explicitly in `AecoPostMortem.Api.csproj` rather
+than leaned on transitively through `Findings` — this project's own dependency list should say what
+its source actually names. It does not weaken Repo Rule 6, which binds what `Rules` may *contain*,
+not who may read it.
 
 `ApiHost.GetSession` (S-08) widens the same `Data` reference further: it opens a `PostMortemContext`
 and reads `Sessions`/`Turns`/`ToolCalls`/`Agents`/`Skills`/`Hooks` directly by session id, then hands
@@ -46,16 +54,31 @@ rather than duplicating it a second time.
 
 ## Non-obvious decisions
 
-### `FindingEnvelope` is three closed shapes, not one type with a nullable resolution
+### `FindingEnvelope` is three closed shapes, not one type with a nullable figure
 
-`Finding.Resolution` is nullable because only adherence classes carry one (FR-33). The response
-envelope makes that distinction structural rather than repeating the nullable field: `General` has no
-`Resolution` or `RuleVersion` members at all, and `Adherence` is the only shape that has them — both
-`required`. Assembling an `Adherence` envelope without a resolution and rule version is a compile
-error (CS9035), the same guarantee `Finding.Provenance` already gives (issue #23). `FR-33`'s refusal
-therefore lives here, structurally, at build time; `S-24` is the story that exercises the resulting
-behaviour at the API boundary — this contract only has to make the bare figure unrepresentable, not
-implement the refusal itself.
+Only adherence classes carry an adherence figure (FR-33). The response envelope makes that
+distinction structural rather than a nullable field: `General` and `BaseRate` have no `Figure`
+member at all, and `Adherence` is the only shape that has one — `required`. Assembling an
+`Adherence` envelope without it is a compile error (CS9035), the same guarantee
+`Finding.Provenance` already gives (issue #23).
+
+S-24 (issue #38) is the story that closed FR-33's refusal, and it replaced this shape's original
+`Resolution` + `RuleVersion` pair with a single `required AdherenceFigure Figure`. Two separate
+members were the weak point: they let a caller supply a resolution that did not produce the
+percentage it was served beside, and the wire carried a single `operandLayer` string where FR-33
+asks for the layer used *per operand*. `AdherenceFigure` (`AecoPostMortem.Findings`) fixes both —
+the percentage is a computed property over the per-operand call counts, so there is no bare figure
+to refuse at run time because none can be constructed, and `RuleVersion` is
+`Rules.RuleSetVersionId` (repository + content hash, S-20) rather than a display string, so S-35's
+Monitor comparison can tell whether two figures were even scoped to the same rule set before
+comparing them.
+
+`FromAdherence(Finding, AdherenceFigure)` is the only producer of this shape in this project, and
+the figure is a non-optional parameter — `FindingEnvelopeTests.The_only_way_to_produce_an_adherence_
+envelope_takes_the_figure_as_a_required_parameter` proves by reflection that no second factory has
+appeared, and `No_constructor_opts_out_of_required_member_enforcement` proves no constructor carries
+`[SetsRequiredMembers]`, the one attribute that would switch CS9035 back off and make the refusal a
+convention again.
 
 All three shapes derive from `FindingEnvelope` through a private constructor, so nothing outside this
 file can add a fourth shape — the same closed-hierarchy trick `SuggestionEnvelope` uses.
@@ -172,6 +195,19 @@ every other masthead field. It does not re-derive or re-filter anything — `Dig
 `ProcessDigest.Build` (`AecoPostMortem.Findings/CLAUDE.md`) already scoped `findings` to one
 repository before this envelope is ever assembled.
 
+### `RulesInventoryEnvelope` serves the status counts rather than letting a client recount them
+
+FR-40's four-status breakdown (a measured 4 / 9 / 9 / 21) is the figure PRD §2 says every coverage
+number derives from, so it is served as `RulesInventoryStatusCountsEnvelope` even though a client
+could count `Rows` itself. Two surfaces recounting independently is exactly how the three
+conflicting coverage figures the PRD had to reconcile came about; one served figure is one answer.
+It is projected from `RulesInventory.StatusCounts`, itself a computed property over the rows, so
+the served counts cannot disagree with the served rows.
+
+`RuleStatementStatusEnvelope.Of` and `RuleRetirementEnvelope.Of` switch over the domain's own closed
+unions with no catch-all arm that could serialise an unrecognised shape as something plausible — a
+fifth domain status would fail to compile here rather than reach a client mislabelled.
+
 ### `ApiHost.Build` returns an unstarted `WebApplication`
 
 The caller (`AecoPostMortem.Cli`'s `serve` command) decides when to start it and how long to run
@@ -206,12 +242,38 @@ so a machine that has only built the .NET solution has no web shell to serve; `s
 
 `DigestEnvelope.From(ProcessDigest, Func<Finding, FindingEnvelope>)` cannot assume every ranked
 finding maps through `FindingEnvelope.From` — an adherence finding needs `FromAdherence` with its
-resolution and rule version instead (FR-33), and only the caller (which already has the resolution)
-knows which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
+`AdherenceFigure` instead (FR-33), and only the caller (which already resolved the operands) knows
+which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
 the ranking already happened in `Findings`, this only converts each entry to its wire shape. The
 same mapper is reused for `ProcessDigest.InferredFindings` (FR-48, issue #52, S-42) — there is no
 second, Inferred-only mapping function, because an Inferred finding needs exactly the same
 `General`/`Adherence` shape decision any other finding does.
+
+### `SessionsAffected` is served, not left for each client to re-derive
+
+FR-41 (issue #44, S-36) ranks `RankedFindings` by distinct sessions affected, and S-36's edge case
+makes that count the most prominent thing on a rendered row — a finding touching one session has to
+read as an anecdote beside one touching thirty. `FindingEnvelope.SessionsAffected` carries that
+number on the wire even though `Recurrence.Occurrences` technically already contains it: a client
+counting its own distinct session ids would be re-implementing `ProcessDigest.SessionsAffected`, and
+any drift between the two would show up as a row whose displayed count disagrees with the order it
+is being displayed in. It is always computed by `ProcessDigest.SessionsAffected(finding)` inside the
+three factories, never accepted as a parameter, so the served figure and the ranking cannot come
+from two different rules.
+
+### The "no aggregate scan" guarantee is enforced here, not only in `Findings`
+
+`AecoPostMortem.Findings`' own `ProcessDigestStructureTests` proves `ProcessDigest.Build` cannot be
+handed a live data source — but that project has no `Data` reference at all, so the guarantee costs
+it nothing. **This** project does reference `Data` (`DiagnoseAppState`, `GetSession`), which makes
+`MastheadEnvelope` the first point on the masthead's path where a live `COUNT` could plausibly be
+introduced by a later story wiring `/api/digest`. `MastheadEnvelopeStructureTests` reflects over
+`MastheadEnvelope`'s public surface (properties, method parameters and return types, following
+generic arguments down) and fails if any of it mentions an `IQueryable`, an `Expression`, or any type
+out of `AecoPostMortem.Data` / `Microsoft.EntityFrameworkCore`. Counting a million rows measured
+126 ms on SQLite and 118 ms on Postgres (`docs/product-superpowers/research/2026-08-16-sqlite-vs-
+postgres-query-latency.md`), so this is not an engine problem to tune away later — the masthead reads
+counters maintained at ingest, and the alternative is made unrepresentable rather than discouraged.
 
 ### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
 
@@ -318,6 +380,22 @@ FR-48 (issue #52, S-42) added `FindingEnvelope.ProvenanceLabel` (required on eve
 either through a live store — but `web/src/digest/ProvenanceBadge.tsx` (S-54, issue #45) is a real
 consumer of the shape once `DigestPage` does have data to render, closing the gap that was still
 open when S-42 alone had landed.
+
+FR-33 (issue #38, S-24) made the adherence shape carry one `required AdherenceFigure Figure`. It is
+contract-only from this project's side for the same reason FR-48's additions were: `ApiHost` still
+serves no finding endpoint, so there is no live route to wire a figure into — the "wherever figures
+are currently served" this story asks about is, today, this contract and nothing else. That is not a
+gap in the refusal: because the figure's percentage is computed from its operands and the envelope
+member is `required`, any endpoint added later (including S-35's Monitor comparison) inherits the
+guarantee without opting into it. `web/src/digest/AdherenceFigureBlock.tsx` is the real rendering
+consumer, reached through `FindingRow` once `/api/digest` has data.
+
+`RulesInventoryEnvelope.cs` (S-22, issue #35, FR-40) is contract-only in the same sense the digest
+contract was before S-54: `web/src/routes/RulesInventoryPage.tsx` is a real consumer of the shape,
+but `ApiHost.Build` does not `MapGet` `/api/rules-inventory` — resolving a whole store's `RawEvent`s
+into `SessionRuleSet`s at scale (FR-26's extraction run over every session, then FR-27's versioning
+over the result) is wiring no story has done yet, the same gap `ProcessDigest`'s masthead counters
+document. The web page targets the route ahead of it.
 
 `GET /api/sessions/{sessionId}` (`SessionEnvelope.cs`, `ApiHost.GetSession`, S-08, issue #15) is the
 second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by

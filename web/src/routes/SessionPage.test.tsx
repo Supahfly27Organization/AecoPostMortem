@@ -204,6 +204,7 @@ const ONE_STEP_ENVELOPE: SessionEnvelope = {
         recurrence: { key: 'path:/repo/a.cs', occurrences: [{ sessionId: 'session-1', ruleSetVersion: null }] },
         suggestion: { state: 'absent' },
         operatorResponse: 'ignored',
+        sessionsAffected: 3,
       },
       sessionsAffected: 3,
     },

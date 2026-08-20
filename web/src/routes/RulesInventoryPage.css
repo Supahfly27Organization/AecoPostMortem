@@ -1,0 +1,117 @@
+.rules-inventory {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.rules-inventory__scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem 1.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+}
+
+.rules-inventory__scope-statement {
+  margin: 0;
+}
+
+.rules-inventory__scope-picker {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.rules-inventory__scope-picker-label {
+  font-size: 0.85rem;
+  color: #57606a;
+}
+
+/* Every status count is styled identically. "Not a rule" is the largest bucket on the reference
+   corpus (a measured 21 of 43) and is not a failure — see StatusBreakdown's own comment. Adding a
+   warning colour to any one of these tiles would undo the point of the surface. */
+.rules-inventory__breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  align-items: baseline;
+}
+
+.rules-inventory__count {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #d0d7de;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #24292f;
+  font-size: 0.9rem;
+}
+
+.rules-inventory__count-total {
+  color: #57606a;
+  font-size: 0.9rem;
+}
+
+.rules-inventory__empty {
+  padding: 1rem;
+  border: 1px dashed #d0d7de;
+  border-radius: 6px;
+  color: #57606a;
+}
+
+.rules-inventory__table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.rules-inventory__table th,
+.rules-inventory__table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #d0d7de;
+  vertical-align: top;
+}
+
+.rules-inventory__table th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #57606a;
+}
+
+.rules-inventory__text {
+  max-width: 32rem;
+}
+
+.rules-inventory__sessions,
+.rules-inventory__window,
+.rules-inventory__retirement {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: #57606a;
+}
+
+/* A retired rule stays visible and legible — dimmed would read as "less true", and its adherence
+   figure is frozen, not withdrawn (FR-40, Scenario 5). Marked with a rule on the leading edge rather
+   than with reduced contrast, so it is distinguishable at a glance without being de-emphasised. */
+.rules-inventory__table tr[data-retired='true'] td:first-child {
+  box-shadow: inset 3px 0 0 #8c959f;
+}
+
+.rules-inventory__status {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.rules-inventory__reason {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: #57606a;
+  max-width: 22rem;
+}

@@ -1,0 +1,29 @@
+.app-state-banner {
+  margin: 0 0 1.5rem;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid #d9c15a;
+  border-radius: 6px;
+  background: #fdf6df;
+  color: #4a3c05;
+}
+
+.app-state-banner p {
+  margin: 0;
+}
+
+.app-state-banner p + p {
+  margin-top: 0.4rem;
+}
+
+.app-state-banner code {
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.9em;
+}
+
+.app-state-banner--error {
+  border-color: #c0392b;
+  background: #fdecea;
+  color: #7b241c;
+}

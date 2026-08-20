@@ -1,0 +1,164 @@
+namespace AecoPostMortem.Findings.Tests;
+
+/// <summary>
+/// FR-41's corpus digest (issue #44, S-36): findings ranked by sessions affected, and a masthead
+/// that states its own scope honestly — including the two designed "nothing to show yet" states a
+/// bare zero could otherwise hide.
+/// </summary>
+public sealed class ProcessDigestTests
+{
+    static MastheadCounters Counters(int sessionCount = 35, bool ingestInProgress = false) => new()
+    {
+        SessionCount = sessionCount,
+        SpanStart = sessionCount == 0 ? null : new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
+        SpanEnd = sessionCount == 0 ? null : new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero),
+        RepositoryCount = sessionCount == 0 ? 0 : 3,
+        EventCount = sessionCount == 0 ? 0 : 56_138,
+        ToolCallCount = sessionCount == 0 ? 0 : 12_345,
+        IngestInProgress = ingestInProgress,
+    };
+
+    static CheckRegistry EmptyRegistry() => new() { Entries = [] };
+
+    static CheckRegistry RanCleanRegistry() => new()
+    {
+        Entries =
+        [
+            new CheckRegistryEntry
+            {
+                CheckId = "repeated-file-read",
+                Status = CheckRunStatus.Ran,
+                Population = 35,
+                FindingCount = 0,
+            },
+        ],
+    };
+
+    static Finding WasteFinding(string path, params string[] sessionIds) => new()
+    {
+        Class = FindingClass.Waste,
+        Provenance = Provenance.Derived,
+        Evidence = [new EvidenceItem { Field = "data.path", Value = path }],
+        Recurrence = new Recurrence
+        {
+            Key = path,
+            Occurrences = [.. sessionIds.Select(id => new RecurrenceOccurrence { SessionId = id })],
+        },
+    };
+
+    [Fact]
+    public void Findings_are_ranked_by_distinct_sessions_affected_descending()
+    {
+        var touchedThirty = WasteFinding("src/hot.cs", [.. Enumerable.Range(1, 30).Select(i => $"session-{i}")]);
+        var touchedOne = WasteFinding("src/rare.cs", "session-1");
+        var touchedFive = WasteFinding("src/warm.cs", [.. Enumerable.Range(1, 5).Select(i => $"session-{i}")]);
+
+        var digest = ProcessDigest.Build(
+            Counters(),
+            RanCleanRegistry(),
+            [touchedOne, touchedThirty, touchedFive]);
+
+        Assert.Equal(
+            ["src/hot.cs", "src/warm.cs", "src/rare.cs"],
+            digest.RankedFindings.Select(f => f.Recurrence.Key));
+    }
+
+    [Fact]
+    public void A_tie_in_sessions_affected_preserves_input_order_rather_than_reordering_arbitrarily()
+    {
+        // OrderByDescending is a stable sort: two findings tied on the ranking key keep the order
+        // they arrived in, deterministically — nothing about a tie is a licence to reorder.
+        var first = WasteFinding("src/first.cs", "session-1", "session-2");
+        var second = WasteFinding("src/second.cs", "session-3", "session-4");
+
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [first, second]);
+
+        Assert.Equal(
+            ["src/first.cs", "src/second.cs"],
+            digest.RankedFindings.Select(f => f.Recurrence.Key));
+    }
+
+    [Fact]
+    public void Ranking_ignores_input_order_which_would_otherwise_read_as_recency()
+    {
+        var touchedThirty = WasteFinding("src/hot.cs", [.. Enumerable.Range(1, 30).Select(i => $"session-{i}")]);
+        var touchedOne = WasteFinding("src/rare.cs", "session-1");
+
+        // The "recent" finding (touchedOne) arrives first in the input; the ranking must not treat
+        // input order as a proxy for recency or severity — only the session count decides.
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [touchedOne, touchedThirty]);
+
+        Assert.Equal("src/hot.cs", digest.RankedFindings[0].Recurrence.Key);
+    }
+
+    [Fact]
+    public void The_masthead_states_sessions_span_repositories_events_tool_calls_and_rule_coverage()
+    {
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+
+        Assert.Equal(35, digest.Masthead.Counters.SessionCount);
+        Assert.NotNull(digest.Masthead.Counters.SpanStart);
+        Assert.NotNull(digest.Masthead.Counters.SpanEnd);
+        Assert.Equal(3, digest.Masthead.Counters.RepositoryCount);
+        Assert.Equal(56_138, digest.Masthead.Counters.EventCount);
+        Assert.Equal(12_345, digest.Masthead.Counters.ToolCallCount);
+        Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
+    }
+
+    [Fact]
+    public void An_empty_store_reads_as_not_yet_analyzed_not_as_finding_nothing()
+    {
+        // No check has ever run — CheckRegistry has no Ran entry.
+        var digest = ProcessDigest.Build(Counters(sessionCount: 0), EmptyRegistry(), []);
+
+        Assert.Equal(DigestState.NotYetAnalyzed, digest.State);
+        Assert.Empty(digest.RankedFindings);
+    }
+
+    [Fact]
+    public void A_corpus_where_every_check_ran_and_found_nothing_reads_as_analyzed_not_not_yet_analyzed()
+    {
+        // Distinct from the empty-store scenario above: the checks ran, they just found nothing.
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+
+        Assert.Equal(DigestState.Analyzed, digest.State);
+        Assert.Empty(digest.RankedFindings);
+    }
+
+    [Fact]
+    public void A_session_mid_ingest_reads_as_incomplete_rather_than_a_final_count()
+    {
+        var digest = ProcessDigest.Build(Counters(ingestInProgress: true), RanCleanRegistry(), []);
+
+        Assert.Equal(DigestState.Incomplete, digest.State);
+    }
+
+    [Fact]
+    public void Incomplete_ingest_takes_precedence_over_whether_a_check_has_run()
+    {
+        // Even with no check registered yet, a mid-ingest corpus reads "incomplete", not
+        // "not yet analysed" — the two designed states answer different questions and must not
+        // collapse into one when both conditions happen to hold at once.
+        var digest = ProcessDigest.Build(Counters(ingestInProgress: true), EmptyRegistry(), []);
+
+        Assert.Equal(DigestState.Incomplete, digest.State);
+    }
+
+    [Fact]
+    public void Rule_coverage_reads_not_yet_analyzed_never_a_zero_violation_count()
+    {
+        // Release 1 ships exactly one RuleCoverageStatus value — there is no case here that could
+        // be mistaken for "zero violations found" (FR-26/FR-40 are Release 2).
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), []);
+
+        Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
+    }
+
+    [Fact]
+    public void Sessions_affected_counts_distinct_sessions_not_raw_occurrences()
+    {
+        var finding = WasteFinding("src/dup.cs", "session-1", "session-1", "session-2");
+
+        Assert.Equal(2, ProcessDigest.SessionsAffected(finding));
+    }
+}

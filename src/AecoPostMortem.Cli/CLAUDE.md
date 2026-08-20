@@ -34,11 +34,43 @@ NORMALIZED/FINDINGS rows from RAW is not implemented yet — that logic lands wi
 stories; today `rebuild` empties the derived tables rather than repopulating them, which is the
 honest behaviour for a RAW that has no reader yet.
 
+### `serve` prints the URL, then blocks — `runHost` is the seam that makes that testable
+
+`CommandRunner.Serve` builds the host (`AecoPostMortem.Api.ApiHost.Build`), writes
+`http://127.0.0.1:<port>` to stdout (its `CommandSpec.OutputChannel`), then hands the built
+`WebApplication` to `runHost`. The real default, `RunUntilShutdown`, calls `app.Run()` — blocking
+until the operator stops the process, which is the actual point of `serve`. `CommandRunner.Run`'s
+optional `runHost` parameter lets a test supply its own delegate instead: start the host, make a
+request, stop it, return — all inside one `[Fact]`, without ever calling the blocking default.
+
+`copilotSessionStateRoot` is `CommandRunner.Run`'s other new optional parameter, for the same
+reason `store` already is one: `Serve` defaults it to
+`AecoPostMortem.Ingestion.CopilotSourceLocation.DefaultSessionStateRoot` — the real machine's
+`~/.copilot/session-state` — and a test overrides it so the app-state result does not depend on
+whatever is really on the machine running the test suite.
+
+### `--port 0` is accepted deliberately
+
+The same convention as `dotnet run --urls http://localhost:0`: it asks the OS for an ephemeral
+port instead of naming one. `TryParsePort` allows `0` through for exactly this reason — it is what
+lets a test run `serve` without claiming a port a parallel test (or a parallel `dotnet test`
+invocation) might also want.
+
+### `ServeWebRoot.Resolve()` finds `web/dist` without requiring it to exist
+
+It walks upward from `AppContext.BaseDirectory` looking for `web/dist/index.html`, bounded to eight
+levels so a machine with no repository checkout does not walk to the filesystem root. Returns
+`null` — not a thrown exception — when nothing is found, because "no web shell built yet" is a
+state `ApiHost.Build` already handles (`webRootPath: null`), not a failure. `dotnet build` and
+`dotnet test` never run `scripts/build-web.ps1` (`web/CLAUDE.md`), so this has to stay optional.
+
 ## Status
 
 The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `CommandListing`,
-`CommandRunner`, `Program`), and `purge` and `rebuild` are wired to the store. Behaviour behind
-`ingest` and `serve` arrives in the order each `CommandSpec.ArrivesWith` names.
+`CommandRunner`, `Program`), and `purge`, `rebuild` and `serve` are wired. `serve` builds and runs
+the local API and web shell host (`AecoPostMortem.Api.ApiHost`) on a stated default port
+(`CommandRunner.DefaultPort`), overridable with `--port <n>`. Behaviour behind `ingest` still
+arrives in the order its `CommandSpec.ArrivesWith` names.
 
 ## Playbook — adding a command
 

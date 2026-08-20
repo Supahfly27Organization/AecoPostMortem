@@ -14,6 +14,11 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
+| `InterruptionLoadCheck.cs` | FR-20's check shape (issue #30): `PermissionPromptOutcome` and `QuestionOutcome` (plain per-event inputs, no tool name), `InterruptionLoad` (the paired-count result — permission prompts and questions never summed), `InterruptionLoadCheck.Evaluate` |
+| `RuleStatement.cs` | FR-26 (S-19, issue #32): `RuleStatement` (source file + verbatim text) and `InstructionBlock` (a block's source file plus the statements its list items yielded) |
+| `RuleStatementExtractor.cs` | FR-26's `<custom_instruction>` parser: `RuleStatementExtractor.ExtractBlocks` takes a system prompt's own text and returns its blocks — pure, no file, no session |
+| `RuleStatementDeduplication.cs` | `SessionInstructionBlocks` (one session's blocks, plus `HasInstructionBlocks`), `RuleStatementOccurrence` (a statement plus every session that carried it), and `RuleStatementDeduplication.Deduplicate`, which collapses identical statements across sessions |
+| `AbortedTurnCheck.cs` | FR-18 (S-16, issue #28): `TurnRecord` (the plain per-turn input, aborted or not), `AbortedTurnOccurrence` (reason paired with its 1-based position and the session's own turn count), and `AbortedTurnCheck.Run`, which orders each session's turns and reports only the ones that aborted |
 | `DeclaredIntent.cs` | FR-19's plain input (issue #29): one self-declared phase — `SessionId`, `Phase` (an opaque label) and `Sequence` (the corpus-wide chronological order, the only ordering input this project trusts) |
 | `PhaseOrdering.cs` | `PhaseOrdering.Derive` — the distinct phases in the corpus, ordered by each phase's earliest `Sequence` across every session (FR-19; the S-21 vocabulary pattern applied to phase labels) |
 | `PhaseChurnCheck.cs` | FR-19's check shape (issue #29): `PhaseChurnResult` (a session's returns, its own total intents, and the vocabulary/ordering that produced it), `PhaseChurnCheck.Run`, which derives the ordering once and evaluates each session independently |
@@ -140,6 +145,91 @@ deliberately unusual identities to prove the grouping is generic. The check retu
 every tool observed, including ones with zero failures; deciding which rates are worth surfacing as
 a finding is `AecoPostMortem.Findings`'s call, not this one's.
 
+### `PermissionPromptOutcome.ResultKind` is carried verbatim, never matched against a denial string
+
+FR-20's Scenario 2 requires a permission prompt's outcome to come "from the recorded result kind,
+not inferred." `PermissionPromptOutcome.ResultKind` is whatever string the caller resolved from
+`permission.completed.data.result.kind` — this project never compares it against a literal like
+`"denied"`, because Repo Rule 6 forbids naming values this project cannot verify against Copilot's
+actual enum, and doing so would turn "read from the field" back into a string match, the exact
+thing FR-20 says Copilot data avoids. `null` means the prompt never resolved at all — a distinct
+state from any recorded outcome, denial included, per the measured 1,033-requested-against-1,031-
+completed edge case (issue #30).
+
+### `InterruptionLoad` pairs its counts the same way `HookFailureCounts` does
+
+`PermissionPromptCount` and `QuestionCount` are both `required` on `InterruptionLoad`, so a caller
+cannot construct a result that states one without the other — the same reasoning
+`HookFailureCounts` documents for its two denominators. `PermissionPromptsWithoutOutcome` is a
+computed property, never a stored field, mirroring `FailureRate.Percentage`: there is no
+constructor path that could let it disagree with the two counts it is derived from.
+
+### A block's source file is its own first line, heading marker stripped
+
+`RuleStatementExtractor.ExtractBlocks` takes the first non-blank line inside a
+`<custom_instruction>…</custom_instruction>` block, strips a leading `#`/whitespace run and trims
+what remains, and uses that as `SourceFile`. This is not a guess: Copilot inlines a repository's own
+file verbatim, and this repository's own `CLAUDE.md` (like the reference corpus's) begins with
+`# CLAUDE.md` — so the block's own first line already *is* its heading, whether that heading names a
+real file (`CLAUDE.md`, `AGENTS.md`) or a section Copilot injects under a non-file label (`Agent
+workflow`, `Copilot instructions`, both measured in FR-26). The extractor does not try to tell those
+two kinds apart — it reports whichever text the block was headed by, verbatim.
+
+### The extraction unit is a line, not a paragraph
+
+`RuleStatementExtractor` matches a markdown list marker (`-`, `*`, `+`, or `\d+[.)]`) at the start of
+a line and treats everything from there as one statement — no continuation-line joining, no
+nesting-aware grouping. A list item that is itself a heading for nested bullets (issue #32's edge
+case — "Use `codebase-memory` MCP before broad file search when asking:") is one statement like any
+other; whether it is a rule, a heading, or a documentation index entry is S-22's classification to
+make, not this extractor's to decide by filtering. Prose lines (no marker) are skipped for
+statements but never lost — the block's own text is not altered, only read.
+
+### A block with no list item still appears, with an empty `Statements`
+
+`InstructionBlock.Statements` can be empty. Dropping such a block instead would erase the difference
+FR-26's fourth scenario is about — a session with no `<custom_instruction>` block at all
+(`SessionInstructionBlocks.Blocks` itself empty) is not the same fact as a session whose block(s)
+carried only prose (`Blocks` non-empty, every block's `Statements` empty). `HasInstructionBlocks` is
+a computed property over `Blocks.Count`, not a second stored flag that could drift from it.
+
+### A statement's identity is `(SourceFile, Text)`, not `Text` alone
+
+`RuleStatementDeduplication.Deduplicate` groups by the pair, so the same wording headed by two
+different files is not collapsed into one occurrence — attribution is part of what FR-26's first
+scenario asks a recovered statement to carry, so it is part of what makes two statements "the same"
+here too. Session ids are deduplicated per statement (a `HashSet`-style check on add) so a session
+whose own text repeats a statement across two blocks — or across two of its own `system.message`
+events, unioned by `AecoPostMortem.Ingestion.SessionRuleExtractor` — still contributes exactly one
+session id, not one per repetition.
+
+### Cross-session resolution deliberately stays in `Rules`, not `Ingestion` or `Findings`
+
+`RuleStatementDeduplication.Deduplicate` takes `SessionInstructionBlocks` — a plain per-session
+shape, the same kind of input every other check in this project takes — rather than living beside
+`SessionRuleExtractor` in `Ingestion`, which is the project that actually resolves a session to its
+`RawEvent`s. The split mirrors `RepeatedReadCheck`/`ReadEvent`: whoever reads the store resolves
+sessions to plain shapes and hands them in; the reduction over many sessions' worth of shapes is a
+pure function of its input and belongs where every other pure check-shape reduction already lives.
+
+### Position is derived by ordering, not read off a field
+
+`AbortedTurnCheck.Run` groups `TurnRecord`s by `SessionId`, orders each session's turns by
+`StartedAt` (ties broken by `TurnId`, ordinal string comparison, for a deterministic result
+regardless of input order — PRD §3.8), and reports each aborted turn's 1-based index in that
+ordering alongside the session's total turn count. Copilot's own event log carries no ordinal turn
+number, so "position in the session" (issue #28, Scenario 1) only exists once every turn in the
+session — not only the aborted ones — has been placed in order; that is why `TurnRecord` covers
+every turn, `Aborted` and all, rather than taking a list of already-known aborts.
+
+### One occurrence per abort, never grouped by reason
+
+Unlike `HookFailureCheck` (grouped by hook identity) or `FailedToolCallsCheck` (grouped by tool
+identity), `AbortedTurnCheck` groups only by session — the reason text plays no role in identity.
+A measured 9 aborts across 8 sessions is low volume (issue #28's edge case): two aborts sharing the
+same reason string in different sessions are still two independent abandonments, and merging them
+by reason would make the finding look more recurring than the corpus measures.
+
 ### The phase vocabulary and its ordering are corpus-wide, never per-session
 
 FR-19 requires "an earlier phase" to mean something, which needs a vocabulary and an ordering that
@@ -176,8 +266,18 @@ produce a zero for it.
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
-four entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
-`FailedToolCallsCheck` (issue #26, FR-16) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
-establish — plain per-call/per-session input records in, structurally-required or
+six entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+`FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
+`AbortedTurnCheck` (issue #28, FR-18) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
+establish — plain per-call/per-session/per-turn input records in, structurally-required or
 structurally-paired results out, no branch on any specific tool name — is the pattern later checks
 in this project should follow.
+
+FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
+parses `<custom_instruction>` blocks from plain prompt text, and
+`RuleStatementDeduplication.Deduplicate` collapses identical statements across sessions while
+preserving which sessions carried each one. Nothing yet resolves a real corpus's `RawEvent`s into
+`SessionInstructionBlocks` at scale and dedupes the whole store in one pass — that wiring, and
+rule-set versioning by content hash of the block set (FR-27), are S-20's job; this project only
+publishes the shapes S-20 builds against, the same way S-49 published NORMALIZED's eight shapes
+ahead of anything populating them.

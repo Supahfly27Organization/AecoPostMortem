@@ -36,6 +36,16 @@ public sealed record SessionTapeStep
 
     public required string Label { get; init; }
 
+    /// <summary>FR-25 (S-12, issue #21): the plugin a <see cref="SessionTapeStepKind.Skill"/> step
+    /// was invoked from, carried alongside <see cref="Label"/> (the skill's own name) rather than
+    /// folded into it. <see langword="null"/> for every other step kind, and for a skill Copilot
+    /// recorded no plugin for.</summary>
+    public string? PluginName { get; init; }
+
+    /// <summary>The plugin's version, paired with <see cref="PluginName"/> — never populated
+    /// without it, matching <see cref="Data.Execution.Skill.PluginVersion"/>'s own nullability.</summary>
+    public string? PluginVersion { get; init; }
+
     public required DateTimeOffset Timestamp { get; init; }
 
     /// <summary>How long after the session's own <see cref="Session.StartedAt"/> this step began —
@@ -170,7 +180,7 @@ public sealed record SessionRecording
         {
             steps.Add(BuildStep(
                 SessionTapeStepKind.Skill, skill.EventId, skill.Name, skill.InvokedAt,
-                start, skill.OwnerKind, skill.AgentId));
+                start, skill.OwnerKind, skill.AgentId, skill.PluginName, skill.PluginVersion));
         }
 
         foreach (var hook in hooks)
@@ -203,7 +213,9 @@ public sealed record SessionRecording
         string timestamp,
         DateTimeOffset sessionStart,
         OwnerKind ownerKind,
-        string? agentId)
+        string? agentId,
+        string? pluginName = null,
+        string? pluginVersion = null)
     {
         var parsed = ParseTimestamp(timestamp);
 
@@ -212,6 +224,8 @@ public sealed record SessionRecording
             Kind = kind,
             StepId = stepId,
             Label = label,
+            PluginName = pluginName,
+            PluginVersion = pluginVersion,
             Timestamp = parsed,
             Offset = parsed - sessionStart,
             OwnerKind = ownerKind,

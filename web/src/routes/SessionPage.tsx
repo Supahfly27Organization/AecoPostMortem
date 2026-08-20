@@ -29,6 +29,17 @@ function formatOffset(offsetMs: number): string {
   return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
+/** FR-25 (S-12, issue #21): a skill step's plugin, alongside its version when both are recorded —
+ * neither is rendered alone, matching `SessionTapeStep.pluginVersion`'s own "never populated
+ * without `pluginName`" contract. */
+function formatPlugin(step: SessionTapeStep): string | null {
+  if (step.pluginName === null) {
+    return null
+  }
+
+  return step.pluginVersion === null ? step.pluginName : `${step.pluginName} v${step.pluginVersion}`
+}
+
 function formatContextSize(contextSize: SessionEnvelope['masthead']['contextSize']): string {
   if (contextSize.kind === 'notRecorded') {
     return 'not recorded'
@@ -102,13 +113,18 @@ function Tape({ steps }: { steps: SessionTapeStep[] }) {
 
   return (
     <ul className="session-tape" aria-label="Tape">
-      {steps.map((step) => (
-        <li key={step.stepId} className="session-tape__step">
-          <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
-          <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
-          <span className="session-tape__label">{step.label}</span>
-        </li>
-      ))}
+      {steps.map((step) => {
+        const plugin = formatPlugin(step)
+
+        return (
+          <li key={step.stepId} className="session-tape__step">
+            <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
+            <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
+            <span className="session-tape__label">{step.label}</span>
+            {plugin !== null && <span className="session-tape__plugin">{plugin}</span>}
+          </li>
+        )
+      })}
     </ul>
   )
 }

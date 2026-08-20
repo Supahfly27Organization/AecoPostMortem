@@ -126,6 +126,14 @@ S-08 (FR-21, part 1 of 3, issue #15): the masthead and the time-ordered tape, re
 `GET /api/sessions/{sessionId}`. Finding chips and the inspector (Detail/Thinking/Raw tabs) are
 S-52/S-53, not built here.
 
+FR-25 (S-12, issue #21) added `SessionTapeStep.pluginName`/`.pluginVersion` — a `'skill'` step's
+plugin and version, rendered next to its name (`session-tape__plugin`, shown only when
+`pluginName` is non-null; `formatPlugin` in `SessionPage.tsx` joins the version in only when both
+are present). A subagent's skill already carried `ownerKind`/`agentId` correctly since S-08 (the
+same generic attribution every step kind gets) — this story only closed the plugin/version gap, it
+added no new lane-rendering: the tape still renders one flat, wall-clock-ordered list, and grouping
+steps visually by lane is S-09's job (FR-22), not built here.
+
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there
 rather than shared) and `src/vitest-setup.ts` (jest-dom matchers, and `afterEach(cleanup)` since

@@ -545,3 +545,12 @@ step by wall-clock time with its offset from session start, and states plainly w
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
 `web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
 path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+
+`SessionTapeStep.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) close the one gap S-08 left
+in `SessionTapeStepKind.Skill`'s own step: the kind, ordering and lane attribution
+(`OwnerKind`/`AgentId`) already worked generically for every step kind since S-08, but the step
+carried only the skill's own name (`Label`) — never its plugin. `BuildStep` now takes the plugin
+pair as two more optional parameters, populated only from the `Skill` loop in `Build`; every other
+step kind still passes neither, so both fields stay `null` there. No new lane-attribution mechanism
+was needed — a skill invoked inside a subagent already got `skill.OwnerKind`/`skill.AgentId` passed
+straight through `BuildStep`, the same as a subagent's tool calls and hooks.

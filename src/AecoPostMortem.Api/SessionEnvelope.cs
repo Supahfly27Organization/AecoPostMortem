@@ -124,6 +124,15 @@ public sealed record SessionTapeStepEnvelope
 
     public required string Label { get; init; }
 
+    /// <summary>FR-25 (S-12, issue #21): a <see cref="Findings.SessionTapeStepKind.Skill"/> step's
+    /// plugin, carried alongside <see cref="Label"/> (the skill's own name) rather than folded into
+    /// it — <see langword="null"/> for every other step kind and for a skill with no plugin
+    /// recorded.</summary>
+    public string? PluginName { get; init; }
+
+    /// <summary>Paired with <see cref="PluginName"/> — never populated without it.</summary>
+    public string? PluginVersion { get; init; }
+
     public required DateTimeOffset Timestamp { get; init; }
 
     public required long OffsetMs { get; init; }
@@ -141,6 +150,8 @@ public sealed record SessionTapeStepEnvelope
             Kind = step.Kind,
             StepId = step.StepId,
             Label = step.Label,
+            PluginName = step.PluginName,
+            PluginVersion = step.PluginVersion,
             Timestamp = step.Timestamp,
             OffsetMs = (long)step.Offset.TotalMilliseconds,
             OwnerKind = step.OwnerKind,

@@ -281,3 +281,10 @@ second real endpoint: FR-21's masthead and tape, read through `Data.Execution` a
 session id the store carries no `Session` row for; a session with rows but no steps still serves its
 masthead with an empty `Steps` list. Finding chips (a different data path — findings joined per
 session) and the inspector are S-52/S-53, not served here.
+
+`SessionTapeStepEnvelope.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) carry a
+`SessionTapeStepKind.Skill` step's plugin straight across from `Findings.SessionTapeStep` — no
+resolution of their own, the same passthrough `From` already does for `Label`. Both are `null` for
+every other step kind. No endpoint change: `GetSession`'s query already read `context.Skills`
+(S-08), so this story only widened the wire shape two fields, plus one row in
+`SessionTapeStepEnvelope.From`.

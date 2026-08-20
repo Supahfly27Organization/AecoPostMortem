@@ -89,6 +89,9 @@ public sealed class RulesProjectNamesNothingTests
         // The prose of the two exception messages FR-28's refusal carries.
         "figure", "cannot", "computed", "across", "more", "than", "one", "rule", "version",
         "needs", "least", "session", "scoped",
+
+        // The prose of FR-39's adjacency-refusal message (RuleSetVersionAdjacency).
+        "comparison", "versions", "adjacent",
     };
 
     /// <summary>

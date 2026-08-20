@@ -16,6 +16,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope` |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
+| `MonitorComparisonEnvelope.cs` | FR-39's served comparison (S-35, issue #43): `MonitorComparisonEnvelope` — `BeforeVersion`/`AfterVersion` reuse `RuleSetVersionEnvelope` (S-22), `Before`/`After` carry `Findings.AdherenceFigure` directly, no separate figure envelope — and `MonitorComparisonEnvelope.From(Findings.MonitorComparison)` |
 
 ## References
 
@@ -394,6 +395,16 @@ subagent's reasoning belongs to its own step's turn context, not its parent's. E
 recorded per assistant message" — never attempting a lookup, matching the mockup's own wording for
 selecting a non-assistant step.
 
+### `MonitorComparisonEnvelope` reuses `RuleSetVersionEnvelope` and `AdherenceFigure` verbatim, no third figure shape
+
+FR-39 Scenario 2 ("the session count on each side is as visible as the percentage") is satisfied by
+reusing two contracts this project already serves elsewhere, rather than inventing a
+`MonitorComparisonEnvelope`-specific figure: `BeforeVersion`/`AfterVersion` are the same
+`RuleSetVersionEnvelope` `RulesInventoryEnvelope.cs` (S-22) already carries `SessionCount` on, and
+`Before`/`After` are `Findings.AdherenceFigure` directly — the identical domain type
+`FindingEnvelope.Adherence.Figure` already serialises. A client that already renders one of those
+two shapes elsewhere in this app needs no new parsing logic to render this one.
+
 ## Status
 
 The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
@@ -464,3 +475,13 @@ resolution of their own, the same passthrough `From` already does for `Label`. B
 every other step kind. No endpoint change: `GetSession`'s query already read `context.Skills`
 (S-08), so this story only widened the wire shape two fields, plus one row in
 `SessionTapeStepEnvelope.From`.
+
+`MonitorComparisonEnvelope.cs` (S-35, issue #43, FR-39) is contract-only in the same sense the
+digest and Rules Inventory contracts were before their own live endpoints landed:
+`web/src/digest/MonitorComparisonBlock.tsx` and `web/src/api/monitor.ts` are real consumers of the
+shape, but `ApiHost.Build` does not `MapGet` `/api/monitor-comparison` — resolving a whole store's
+`RawEvent`s into `SessionRuleSet`s, picking the two adjacent versions and the operand pair to
+compare, and running `Findings.MonitorComparison.Compare` against the live store is wiring no story
+has done yet, the same not-yet-wired gap `/api/digest` and `/api/rules-inventory` document. The web
+component is built ahead of that wiring, the same seam `AdherenceFigureBlock.tsx` established
+before any digest endpoint served a real `AdherenceFigure`.

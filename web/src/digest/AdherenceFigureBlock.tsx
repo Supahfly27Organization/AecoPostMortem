@@ -26,6 +26,10 @@ function formatPercentage(percentage: number): string {
  * The guard is the measured fivefold spread on one rule that came from the resolution choice alone:
  * an operator who cannot see which layer resolved each operand has no way to reject a number whose
  * mapping is wrong.
+ *
+ * `data-emphasis="prominent"` on the percentage span is FR-39's own seam (S-35, issue #43): the
+ * Monitor comparison's session count shares this same marker and CSS class so the two render at
+ * identical visual weight -- see `MonitorComparisonBlock.tsx`.
  */
 export function AdherenceFigureBlock({ figure }: { figure: AdherenceFigure }) {
   return (
@@ -37,7 +41,9 @@ export function AdherenceFigureBlock({ figure }: { figure: AdherenceFigure }) {
           </span>
         ) : (
           <>
-            <span className="adherence-figure__percentage">{formatPercentage(figure.percentage)}</span>
+            <span className="adherence-figure__percentage" data-emphasis="prominent">
+              {formatPercentage(figure.percentage)}
+            </span>
             <span className="adherence-figure__counts">
               {figure.adherentCalls} of {figure.totalCalls} calls
             </span>

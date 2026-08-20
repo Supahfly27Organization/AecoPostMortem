@@ -1,0 +1,34 @@
+.monitor-comparison {
+  margin: 0.75rem 0;
+}
+
+.monitor-comparison__sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.monitor-comparison__side {
+  min-width: 0;
+}
+
+.monitor-comparison__side-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5a626e;
+}
+
+.monitor-comparison__sample-size {
+  margin: 0 0 0.35rem;
+}
+
+/* Deliberately not redeclaring font-size/font-weight here -- this element shares
+   `.adherence-figure__percentage`'s own rule (AdherenceFigureBlock.css) so the sample size and the
+   percentage beneath it can never drift apart in visual weight by one of the two classes being
+   edited alone. */
+.monitor-comparison__session-count {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}

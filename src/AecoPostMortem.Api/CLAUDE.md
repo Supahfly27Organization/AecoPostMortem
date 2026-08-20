@@ -8,6 +8,7 @@ Endpoints for the three surfaces, and the host that serves them.
 |---|---|
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General` and `FindingEnvelope.Adherence`, and the `From`/`FromAdherence` factories that assemble them from a `Finding` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
+| `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`) and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` is the same diagnosis without a listener |
@@ -51,14 +52,43 @@ omitted by mistake." `SuggestionEnvelope` is instead a required, closed two-stat
 every served finding's `Suggestion` field is present in the JSON, and its value states explicitly
 which case applies. `SuggestionEnvelope.Of(Suggestion?)` does the mapping from the domain type.
 
+### `SilentCheckEnvelope.From` filters, it never synthesises
+
+FR-42's surface has exactly one producer, `From(CheckRegistry)`, and it is a pure filter over
+`CheckRegistry.Entries` — `Status == Ran && FindingCount == 0` — never a step that fabricates an
+entry for a check the registry doesn't carry. That is what makes all three of this story's negative
+scenarios (issue #46) hold structurally rather than by caller discipline:
+
+- A `Refused` entry is dropped here; it belongs to the Rules Inventory (FR-53) as "not checkable",
+  a different surface this project does not yet implement — showing it here as clean is exactly the
+  "silence reading as compliance" failure PRD §3.9 names.
+- A check the registry has no entry for at all (not built yet this release, e.g. the contradiction
+  check before S-38) has nothing for `From` to project — absence in, absence out. There is no
+  hard-coded list of expected `CheckId`s this type could complete against; it only ever reflects
+  what `CheckRegistry.Entries` actually contains.
+- A `Ran` entry with `FindingCount > 0` is also dropped: this surface is specifically checks that
+  found *nothing*, not every check that ran. `FindingCount` is a real int on every served
+  `SilentCheckEnvelope` (never null, since `Refused` entries — the only ones with a null
+  `FindingCount` — are filtered out before the projection), and it is always `0` by construction of
+  the filter, carried explicitly rather than left for the reader to infer from mere presence.
+
+Unlike `FindingEnvelope` and `SuggestionEnvelope`, `SilentCheckEnvelope` is a single plain
+`sealed record` rather than a closed hierarchy behind a private constructor. Those two types close
+off a *discriminated union* — "which of these shapes is this?" is part of what a client needs to
+know. This surface serves only one shape (a clean check's id, population and zero count); there is
+no second variant to keep a client from constructing by mistake, so there is nothing for the
+closed-hierarchy trick to protect here.
+
 ### `FindingEnvelope` and `SuggestionEnvelope` are still a contract, not endpoints
 
 S-50 / FR-59 published the response shape so the stories that build real finding endpoints against
 it (S-08, S-22, S-24, S-36, S-37, S-42) have something structural to target. Nothing here reads
 through `Data` or calls into `Rules` for those two types yet — the factory methods take a `Finding`
 (and, for `FromAdherence`, a `Resolution` and rule version) as plain inputs. `ApiHost` does not
-serve `FindingEnvelope` yet either; the app-state endpoint is the first real endpoint this project
-ships, and it does not need the finding contract at all.
+serve `FindingEnvelope`, `SilentCheckEnvelope` or `DigestEnvelope` yet either; the app-state endpoint
+is the first real endpoint this project ships, and it does not need the finding contract at all.
+`SilentCheckEnvelope.From` follows the same plain-input pattern — a `CheckRegistry` in, a projected
+list out — nothing here reads through `Data` or calls into `Rules` for it either.
 
 ### `ApiHost.Build` returns an unstarted `WebApplication`
 
@@ -109,9 +139,9 @@ words.
 
 ## Status
 
-The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `DigestEnvelope`,
-`MastheadEnvelope`) — still unconsumed by any finding endpoint. The app-state endpoint and host
-(`AppStateReport`, `ApiHost`) that S-48 adds are the first real endpoint this project ships: `serve`
-(`AecoPostMortem.Cli`) builds and runs this host, and `web/`'s `AppStateBanner` is the client that
-reads it. No finding endpoint exists yet — that arrives with the stories `FindingEnvelope.cs`
-already named.
+The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `SilentCheckEnvelope`,
+`DigestEnvelope`, `MastheadEnvelope`) — still unconsumed by any finding endpoint. The app-state
+endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds are the first real endpoint this
+project ships: `serve` (`AecoPostMortem.Cli`) builds and runs this host, and `web/`'s
+`AppStateBanner` is the client that reads it. No finding endpoint exists yet — that arrives with the
+stories `FindingEnvelope.cs` already named.

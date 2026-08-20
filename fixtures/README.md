@@ -20,11 +20,21 @@ enough to detect any change without the bytes ever being committed.
 ```sh
 python scripts/freeze-corpus-manifest.py            # re-freeze (deliberate act)
 python scripts/freeze-corpus-manifest.py --check    # verify disk; exit 1 on drift
+python scripts/check-apply-patch-roundtrip.py       # FR-4: apply_patch round-trips (S-03)
+python scripts/check-corpus-verification.py         # FR-55: Phase A exit criterion (S-45, issue #9)
 ```
 
 `--check` compares hashes and per-session censuses only; the freeze date is
 metadata, not evidence. A session that has rotated away reports as a difference
 rather than being absorbed — that is the point of the file, not a failure of it.
+
+`check-corpus-verification.py` runs a real full ingest and a real incremental re-ingest of this
+manifest's own `source` directory, and checks: the RAW event census matches `totals.event_census`
+exactly, every RAW row re-serialises byte-identically to its source line, and both runs finish
+inside PRD §3.7's time targets (3 minutes full, 15 seconds incremental — targets, not measurements,
+so a miss is a conversation about the target rather than a silently absorbed failure). Like the
+other corpus-shaped checks here, it reads the live directory this manifest's `source` field names
+and skips rather than fails when that directory is not present on the machine running it.
 
 ## What the freeze measured
 

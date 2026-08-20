@@ -65,13 +65,18 @@ that condition is the same CS9035 compile error `Adherence` gives for its own tw
 Scenario 1's "the unevaluated condition is stated" is therefore not optional prose a caller could
 forget to add.
 
-Scenario 2 ("A base rate is never ranked as a violation") is deliberately *not* enforced by excluding
-base-rate findings from `ProcessDigest`'s ranking — a base rate can still touch more sessions than a
-measured violation and rank above it (`DigestEnvelopeTests.A_base_rate_item_ranked_above_a_measured_
-violation_still_serialises_a_distinct_kind`). What FR-44 requires is that it never *renders* as one:
-the `"baseRate"` wire discriminator is the visual/structural distinction, always different from
-`"adherence"` regardless of rank — the same mechanism `DigestEnvelope.From`'s per-finding mapper
-already had to support for `Adherence` (FR-33), reused here rather than a second special case.
+Scenario 2 ("A base rate is never ranked as a violation") turned out to be satisfied more strongly
+than this story alone set out to: every `BaseRate` finding carries `Provenance.Inferred` (this
+story's own worked example), and FR-48 (issue #52, S-42, landed after this one) partitions
+`ProcessDigest.Build`'s *entire* input by provenance — every `Inferred` finding, `BaseRate` included,
+is structurally excluded from `RankedFindings` and served through `DigestEnvelope.InferredFindings`
+instead, never interleaved by rank at all. `DigestEnvelopeTests.A_base_rate_item_never_appears_in_
+ranked_findings_and_serialises_a_distinct_kind_in_inferred_findings` proves both halves together: a
+base rate is absent from `RankedFindings` and, wherever it is served, still carries the `"baseRate"`
+wire discriminator distinct from `"adherence"` — belt and suspenders, not a fallback on the
+discriminator alone. `FromBaseRate` still sets that discriminator regardless of which list a caller
+eventually serves the envelope through, since this contract has no way to know FR-48 would add a
+second list when it was written.
 
 `FromBaseRate(Finding, string unevaluatedCondition)` follows `FromAdherence`'s own precedent:
 `unevaluatedCondition` is a required parameter, not read off the `Finding` (which has no field for

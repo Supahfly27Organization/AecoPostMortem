@@ -95,6 +95,7 @@ public abstract record FindingEnvelope
     {
         Class = finding.Class,
         Provenance = finding.Provenance,
+        ProvenanceLabel = Findings.ProvenanceLabel.For(finding.Provenance),
         Evidence = finding.Evidence,
         Recurrence = finding.Recurrence,
         Suggestion = SuggestionEnvelope.Of(finding.Suggestion),

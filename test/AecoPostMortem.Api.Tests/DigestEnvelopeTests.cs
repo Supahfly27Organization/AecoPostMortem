@@ -191,12 +191,16 @@ public sealed class DigestEnvelopeTests
         Assert.Empty(envelope.RankedFindings);
     }
 
-    // FR-44, Scenario 2 ("A base rate is never ranked as a violation"): the conditional-rule
-    // finding touches more sessions than the measured adherence finding, so it ranks first — and
-    // still has to render with a wire shape a client can never mistake for the measured violation
-    // beside it.
+    // FR-44, Scenario 2 ("A base rate is never ranked as a violation") and FR-48, Scenario 1
+    // ("Inferred findings are not in the ranked list"): a base rate carries Provenance.Inferred
+    // (FindingEnvelopeTests' own worked example), so ProcessDigest.Build's FR-48 partition already
+    // keeps it out of RankedFindings structurally — the same session count that would rank it above
+    // a measured violation never gets the chance to, because it is never in that list at all. This
+    // is a strictly stronger reading of "never ranked as a violation" than a same-list, distinct-kind
+    // compromise: FR-44's own wire-discriminator guarantee (BaseRate vs. Adherence) still holds for a
+    // client reading InferredFindings, on top of the list-level separation FR-48 adds.
     [Fact]
-    public void A_base_rate_item_ranked_above_a_measured_violation_still_serialises_a_distinct_kind()
+    public void A_base_rate_item_never_appears_in_ranked_findings_and_serialises_a_distinct_kind_in_inferred_findings()
     {
         var digest = ProcessDigest.Build(
             Counters(),
@@ -212,17 +216,23 @@ public sealed class DigestEnvelopeTests
 
         var envelope = DigestEnvelope.From(digest, MapFinding);
 
-        Assert.Equal(2, envelope.RankedFindings.Count);
-        var baseRate = Assert.IsType<FindingEnvelope.BaseRate>(envelope.RankedFindings[0]);
-        var adherence = Assert.IsType<FindingEnvelope.Adherence>(envelope.RankedFindings[1]);
-        Assert.Equal(ParallelCallAvailabilityUnevaluated, baseRate.UnevaluatedCondition);
+        var adherence = Assert.Single(envelope.RankedFindings);
+        Assert.IsType<FindingEnvelope.Adherence>(adherence);
+
+        var baseRate = Assert.Single(envelope.InferredFindings);
+        var typedBaseRate = Assert.IsType<FindingEnvelope.BaseRate>(baseRate);
+        Assert.Equal(ParallelCallAvailabilityUnevaluated, typedBaseRate.UnevaluatedCondition);
 
         var json = JsonSerializer.Serialize(envelope);
         using var document = JsonDocument.Parse(json);
-        var kinds = document.RootElement.GetProperty("RankedFindings").EnumerateArray()
+        var rankedKinds = document.RootElement.GetProperty("RankedFindings").EnumerateArray()
+            .Select(item => item.GetProperty("kind").GetString())
+            .ToList();
+        var inferredKinds = document.RootElement.GetProperty("InferredFindings").EnumerateArray()
             .Select(item => item.GetProperty("kind").GetString())
             .ToList();
 
-        Assert.Equal(["baseRate", "adherence"], kinds);
+        Assert.Equal(["adherence"], rankedKinds);
+        Assert.Equal(["baseRate"], inferredKinds);
     }
 }

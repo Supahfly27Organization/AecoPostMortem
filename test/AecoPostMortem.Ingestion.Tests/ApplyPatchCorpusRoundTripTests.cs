@@ -12,8 +12,8 @@ namespace AecoPostMortem.Ingestion.Tests;
 /// <remarks>
 /// The corpus round-trip is a gate on real data, not a unit test with hand-picked strings
 /// (<c>ToolArgumentsTests</c> covers those). The bytes themselves are not checked in
-/// (<c>fixtures/README.md</c>) — only their hashes — so this test reads the live source directory
-/// the manifest was frozen from (<c>fixtures/corpus-manifest.json</c>'s own <c>source</c> field,
+/// (<c>fixtures/README.md</c>) — only their hashes — so this test resolves the live source
+/// directory through <see cref="ReferenceCorpus"/> (the manifest's own <c>source</c> field,
 /// overridable by <c>AECOPOSTMORTEM_CORPUS_SOURCE</c>) and skips, rather than fails, when that
 /// directory is not present on the machine running the suite. <c>scripts/check-apply-patch-roundtrip.py</c>
 /// is the CI entry point that runs this test in isolation and forwards its exit code.
@@ -23,8 +23,8 @@ public sealed class ApplyPatchCorpusRoundTripTests
     [Fact]
     public void Every_apply_patch_call_in_the_corpus_parses_as_a_string_and_round_trips()
     {
-        var source = CorpusSource();
-        if (source is null || !Directory.Exists(source))
+        var source = ReferenceCorpus.Source();
+        if (!ReferenceCorpus.IsAvailable(source))
         {
             Assert.Skip(
                 $"No corpus at {source ?? "(unresolved)"} on this machine; the gate only runs "
@@ -113,42 +113,5 @@ public sealed class ApplyPatchCorpusRoundTripTests
         {
             failures.Add($"{eventsFile}: {ex.GetType().Name}: {ex.Message}");
         }
-    }
-
-    static string? CorpusSource()
-    {
-        var overridden = Environment.GetEnvironmentVariable("AECOPOSTMORTEM_CORPUS_SOURCE");
-        if (!string.IsNullOrEmpty(overridden))
-        {
-            return overridden;
-        }
-
-        var manifestPath = FindManifestPath();
-        if (manifestPath is null)
-        {
-            return null;
-        }
-
-        using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
-        return manifest.RootElement.TryGetProperty("source", out var sourceElement)
-            ? sourceElement.GetString()
-            : null;
-    }
-
-    /// <summary>Walks up from the test binary's own directory to find the repo's
-    /// <c>fixtures/corpus-manifest.json</c>, so the test does not depend on the working directory
-    /// the runner happens to use.</summary>
-    static string? FindManifestPath()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, "fixtures", "corpus-manifest.json");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
     }
 }

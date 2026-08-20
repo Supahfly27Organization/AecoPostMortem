@@ -13,7 +13,7 @@ public sealed class EventEnvelopeReaderTests
     public void Id_parentId_and_agentId_are_read_from_the_payload()
     {
         var raw = RawEventWithPayload(
-            """{"type":"tool.execution_start","ts":"2026-05-07T00:00:00Z","id":"e1","parentId":"e0","agentId":"agent-1","data":{"toolName":"view"}}""");
+            """{"type":"tool.execution_start","timestamp":"2026-05-07T00:00:00Z","id":"e1","parentId":"e0","agentId":"agent-1","data":{"toolName":"view"}}""");
 
         var ok = EventEnvelopeReader.TryRead(raw, out var envelope);
 
@@ -27,7 +27,7 @@ public sealed class EventEnvelopeReaderTests
     [Fact]
     public void Absence_of_agentId_means_main_thread()
     {
-        var raw = RawEventWithPayload("""{"type":"assistant.turn_start","ts":"2026-05-07T00:00:00Z","id":"e1","parentId":null,"data":{"turnId":"turn-1"}}""");
+        var raw = RawEventWithPayload("""{"type":"assistant.turn_start","timestamp":"2026-05-07T00:00:00Z","id":"e1","parentId":null,"data":{"turnId":"turn-1"}}""");
 
         var ok = EventEnvelopeReader.TryRead(raw, out var envelope);
 
@@ -38,7 +38,7 @@ public sealed class EventEnvelopeReaderTests
     [Fact]
     public void A_missing_id_cannot_take_part_in_the_causality_chain()
     {
-        var raw = RawEventWithPayload("""{"type":"assistant.turn_start","ts":"2026-05-07T00:00:00Z","data":{}}""");
+        var raw = RawEventWithPayload("""{"type":"assistant.turn_start","timestamp":"2026-05-07T00:00:00Z","data":{}}""");
 
         var ok = EventEnvelopeReader.TryRead(raw, out _);
 

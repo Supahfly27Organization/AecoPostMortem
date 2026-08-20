@@ -9,9 +9,9 @@ namespace AecoPostMortem.Ingestion.Tests;
 public sealed class SessionIngestorTests
 {
     const string SessionStart =
-        """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""";
+        """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"1.0.40","version":1}}""";
 
-    const string TurnStart = """{"type":"assistant.turn_start","ts":"2026-05-07T14:16:49.000Z"}""";
+    const string TurnStart = """{"type":"assistant.turn_start","timestamp":"2026-05-07T14:16:49.000Z"}""";
 
     [Fact]
     public void Ingesting_a_session_file_persists_its_events_to_RAW()
@@ -114,7 +114,7 @@ public sealed class SessionIngestorTests
         // byte offset (0), which is what a truncate-and-rewrite looks like, as opposed to a
         // resumed session continuing the same byte stream.
         const string RewrittenSessionStart =
-            """{"type":"session.start","ts":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.9","version":1}}""";
+            """{"type":"session.start","timestamp":"2026-05-07T14:16:48.682Z","data":{"copilotVersion":"9.9.9","version":1}}""";
         File.WriteAllBytes(file, Encoding.UTF8.GetBytes(string.Join('\n', RewrittenSessionStart, TurnStart) + "\n"));
 
         var secondRun = SessionIngestor.Ingest(context, "session-1", file);

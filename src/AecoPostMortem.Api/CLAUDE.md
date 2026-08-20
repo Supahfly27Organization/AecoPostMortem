@@ -8,6 +8,7 @@ Endpoints for the three surfaces, and the host that serves them.
 |---|---|
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General` and `FindingEnvelope.Adherence`, and the `From`/`FromAdherence` factories that assemble them from a `Finding` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
+| `DigestEnvelope.cs` | FR-41 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`) and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` is the same diagnosis without a listener |
 
@@ -89,10 +90,28 @@ so a machine that has only built the .NET solution has no web shell to serve; `s
 `/api/app-state`, it just falls through on `/` instead of returning `index.html`. This is why
 `Build` accepts `webRootPath: null` as a normal case rather than throwing.
 
+### `DigestEnvelope.From` takes a mapper, not a fixed factory
+
+`DigestEnvelope.From(ProcessDigest, Func<Finding, FindingEnvelope>)` cannot assume every ranked
+finding maps through `FindingEnvelope.From` — an adherence finding needs `FromAdherence` with its
+resolution and rule version instead (FR-33), and only the caller (which already has the resolution)
+knows which shape a given finding needs. The mapper preserves `ProcessDigest.RankedFindings`' order:
+the ranking already happened in `Findings`, this only converts each entry to its wire shape.
+
+### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
+
+Both enums are declared in `Findings` with no serialisation attributes of their own — domain types
+stay serialisation-agnostic, the same separation `FindingEnvelope`/`SuggestionEnvelope` already draw.
+`MastheadEnvelope.RuleCoverage` and `DigestEnvelope.State` each carry their own
+`[JsonConverter(typeof(JsonStringEnumConverter))]` here instead, so a client reads `"NotYetAnalyzed"`
+rather than an opaque integer for a state whose entire point (S-36's Gherkin) is to be stated in
+words.
+
 ## Status
 
-The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`) — still unconsumed by any
-endpoint. The app-state endpoint and host (`AppStateReport`, `ApiHost`) that S-48 adds: `serve`
+The response envelope contract (`FindingEnvelope`, `SuggestionEnvelope`, `DigestEnvelope`,
+`MastheadEnvelope`) — still unconsumed by any finding endpoint. The app-state endpoint and host
+(`AppStateReport`, `ApiHost`) that S-48 adds are the first real endpoint this project ships: `serve`
 (`AecoPostMortem.Cli`) builds and runs this host, and `web/`'s `AppStateBanner` is the client that
 reads it. No finding endpoint exists yet — that arrives with the stories `FindingEnvelope.cs`
 already named.

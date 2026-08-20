@@ -37,6 +37,11 @@ function formatOffset(offsetMs: number): string {
  * in the operator's Tab order for one page. `aria-activedescendant` names the selected row's id so
  * assistive technology still announces which step is current, the same composite-widget pattern a
  * combobox or a virtualised listbox already uses for this exact "many options, one tab stop" shape.
+ *
+ * A row is deliberately not its own tab stop, but it is still a real click target: `selectRow`
+ * gives a mouse user the same "select any step" contract (FR-21 part 2 of 3, S-52, issue #16,
+ * Scenario 1) that `moveSelection` plus Enter/Space already give a keyboard user, converging on the
+ * one `onSelectStep` callback either input method calls.
  */
 export function Tape({
   steps,
@@ -97,6 +102,15 @@ export function Tape({
     const clamped = Math.max(0, Math.min(steps.length - 1, nextIndex))
     setSelectedIndex(clamped)
     ensureVisible(clamped)
+  }
+
+  /** A row is not its own tab stop (see the roving-tab-stop remarks above), but a mouse click still
+   * has to move the selection and fire `onSelectStep` — the same "select and show evidence" contract
+   * Enter/Space give a keyboard user. */
+  function selectRow(index: number) {
+    setSelectedIndex(index)
+    ensureVisible(index)
+    onSelectStep?.(steps[index])
   }
 
   function handleScroll(event: UIEvent<HTMLUListElement>) {
@@ -166,9 +180,14 @@ export function Tape({
             data-selected={isSelected ? 'true' : undefined}
             style={{ top: index * ROW_HEIGHT_PX }}
           >
-            <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
-            <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
-            <span className="session-tape__label">{step.label}</span>
+            {/* tabIndex={-1}: a mouse/screen-reader click target, not a second tab stop — the
+             * roving tab stop above stays the list's only one, per the doc comment's own
+             * reasoning; `aria-activedescendant` is what names this row current, not focus. */}
+            <button type="button" className="session-tape__step-button" tabIndex={-1} onClick={() => selectRow(index)}>
+              <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
+              <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
+              <span className="session-tape__label">{step.label}</span>
+            </button>
           </li>
         )
       })}

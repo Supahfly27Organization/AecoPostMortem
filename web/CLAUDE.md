@@ -33,11 +33,12 @@ passing `--prefix`, for the same reason.
 | `src/digest/ProvenanceBadge.tsx` | PRD §3.8's three provenance levels, rendered distinguishably — a `data-provenance` attribute drives a distinct colour per level, alongside the badge's own text label |
 | `src/digest/SuggestionBlock.tsx` | Scenario 4: renders `SuggestionEnvelope`'s `present`/`absent` states — an explicit "No suggestion is offered." for `absent`, never a blank area |
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
-| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). `SessionRecordingStatus` (S-53, issue #17) added |
+| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus` |
 | `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
-| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape, real as of this story. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built. FR-21 part 3 of 3 (S-53, issue #17): renders `session/Tape.tsx` only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind |
-| `src/session/Tape.tsx` | FR-21, part 3 of 3 (S-53, issue #17): the tape itself, moved out of `SessionPage.tsx` — fixed-row-height virtualisation (only the scrolled-to window plus overscan is mounted, proven at the largest measured session scale, 84 turns + 764 tool calls) and full keyboard reachability (a single roving tab stop on the list itself; Arrow/Home/End/PageUp/PageDown move a `selectedIndex` that pulls its row into the mounted window before selecting it, `aria-activedescendant` names it for assistive technology) |
-| `src/session/Tape.css` | `Tape.tsx`'s absolute-positioning layout (each mounted row placed by `top: index * rowHeight` inside a spacer-sized scroll container) and the `aria-selected` highlight |
+| `src/api/useStepEvidence.ts` | FR-21 part 2 of 3 (S-52, issue #16): the fetch-per-`(sessionId, stepId, kind)` hook the inspector reads once a step is selected, mirroring `useSession`'s loading/error/loaded shape |
+| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built |
+| `src/session/Tape.tsx` | FR-21, part 3 of 3 (S-53, issue #17): the tape itself, moved out of `SessionPage.tsx` — fixed-row-height virtualisation (only the scrolled-to window plus overscan is mounted, proven at the largest measured session scale, 84 turns + 764 tool calls) and full keyboard reachability (a single roving tab stop on the list itself; Arrow/Home/End/PageUp/PageDown move a `selectedIndex` that pulls its row into the mounted window before selecting it, `aria-activedescendant` names it for assistive technology). Reconciled with FR-21 part 2 of 3 (S-52, issue #16)'s step-selection contract: each row's content sits inside a `tabIndex={-1}` button — a click target, never a second tab stop — so `SessionPage`'s inspector gets the same `onSelectStep` callback from a mouse click that it already got from keyboard Enter/Space |
+| `src/session/Tape.css` | `Tape.tsx`'s absolute-positioning layout (each mounted row placed by `top: index * rowHeight` inside a spacer-sized scroll container), the `aria-selected` highlight, and the `tabIndex={-1}` row button's own layout |
 
 ## Non-obvious decisions
 
@@ -243,6 +244,38 @@ contrast. FR-40's Scenario 5 says a retired rule stays *visible* with its adhere
 is not withdrawn, and styling it as faded would read as "less true" rather than "no longer in
 force".
 
+### Tape rows are buttons, not list items alone — selection has to be keyboard- and click-reachable
+
+FR-21 part 2 of 3's Scenario 1 says "the operator selects any step" — `Tape`'s `<li>` wraps a real
+`<button type="button">` rather than an `onClick` on the `<li>` itself, so a step is reachable by
+keyboard (Tab, Enter/Space) the same way any other interactive control on the page is, and
+`aria-pressed` states which step is currently selected without a second, parallel "selected" class a
+test or a screen reader would have to infer separately.
+
+### The inspector fetches only Thinking/Raw; Detail needs no request of its own
+
+`SelectedStepInspector` calls `useStepEvidence` once a step is selected, but `DetailPanel` reads
+straight from the `SessionTapeStep` already in `envelope.steps` — every field FR-21's Detail tab
+needs (`kind`, `stepId`, `label`, `timestamp`, `offsetMs`, `ownerKind`, `agentId`) already travelled
+with the tape. Fetching evidence again for Detail would duplicate data already in hand and make the
+Detail tab depend on network latency the other two tabs already have to tolerate.
+
+### All three tab panels render together, hidden by `hidden` rather than only the active one mounted
+
+`SelectedStepInspector` renders `DetailPanel`/`ThinkingPanel`/`RawPanel` inside three `<div>`s, each
+toggled by the native `hidden` attribute rather than a conditional that unmounts the inactive two.
+This is what the story's own edge case asks for structurally: "the Raw tab... must never be the tab
+that gets cut under pressure" — a client that only mounts the active panel could plausibly ship a
+later change that never mounts Raw at all if some future gate short-circuits before reaching it; a
+component tree where all three tabs unconditionally exist has no such gap to introduce by accident.
+
+### A finding chip's label is `finding.recurrence.key`, the same convention `FindingRow` already established
+
+`FindingEnvelope` carries no separate "title" or "name" field — `digest/FindingRow.tsx` already
+renders `finding.recurrence.key` as a digest row's own visible label (FR-41). `FindingChips` reuses
+that exact convention rather than inventing a second one for this surface, so the same finding reads
+with the same label whether it is seen on the digest or on a session's chip row.
+
 ## Playbook — adding a route
 
 1. Add the page component under `src/routes/`. A surface with no real content yet renders
@@ -280,13 +313,26 @@ has wired `/api/digest` to real derived data yet (see the non-obvious decision a
 route always renders its own loading/error state against a real browser.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
-`session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15) and S-53 (FR-21, part 3 of 3,
-issue #17): the masthead and the time-ordered tape, reading `GET /api/sessions/{sessionId}`. The
-tape virtualises at scale and is fully keyboard-navigable (`session/Tape.tsx`), and three non-happy
-states are distinct from each other and from a load failure — mid-ingest (`ingestIncomplete`),
-reconstruction failure (`reconstructionFailed`, states what was skipped) and the unreachable-API/
-404 case S-08 already built. Finding chips and the inspector (Detail/Thinking/Raw tabs) are S-52,
-not built here.
+`session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,
+issue #16) and S-53 (FR-21, part 3 of 3, issue #17): the masthead and the time-ordered tape,
+reading `GET /api/sessions/{sessionId}`. The tape virtualises at scale and is fully
+keyboard-navigable (`session/Tape.tsx`) — a single roving tab stop moves a `selectedIndex` via
+Arrow/Home/End/PageUp/PageDown, confirmed with Enter/Space — and each row also carries a
+`tabIndex={-1}` button as a mouse click target, so both input methods converge on the same
+`onSelectStep` callback `SessionPage` passes down. Selecting a step drives the finding chip row's
+neighbour, the inspector (`Inspector`, `SelectedStepInspector`,
+`DetailPanel`/`ThinkingPanel`/`RawPanel`, `api/useStepEvidence.ts`): Detail, Thinking and Raw as
+three named tabs, Raw always able to state a skipped-at-ingest step rather than render blank, and
+an explicit "pick a step" message when nothing is selected. The finding chip row (`FindingChips`)
+reads `envelope.findings` off the same fetch — no second request — and three non-happy states are
+distinct from each other and from a load failure: mid-ingest (`ingestIncomplete`), reconstruction
+failure (`reconstructionFailed`, states what was skipped) and the unreachable-API/404 case S-08
+already built; `NonFinalState` replaces the chip row, tape and inspector entirely for the two
+non-`complete` states rather than rendering any of them as provisional. A real browser today sees a
+real chip row's *shape* but an empty one — nothing wires a live `Finding` list into
+`ApiHost.GetSession` yet (`AecoPostMortem.Api/CLAUDE.md`'s own status note) — while the inspector's
+Thinking/Raw tabs are fully live against any ingested store, since they read `RawEvent` rows
+directly rather than a not-yet-wired derived pipeline.
 
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there

@@ -23,11 +23,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  display: flex;
-  gap: 0.75rem;
-  align-items: baseline;
   height: 32px;
-  padding: 0 0.6rem;
   box-sizing: border-box;
   border-bottom: 1px solid #f0f0f0;
 }
@@ -36,6 +32,23 @@
   background: #eaf2ff;
   outline: 1px solid #2563eb;
   outline-offset: -1px;
+}
+
+/* tabIndex={-1} (see Tape.tsx): a click target, not a real tab stop, so no focus ring of its own —
+   the outer <ul>'s :focus-visible rule above is the only focus indicator this row ever needs. */
+.session-tape__step-button {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0 0.6rem;
+  box-sizing: border-box;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .session-tape__offset {

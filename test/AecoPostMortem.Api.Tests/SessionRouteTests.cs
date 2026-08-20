@@ -225,6 +225,103 @@ public sealed class SessionRouteTests
         }
     }
 
+    [Fact]
+    public async Task A_tool_calls_raw_event_is_served_verbatim()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s1",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.RawEvents.Add(new RawEvent(
+                "s1", 1, "tool.execution_start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-1",
+                """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var evidence = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "tc1", SessionTapeStepKind.ToolCall), ClientOptions, Cancellation);
+
+            Assert.NotNull(evidence);
+            var raw = Assert.IsType<RawStepEventEnvelope.Present>(evidence!.Raw);
+            Assert.Equal("tool.execution_start", raw.EventType);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    [Fact]
+    public async Task A_step_with_no_matching_raw_event_reports_skipped_not_a_404()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s1",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var evidence = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "tc-missing", SessionTapeStepKind.ToolCall), ClientOptions, Cancellation);
+
+            Assert.NotNull(evidence);
+            Assert.IsType<RawStepEventEnvelope.Skipped>(evidence!.Raw);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    [Fact]
+    public async Task Step_evidence_for_an_unknown_session_is_reported_as_not_found()
+    {
+        using var temporary = new TemporaryStore();
+        temporary.Store.Open().Dispose();
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var response = await client.GetAsync(
+                ApiHost.StepEvidenceRoute("no-such-session", "tc1", SessionTapeStepKind.ToolCall), Cancellation);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     static string MissingCopilotRoot(TemporaryStore temporary) =>
         System.IO.Path.Combine(temporary.Folder, "no-such-copilot-root");
 

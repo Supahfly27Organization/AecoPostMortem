@@ -218,6 +218,25 @@ public sealed class RuleShapeCatalogueTests
         Assert.NotEqual(string.Empty, match.OperandAText);
     }
 
+    /// <summary>
+    /// "Pass" is ambiguous: this project's own live corpus carries a real statement using "pass" to
+    /// mean "pass a CI check" ("always pass build and type checks..."), not "pass an argument". A
+    /// multi-word capture cannot be a JSON argument key, so it must not be read as one — the operand
+    /// is rejected and the statement falls through un-shaped, the same "a rejected operand does not
+    /// consume the statement" precedent <c>NeverReadPath</c>/<c>ToolIsBanned</c> already established.
+    /// </summary>
+    [Fact]
+    public void A_multi_word_operand_does_not_fit_the_parameter_obligation_shape()
+    {
+        var statement = Statement("Always pass full stack traces on every failure.");
+
+        var matching = RuleShapeCatalogue.MatchAll([statement]);
+
+        Assert.Empty(matching.Matches);
+        var unmatched = Assert.Single(matching.Unmatched);
+        Assert.Equal(UnmatchedStatementDisposition.CheckableNotBuilt, unmatched.Disposition);
+    }
+
     // ---- Scenario: A rule matching no shape is not silently dropped ----
 
     [Fact]

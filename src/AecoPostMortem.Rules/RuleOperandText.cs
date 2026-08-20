@@ -86,4 +86,19 @@ public static class RuleOperandText
                || operandText.Contains('\\', StringComparison.Ordinal)
                || FileExtension.IsMatch(operandText);
     }
+
+    /// <summary>
+    /// Whether an operand is shaped like a single argument key rather than a clause. "Pass" is
+    /// grammatically ambiguous — this product's own live corpus carries a real statement using it to
+    /// mean "pass a CI check" ("always pass build and type checks..."), not "pass an argument" — and a
+    /// real JSON argument key is always one token (this product's own verified field names: <c>pattern</c>,
+    /// <c>old_str</c>, <c>file_text</c>). A multi-word capture cannot be a key, so it is rejected here
+    /// rather than matched with confidence it does not deserve.
+    /// </summary>
+    public static bool LooksLikeParameterName(string operandText)
+    {
+        ArgumentNullException.ThrowIfNull(operandText);
+
+        return operandText.Length > 0 && !operandText.Any(char.IsWhiteSpace);
+    }
 }

@@ -201,6 +201,7 @@ public static class RuleShapeCatalogue
     {
         RuleShapeKind.NeverReadPath => RuleOperandText.LooksLikePath(operandA),
         RuleShapeKind.ToolIsBanned => !RuleOperandText.LooksLikePath(operandA),
+        RuleShapeKind.AlwaysPassParam => RuleOperandText.LooksLikeParameterName(operandA),
         _ => true,
     };
 

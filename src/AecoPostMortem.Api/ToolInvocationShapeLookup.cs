@@ -1,4 +1,3 @@
-using System.Text.Json;
 using AecoPostMortem.Data;
 using AecoPostMortem.Data.Execution;
 using AecoPostMortem.Ingestion;
@@ -41,7 +40,7 @@ public static class ToolInvocationShapeLookup
             .Select(agent => (agent.SessionId, agent.SpawningToolCallId))
             .ToHashSet();
 
-        var argumentsByCall = ArgumentsByCall(rawEvents);
+        var argumentsByCall = RawToolArguments.ByCall(rawEvents);
 
         return toolCalls
             .Select(call =>
@@ -61,33 +60,6 @@ public static class ToolInvocationShapeLookup
                 };
             })
             .ToList();
-    }
-
-    static Dictionary<(string SessionId, string ToolCallId), ToolArguments> ArgumentsByCall(
-        IReadOnlyList<RawEvent> rawEvents)
-    {
-        var byCall = new Dictionary<(string, string), ToolArguments>();
-
-        foreach (var raw in rawEvents)
-        {
-            if (raw.EventType != "tool.execution_start" || !EventEnvelopeReader.TryRead(raw, out var envelope))
-            {
-                continue;
-            }
-
-            if (envelope.Data.ValueKind != JsonValueKind.Object
-                || !envelope.Data.TryGetProperty("toolCallId", out var toolCallIdProperty)
-                || toolCallIdProperty.ValueKind != JsonValueKind.String
-                || !envelope.Data.TryGetProperty("arguments", out var argumentsElement))
-            {
-                continue;
-            }
-
-            byCall[(raw.SessionId, toolCallIdProperty.GetString()!)] =
-                ToolArguments.Parse(argumentsElement.GetRawText());
-        }
-
-        return byCall;
     }
 
     static bool HasField(ToolArguments? arguments, string name) =>

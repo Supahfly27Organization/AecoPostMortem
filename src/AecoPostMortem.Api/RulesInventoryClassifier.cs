@@ -12,9 +12,10 @@ namespace AecoPostMortem.Api;
 /// and watched when that one operand resolves — no <see cref="ToolRole"/> involved, since
 /// <c>BannedToolCheck</c> (<c>Rules/CLAUDE.md</c>) answers "was the named tool called at all" rather
 /// than a role comparison, the question <c>ToolVocabularyMismatchCheck</c>'s own <c>TargetRole</c>
-/// exists for. Every other matched shape is <see cref="RuleStatementStatus.CheckableNotYetBuilt"/> —
-/// <see cref="RuleShapeKind.NeverReadPath"/> is watched unconditionally instead (below), and
-/// <see cref="RuleShapeKind.AlwaysPassParam"/> has no built check at all. FR-34's own two unmatched
+/// exists for. <see cref="RuleShapeKind.NeverReadPath"/> and <see cref="RuleShapeKind.AlwaysPassParam"/>
+/// are both watched unconditionally instead (below) — neither operand is a tool name, so neither has
+/// an "unresolved" state to gate on. Every other matched shape is
+/// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>. FR-34's own two unmatched
 /// dispositions map onto the two remaining statuses this piece can answer honestly:
 /// <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> (an obligation, no shape fits) is
 /// also <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, and
@@ -58,10 +59,11 @@ public static class RulesInventoryClassifier
 
     static RuleStatementStatus ClassifyMatch(RuleShapeMatch match, IReadOnlyList<ToolInvocationShape> invocations)
     {
-        if (match.Kind == RuleShapeKind.NeverReadPath)
+        if (match.Kind is RuleShapeKind.NeverReadPath or RuleShapeKind.AlwaysPassParam)
         {
-            // Unlike a tool-name operand, a path operand always produces a determinate real/no-access
-            // verdict against the ToolCall corpus (Rules/NeverReadPathCheck.cs) — there is no
+            // Unlike a tool-name operand, a path operand (NeverReadPath) or an argument-key operand
+            // (AlwaysPassParam) always produces a determinate present/absent verdict against its own
+            // corpus (Rules/NeverReadPathCheck.cs, Rules/AlwaysPassParamCheck.cs) — there is no
             // "unresolved" state to fall through to, so a matched statement is Watched
             // unconditionally rather than gated on this classifier's invocation corpus.
             return RuleStatementStatus.Watched;

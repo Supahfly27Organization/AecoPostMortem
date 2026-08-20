@@ -254,6 +254,8 @@ public static class ApiHost
         var bannedTool = BannedToolFinding.Run(ruleShapeMatches, invocations, scopedToolCalls);
         var neverReadPath = NeverReadPathFinding.Run(ruleShapeMatches, scopedToolCalls);
         var useAAfterB = UseAAfterBFinding.Run(ruleShapeMatches, invocations, scopedToolCalls);
+        var paramCarryingCalls = ParamCarryingCallLookup.BuildAll(scopedToolCalls, scopedAgents, scopedRawEvents);
+        var alwaysPassParam = AlwaysPassParamFinding.Run(ruleShapeMatches, paramCarryingCalls);
 
         var findings = repeatedReads.Findings
             .Concat(failedCalls.Findings)
@@ -264,6 +266,7 @@ public static class ApiHost
             .Concat(bannedTool.Findings)
             .Concat(neverReadPath.Findings)
             .Concat(useAAfterB.Findings)
+            .Concat(alwaysPassParam.Findings)
             .ToList();
 
         var checkRegistry = new CheckRegistry
@@ -279,6 +282,7 @@ public static class ApiHost
                 bannedTool.RegistryEntry,
                 neverReadPath.RegistryEntry,
                 useAAfterB.RegistryEntry,
+                alwaysPassParam.RegistryEntry,
             ],
         };
 

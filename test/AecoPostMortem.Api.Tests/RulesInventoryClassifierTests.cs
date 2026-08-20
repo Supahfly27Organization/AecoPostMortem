@@ -5,19 +5,19 @@ namespace AecoPostMortem.Api.Tests;
 /// <summary>
 /// FR-40's classify function. Every statement the catalogue matched to a shape none of
 /// <see cref="RuleShapeKind.PreferAOverB"/>, <see cref="RuleShapeKind.ToolIsBanned"/>,
-/// <see cref="RuleShapeKind.NeverReadPath"/> or <see cref="RuleShapeKind.UseAAfterB"/> is
-/// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/> — no built check watches
-/// <see cref="RuleShapeKind.AlwaysPassParam"/> against the real corpus yet — and FR-34's own two
-/// unmatched dispositions map onto FR-40's remaining two statuses this piece can answer honestly:
-/// <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> is also
+/// <see cref="RuleShapeKind.NeverReadPath"/>, <see cref="RuleShapeKind.UseAAfterB"/> or
+/// <see cref="RuleShapeKind.AlwaysPassParam"/> is <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>
+/// — FR-34's own two unmatched dispositions map onto FR-40's remaining two statuses this piece can
+/// answer honestly: <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> is also
 /// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, and
 /// <see cref="UnmatchedStatementDisposition.NotCheckable"/> is <see cref="RuleStatementStatus.NotARule"/>.
 /// A <see cref="RuleShapeKind.PreferAOverB"/> or <see cref="RuleShapeKind.UseAAfterB"/> match resolves
 /// both operands against the real <see cref="ToolInvocationShape"/> corpus via
 /// <see cref="OperandResolver.ResolveTwoOperands"/> and is <see cref="RuleStatementStatus.Watched"/>
 /// only when both sides resolve; a <see cref="RuleShapeKind.ToolIsBanned"/> match resolves its one
-/// operand the same way. A <see cref="RuleShapeKind.NeverReadPath"/> match is watched
-/// unconditionally — see its own test below.
+/// operand the same way. A <see cref="RuleShapeKind.NeverReadPath"/> or
+/// <see cref="RuleShapeKind.AlwaysPassParam"/> match is watched unconditionally — see their own tests
+/// below.
 /// </summary>
 public sealed class RulesInventoryClassifierTests
 {
@@ -31,9 +31,9 @@ public sealed class RulesInventoryClassifierTests
     }
 
     [Fact]
-    public void A_statement_the_catalogue_matched_to_an_unwatched_shape_is_checkable_not_yet_built()
+    public void A_statement_matched_to_a_shape_whose_operand_never_resolves_is_checkable_not_yet_built()
     {
-        var statement = Statement("Always pass an explicit encoding parameter.");
+        var statement = Statement("Prefer isort over an unsorted import list.");
 
         var classify = Classify(statement);
 
@@ -169,6 +169,20 @@ public sealed class RulesInventoryClassifierTests
         // NeverReadPath statement is Watched unconditionally, not gated on the invocation corpus
         // this classifier otherwise resolves tool-name operands against.
         var statement = Statement("Never read `src/Secrets/`.");
+
+        var classify = Classify(statement);
+
+        Assert.Equal(RuleStatementStatus.Watched, classify(statement));
+    }
+
+    [Fact]
+    public void An_always_pass_param_match_is_watched_even_against_an_empty_corpus()
+    {
+        // Same reasoning as NeverReadPath, above: a parameter-key operand always produces a
+        // determinate present/absent verdict against the ParamCarryingCall corpus
+        // (Rules/AlwaysPassParamCheck.cs) — there is no "unresolved" state for a parameter name the
+        // way there is for a tool name.
+        var statement = Statement("Always pass an explicit `model` param when dispatching a subagent.");
 
         var classify = Classify(statement);
 

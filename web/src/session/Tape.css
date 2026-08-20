@@ -1,0 +1,75 @@
+.session-tape {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid #e2e2e2;
+  border-radius: 6px;
+}
+
+.session-tape:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.session-tape__spacer {
+  position: relative;
+  width: 1px;
+  pointer-events: none;
+}
+
+.session-tape__step {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 32px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.session-tape__step[aria-selected='true'] {
+  background: #eaf2ff;
+  outline: 1px solid #2563eb;
+  outline-offset: -1px;
+}
+
+/* tabIndex={-1} (see Tape.tsx): a click target, not a real tab stop, so no focus ring of its own —
+   the outer <ul>'s :focus-visible rule above is the only focus indicator this row ever needs. */
+.session-tape__step-button {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0 0.6rem;
+  box-sizing: border-box;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.session-tape__offset {
+  font-variant-numeric: tabular-nums;
+  color: #666;
+  min-width: 4.5rem;
+}
+
+.session-tape__kind {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  color: #888;
+  min-width: 4.5rem;
+}
+
+.session-tape__plugin {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.session-tape__empty {
+  color: #666;
+}

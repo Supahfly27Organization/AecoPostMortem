@@ -1,13 +1,20 @@
 import { useState } from 'react'
 import { useDigest } from '../api/useDigest'
 import { FindingRow } from '../digest/FindingRow'
+import { Masthead } from '../digest/Masthead'
 import { RepositorySelector } from '../digest/RepositorySelector'
 import './DigestPage.css'
 
 /**
  * The front door (PRD §3.1: "Getting started ... Open the Process Digest"). FR-41's masthead and
  * ranking (S-36, issue #44) plus row expansion, the recurrence strip and the repository selector
- * (S-54, issue #45, this story).
+ * (S-54, issue #45).
+ *
+ * The order on the page is the story's argument: the corpus scope first (what was looked at), then
+ * the findings ranked by how many of those sessions each touched (what to fix first). Neither the
+ * masthead nor this page counts anything — `MastheadEnvelope`'s figures are ingest-time counters and
+ * `sessionsAffected` is the key the server already ranked by, so nothing here re-derives a total
+ * from the findings it happens to be holding.
  *
  * `/api/digest` is not served by `ApiHost` yet (`web/src/api/digest.ts` documents why: assembling a
  * real `ProcessDigest` from the live store is later, unwired work). `useDigest` targets the route
@@ -49,12 +56,26 @@ export function DigestPage() {
     <div className="digest-page">
       <h2>Process Digest</h2>
 
+      <Masthead masthead={digest.masthead} state={digest.state} />
+
       <RepositorySelector scope={displayedScope} onSelect={setPendingRepository} />
 
-      {digest.state === 'NotYetAnalyzed' && <p>No check has run against this corpus yet.</p>}
-      {digest.state === 'Incomplete' && <p>Ingestion is still under way — this digest is incomplete.</p>}
+      {/* The three designed states, each said in its own words rather than all collapsing into an
+          unexplained empty list. "Nothing analysed yet" and "found nothing" are different facts
+          about the operator's setup and lead to different next actions — see
+          `AecoPostMortem.Findings.DigestState`, which draws the same distinction one layer down. */}
+      {digest.state === 'NotYetAnalyzed' && (
+        <p className="digest-page__state">
+          Nothing has been analysed yet — no check has run against this corpus.
+        </p>
+      )}
+      {digest.state === 'Incomplete' && (
+        <p className="digest-page__state">
+          Analysis is incomplete — ingestion is still under way, so this ranking is not final.
+        </p>
+      )}
       {digest.state === 'Analyzed' && digest.rankedFindings.length === 0 && (
-        <p>Every check ran clean — nothing to show.</p>
+        <p className="digest-page__state">Every check ran and found nothing.</p>
       )}
 
       <ul className="digest-page__findings">

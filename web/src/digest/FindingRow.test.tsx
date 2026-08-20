@@ -20,6 +20,7 @@ function waste(overrides: Partial<FindingEnvelope> = {}): FindingEnvelope {
         { sessionId: 'session-2', ruleSetVersion: null },
       ],
     },
+    sessionsAffected: 2,
     suggestion: { state: 'present', text: 'Name `rg` instead of repeated `view` calls.' },
     operatorResponse: 'ignored',
     ...overrides,
@@ -62,6 +63,38 @@ describe('FindingRow', () => {
     expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument()
     expect(screen.queryByText('src/hot.cs', { selector: 'dd' })).not.toBeInTheDocument()
     expect(screen.queryByText(/Name `rg`/)).not.toBeInTheDocument()
+  })
+
+  // S-36's edge case (issue #44): "a finding touching one session is an anecdote and must be
+  // visually subordinate to one touching thirty — that's the ranking's entire purpose, so make the
+  // 'sessions affected' count visually prominent, not a small annotation." A count only visible
+  // after expanding the row cannot do that job, so it belongs in the always-visible summary.
+  it('shows how many sessions it touched without needing to be expanded first', () => {
+    render(
+      <ul>
+        <FindingRow finding={waste({ sessionsAffected: 30 })} />
+      </ul>,
+    )
+
+    const summary = screen.getByRole('button', { expanded: false })
+    const metric = summary.querySelector('[data-rank-metric="sessions-affected"]')
+
+    expect(metric).toHaveTextContent('30')
+    expect(metric).toHaveTextContent(/sessions/i)
+  })
+
+  it('reads a single-session finding as one session, not as "1 sessions"', () => {
+    render(
+      <ul>
+        <FindingRow finding={waste({ sessionsAffected: 1 })} />
+      </ul>,
+    )
+
+    const metric = screen
+      .getByRole('button', { expanded: false })
+      .querySelector('[data-rank-metric="sessions-affected"]')
+
+    expect(metric).toHaveTextContent(/^1\s*session$/i)
   })
 
   it('expanding the row reveals the quoted evidence, the provenance badge, and the suggestion', async () => {

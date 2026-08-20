@@ -36,6 +36,8 @@ public sealed class SessionEnvelopeTests
         OwnerKind = OwnerKind.Main,
     };
 
+    static SessionFindings NoFindings() => SessionFindings.For("s1", []);
+
     [Fact]
     public void From_carries_the_masthead_and_maps_every_step_in_order()
     {
@@ -47,7 +49,7 @@ public sealed class SessionEnvelopeTests
         };
 
         var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         Assert.Equal("s1", envelope.Masthead.SessionId);
         Assert.Equal("org/repo", envelope.Masthead.Repository);
@@ -69,7 +71,7 @@ public sealed class SessionEnvelopeTests
         var session = SessionWith("2026-08-16T10:00:00Z", null);
         var recording = SessionRecording.Build(session, [], [], [], [], []);
 
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         var json = JsonSerializer.Serialize(envelope.Masthead.ContextSize);
         using var document = JsonDocument.Parse(json);
@@ -84,7 +86,7 @@ public sealed class SessionEnvelopeTests
         var session = SessionWith("2026-08-16T10:00:00Z", null, inputTokens: 12_345, outputTokens: 6_789);
         var recording = SessionRecording.Build(session, [], [], [], [], []);
 
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         var observed = Assert.IsType<SessionTokenFiguresEnvelope.Observed>(envelope.Masthead.ContextSize);
         Assert.Equal(12_345, observed.InputTokens);
@@ -97,7 +99,7 @@ public sealed class SessionEnvelopeTests
         var session = SessionWith("2026-08-16T10:00:00Z", null);
         var recording = SessionRecording.Build(session, [], [], [], [], []);
 
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         Assert.Null(envelope.Masthead.ElapsedMs);
     }
@@ -108,7 +110,7 @@ public sealed class SessionEnvelopeTests
         var session = SessionWith("2026-08-16T10:00:00Z", "2026-08-16T10:01:00Z");
         var recording = SessionRecording.Build(session, [], [], [], [], []);
 
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         Assert.Empty(envelope.Steps);
     }
@@ -135,7 +137,7 @@ public sealed class SessionEnvelopeTests
         };
 
         var recording = SessionRecording.Build(session, [], [], [], skills, []);
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         var step = Assert.Single(envelope.Steps);
         Assert.Equal("code-review", step.Label);
@@ -164,11 +166,61 @@ public sealed class SessionEnvelopeTests
         };
 
         var recording = SessionRecording.Build(session, [], [], [], skills, []);
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         var step = Assert.Single(envelope.Steps);
         Assert.Equal(OwnerKind.Agent, step.OwnerKind);
         Assert.Equal("a1", step.AgentId);
+    }
+
+    /// <summary>FR-21 part 3 of 3 (S-53, issue #17): a complete session's status serialises to the
+    /// closed union's "complete" shape, not a bare boolean.</summary>
+    [Fact]
+    public void A_complete_session_serialises_its_status_as_the_complete_shape()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", "2026-08-16T10:10:00Z");
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        Assert.IsType<SessionRecordingStatusEnvelope.Complete>(envelope.Status);
+    }
+
+    /// <summary>Scenario 3: a session with no recorded end serialises a distinct
+    /// "ingestIncomplete" kind, never folded into a generic error shape.</summary>
+    [Fact]
+    public void An_incomplete_session_serialises_a_distinct_kind_not_a_generic_error()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var json = JsonSerializer.Serialize(envelope.Status);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.Equal("ingestIncomplete", document.RootElement.GetProperty("kind").GetString());
+    }
+
+    /// <summary>Scenario 4: a reconstruction failure carries what was skipped on the wire, not only
+    /// a discriminator.</summary>
+    [Fact]
+    public void A_reconstruction_failure_carries_what_was_skipped()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", "2026-08-16T10:10:00Z");
+        var spawnResolution = new CheckRegistryEntry
+        {
+            CheckId = "unresolvable-spawn",
+            Status = CheckRunStatus.Ran,
+            Population = 5,
+            FindingCount = 2,
+        };
+        var recording = SessionRecording.Build(session, [], [], [], [], [], spawnResolution);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var failed = Assert.IsType<SessionRecordingStatusEnvelope.ReconstructionFailed>(envelope.Status);
+        Assert.Single(failed.Skipped);
     }
 
     [Fact]
@@ -177,7 +229,7 @@ public sealed class SessionEnvelopeTests
         var session = SessionWith("2026-08-16T10:00:00Z", null);
         var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
         var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
-        var envelope = SessionEnvelope.From(recording);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
 
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
@@ -188,5 +240,46 @@ public sealed class SessionEnvelopeTests
         using var document = JsonDocument.Parse(json);
 
         Assert.Equal("toolCall", document.RootElement.GetProperty("steps")[0].GetProperty("kind").GetString());
+    }
+
+    [Fact]
+    public void Findings_affecting_this_session_are_mapped_to_chips_with_their_sessions_affected_count()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        var finding = new Finding
+        {
+            Class = FindingClass.Waste,
+            Provenance = Provenance.Derived,
+            Evidence = [],
+            Recurrence = new Recurrence
+            {
+                Key = "hook:pre-commit",
+                Occurrences =
+                [
+                    new RecurrenceOccurrence { SessionId = "s1" },
+                    new RecurrenceOccurrence { SessionId = "s2" },
+                ],
+            },
+        };
+        var findings = SessionFindings.For("s1", [finding]);
+
+        var envelope = SessionEnvelope.From(recording, findings, FindingEnvelope.From);
+
+        var chip = Assert.Single(envelope.Findings);
+        Assert.Equal(2, chip.SessionsAffected);
+        Assert.Equal(FindingClass.Waste, chip.Finding.Class);
+    }
+
+    [Fact]
+    public void A_session_with_no_findings_serialises_an_empty_chip_list()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        Assert.Empty(envelope.Findings);
     }
 }

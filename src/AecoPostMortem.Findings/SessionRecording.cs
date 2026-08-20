@@ -110,6 +110,44 @@ public sealed record SessionMasthead
 }
 
 /// <summary>
+/// FR-21, part 3 of 3 (S-53, issue #17): whether a <see cref="SessionRecording"/> is ready to be
+/// read as final. A closed union, the same discipline <see cref="SessionTokenFigures"/> already uses
+/// for its own two shapes — "final" is not a boolean a caller could forget to check:
+/// <see cref="Complete"/> is the only shape a UI may render the tape from without also rendering a
+/// caveat above it.
+/// </summary>
+public abstract record SessionRecordingStatus
+{
+    private SessionRecordingStatus()
+    {
+    }
+
+    /// <summary>The one value for "nothing here is provisional".</summary>
+    public static SessionRecordingStatus CompleteValue { get; } = new Complete();
+
+    /// <summary>The one value for Scenario 3 — no per-instance data needed, the same reasoning
+    /// <see cref="SessionTokenFigures.SessionTotalsNotRecorded"/> gives its own singleton.</summary>
+    public static SessionRecordingStatus IngestIncompleteValue { get; } = new IngestIncomplete();
+
+    public sealed record Complete : SessionRecordingStatus;
+
+    /// <summary>Scenario 3: the session has not recorded its own end. Nothing about its captured
+    /// lifecycle has concluded, so today's masthead and tape figures are not the final ones this
+    /// session will eventually have — the recorder states that rather than presenting what has
+    /// arrived so far as though it were the whole session.</summary>
+    public sealed record IngestIncomplete : SessionRecordingStatus;
+
+    /// <summary>Scenario 4: reconstruction found something it could not resolve.
+    /// <see cref="Skipped"/> states what, in the operator's own words — never a bare count with no
+    /// explanation, the same "never a percentage without the count that produced it" discipline this
+    /// project applies to a Waste finding's rate (see this project's own CLAUDE.md).</summary>
+    public sealed record ReconstructionFailed : SessionRecordingStatus
+    {
+        public required IReadOnlyList<string> Skipped { get; init; }
+    }
+}
+
+/// <summary>
 /// FR-21's masthead and tape (S-08, issue #15) — "the half everything else hangs off": S-52
 /// (inspector, finding chips) and S-53 (scale, states) both attach to <see cref="Tape"/>, which is
 /// why this story stops at the tape itself rather than reaching for either.
@@ -120,6 +158,12 @@ public sealed record SessionRecording
 
     public required SessionTape Tape { get; init; }
 
+    /// <summary>FR-21 part 3 of 3 (S-53, issue #17). Defaults to <see cref="SessionRecordingStatus.
+    /// Complete"/> only in the sense that a session with a recorded end and no reconstruction
+    /// problem reaches that value through <see cref="DetermineStatus"/> — this field is never left
+    /// unset.</summary>
+    public required SessionRecordingStatus Status { get; init; }
+
     /// <summary>
     /// Builds a session's masthead and tape from plain, already-resolved <c>Data.Execution</c>
     /// rows — the same reasoning <c>HookFailureFinding.Build</c> and <c>AbortedTurnFinding.Build</c>
@@ -127,13 +171,19 @@ public sealed record SessionRecording
     /// nothing in this project may query the store on its own, and the caller (here,
     /// <c>AecoPostMortem.Api</c>) is the one that knows where its rows came from.
     /// </summary>
+    /// <param name="spawnResolution">FR-9's own reconstruction check (<c>Ingestion.
+    /// SpawnResolutionCheck</c>), already resolved by the caller — the same already-resolved-input
+    /// pattern <c>MastheadCounters</c> establishes. <see langword="null"/> means no reconstruction
+    /// check was run for this session, which reads as <see cref="SessionRecordingStatus.Complete"/>,
+    /// never as a failure this method invented on its own.</param>
     public static SessionRecording Build(
         Session session,
         IReadOnlyList<Turn> turns,
         IReadOnlyList<ToolCall> toolCalls,
         IReadOnlyList<Agent> agents,
         IReadOnlyList<Skill> skills,
-        IReadOnlyList<Hook> hooks)
+        IReadOnlyList<Hook> hooks,
+        CheckRegistryEntry? spawnResolution = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(turns);
@@ -203,7 +253,34 @@ public sealed record SessionRecording
         {
             Masthead = masthead,
             Tape = new SessionTape { Steps = ordered },
+            Status = DetermineStatus(session, spawnResolution),
         };
+    }
+
+    /// <summary>Scenario 3 is checked first — the more urgent, more specific claim wins, the same
+    /// ordering <c>ProcessDigest.Build</c> gives <c>MastheadCounters.IngestInProgress</c> over its
+    /// own analysis-state check (<c>Findings/CLAUDE.md</c>): while the session itself has not
+    /// concluded, nothing here can be trusted as final, not even a reconstruction diagnosis over
+    /// whatever partial data has arrived so far.</summary>
+    static SessionRecordingStatus DetermineStatus(Session session, CheckRegistryEntry? spawnResolution)
+    {
+        if (session.EndedAt is null)
+        {
+            return SessionRecordingStatus.IngestIncompleteValue;
+        }
+
+        if (spawnResolution is { FindingCount: > 0 } check)
+        {
+            return new SessionRecordingStatus.ReconstructionFailed
+            {
+                Skipped =
+                [
+                    $"{check.FindingCount} of {check.Population} subagent spawn(s) could not be resolved to their originating tool call",
+                ],
+            };
+        }
+
+        return SessionRecordingStatus.CompleteValue;
     }
 
     static SessionTapeStep BuildStep(

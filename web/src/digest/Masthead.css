@@ -1,0 +1,46 @@
+.masthead {
+  border: 1px solid #dde1e6;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.9rem 1rem;
+  margin: 0 0 1rem;
+}
+
+/* The provisional note is not decoration around the counts — it changes what they mean, so it sits
+   above them and takes the accent the figures themselves deliberately do not. */
+.masthead[data-provisional='true'] {
+  border-color: #d9b168;
+  background: #fffaf0;
+}
+
+.masthead__provisional {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: #7a5a12;
+}
+
+.masthead__figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin: 0;
+}
+
+.masthead__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.masthead__label {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5b6470;
+}
+
+.masthead__value {
+  margin: 0;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}

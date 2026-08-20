@@ -6,14 +6,16 @@ Endpoints for the three surfaces, and the host that serves them.
 
 | File | What it holds |
 |---|---|
-| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure` |
+| `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-41 (issue #44, S-36) added `SessionsAffected`, the served ranking key; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState` and `GetSession` are the same two without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetSession` and `GetStepEvidence` are the same three without a listener |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
-| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording` |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field |
+| `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope` |
+| `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does |
 
 ## References
 
@@ -41,6 +43,22 @@ plain inputs" split `Findings/CLAUDE.md` documents for its own checks, just perf
 inside `Findings` because nothing in `AecoPostMortem.Findings` may query the store on its own. See
 `SessionEnvelope.cs`'s own remarks below for why this reads the *derived* tables rather than
 re-deriving them from RAW in this project.
+
+S-53 (issue #17, FR-21 part 3 of 3) widens `GetSession` once more, narrowly: alongside the derived-
+table read above, it also reads this session's own `RawEvents` and runs them through
+`Ingestion.ExecutionRecordBuilder.Build` purely to read back its `SpawnResolutionCheck` — never for
+the `Turn`/`ToolCall`/`Agent` rows that same call also returns, which stay unused here. See
+`SessionEnvelope.cs`'s "`SessionRecordingStatusEnvelope`" remark below for why this second, narrow
+read does not reopen the "duplicate reconstruction path" question the paragraph above already
+settled against.
+
+`ApiHost.GetStepEvidence` (S-52, issue #16) reads `Data.RawEvent` directly instead — the inspector's
+Raw and Thinking tabs are provenance over the *event*, not the derived row, and neither `Turn` nor
+`ToolCall` carries a foreign key back to the `RawEvent` that produced it
+(`AecoPostMortem.Data/CLAUDE.md`). `StepEvidenceLookup` (this project, not `Ingestion`) reuses the
+existing `Ingestion` reference (S-48, above) to call `Ingestion.EventEnvelopeReader.TryRead` — the
+same envelope parsing `Ingestion.ExecutionRecordBuilder` already does to build the tape's own rows —
+rather than duplicating it a second time.
 
 ## Non-obvious decisions
 
@@ -239,6 +257,32 @@ same mapper is reused for `ProcessDigest.InferredFindings` (FR-48, issue #52, S-
 second, Inferred-only mapping function, because an Inferred finding needs exactly the same
 `General`/`Adherence` shape decision any other finding does.
 
+### `SessionsAffected` is served, not left for each client to re-derive
+
+FR-41 (issue #44, S-36) ranks `RankedFindings` by distinct sessions affected, and S-36's edge case
+makes that count the most prominent thing on a rendered row — a finding touching one session has to
+read as an anecdote beside one touching thirty. `FindingEnvelope.SessionsAffected` carries that
+number on the wire even though `Recurrence.Occurrences` technically already contains it: a client
+counting its own distinct session ids would be re-implementing `ProcessDigest.SessionsAffected`, and
+any drift between the two would show up as a row whose displayed count disagrees with the order it
+is being displayed in. It is always computed by `ProcessDigest.SessionsAffected(finding)` inside the
+three factories, never accepted as a parameter, so the served figure and the ranking cannot come
+from two different rules.
+
+### The "no aggregate scan" guarantee is enforced here, not only in `Findings`
+
+`AecoPostMortem.Findings`' own `ProcessDigestStructureTests` proves `ProcessDigest.Build` cannot be
+handed a live data source — but that project has no `Data` reference at all, so the guarantee costs
+it nothing. **This** project does reference `Data` (`DiagnoseAppState`, `GetSession`), which makes
+`MastheadEnvelope` the first point on the masthead's path where a live `COUNT` could plausibly be
+introduced by a later story wiring `/api/digest`. `MastheadEnvelopeStructureTests` reflects over
+`MastheadEnvelope`'s public surface (properties, method parameters and return types, following
+generic arguments down) and fails if any of it mentions an `IQueryable`, an `Expression`, or any type
+out of `AecoPostMortem.Data` / `Microsoft.EntityFrameworkCore`. Counting a million rows measured
+126 ms on SQLite and 118 ms on Postgres (`docs/product-superpowers/research/2026-08-16-sqlite-vs-
+postgres-query-latency.md`), so this is not an engine problem to tune away later — the masthead reads
+counters maintained at ingest, and the alternative is made unrepresentable rather than discouraged.
+
 ### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
 
 Both enums are declared in `Findings` with no serialisation attributes of their own — domain types
@@ -281,6 +325,31 @@ the server on a `TimeSpan` text format. `DateTimeOffset` (`SessionTapeStepEnvelo
 left as-is — `MastheadEnvelope.SpanStart`/`SpanEnd` already establish that this type serialises
 losslessly and needs no format agreement of its own.
 
+### `SessionRecordingStatusEnvelope` widens `GetSession`'s read on purpose, and states why that is not the duplicate-reconstruction-path this project already ruled out
+
+FR-21 part 3 of 3 (S-53, issue #17): the "reconstruction failed, states what was skipped" scenario
+has exactly one real signal already built anywhere in this repository — `Ingestion.
+ExecutionRecordBuilder`'s `SpawnResolutionCheck` (FR-9), which counts a `subagent.started` event
+whose `toolCallId` never resolves against a spawning `task` call rather than silently dropping it.
+Nothing in `Data.Execution.Agent` records an unresolved spawn (an unresolved one is excluded from
+`Agent` entirely — `Ingestion/CLAUDE.md`), so there is no way to answer Scenario 4 from the derived
+tables `GetSession` already reads; the only place the signal exists is a fresh pass over the
+session's own RAW events. `GetSession` therefore reads `context.RawEvents` a second time, scoped to
+the one session being requested (bounded, not a corpus scan), and calls `ExecutionRecordBuilder.
+Build` — but reads only `.SpawnResolutionCheck` off the result, discarding the `Turns`/`ToolCalls`/
+`Agents` it also returns. That is the deliberate line: the "GetSession reads the derived tables ...
+rather than re-deriving them from RAW" remark above is about not maintaining two competing paths
+that both produce the masthead/tape's *rows* — this second read produces nothing that overlaps with
+that; it exists only to answer one yes/no diagnostic question the derived tables cannot answer today.
+
+`SessionRecordingStatusEnvelope` itself is a closed three-shape union behind a private constructor
+— `Complete`, `IngestIncomplete`, `ReconstructionFailed { Skipped }` — the same `[JsonPolymorphic]`/
+`[JsonDerivedType]` mechanism `SessionTokenFiguresEnvelope` and `SuggestionEnvelope` already use, so
+a client reads which of the three states applies from the wire `"kind"` discriminator
+(`"complete"`/`"ingestIncomplete"`/`"reconstructionFailed"`) rather than inferring it from which
+optional fields happen to be present. `SessionEnvelope.Status` is `required` — every served session
+carries one of the three, never an implicit fourth "unspecified" state.
+
 ### `SessionTapeStepEnvelope.Kind` and `OwnerKind` get their camelCase wire form from the global converter, not a per-property override
 
 Unlike `MastheadEnvelope.RuleCoverage`/`DigestEnvelope.State` (which opt out of the global naming
@@ -290,6 +359,40 @@ client reads the exact word, e.g. `"NotYetAnalyzed"`), `SessionTapeStepKind` and
 exact English word" requirement here, so both fall through to the
 `JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` `ApiHost.Build` already registers globally,
 the same as `AppStateKind`. A step reads `"toolCall"`/`"mcpCall"`/etc., never `"ToolCall"`.
+
+### `StepEvidenceLookup` matches a step to its raw event by the same field each envelope already carries, not a new identity
+
+Neither `Turn` nor `ToolCall` carries a foreign key back to the `RawEvent` that produced it
+(`AecoPostMortem.Data/CLAUDE.md` — the payload stays authoritative and nothing lifts an envelope's
+own `id` into a NORMALIZED column). `StepEvidenceLookup.Find` instead matches a step's own
+`SessionTapeStep.StepId` against exactly the field `SessionRecording.cs` already documents as that
+step's source: a turn's `assistant.turn_start.data.turnId`, a tool call's
+`tool.execution_start.data.toolCallId`, or a skill/hook's own envelope `id`. This is a lookup by an
+identity that already exists, not a second scheme invented for this story.
+
+### A step's Raw tab answers 200 with `Skipped`, never a 404 — the edge case's own words
+
+`StepEvidenceLookup.Find` cannot fail to find *a* result — when no raw event matches, it returns
+`RawStepEventEnvelope.Skipped` and `ThinkingEnvelope.Unavailable`, both with a stated reason, rather
+than `null`. `ApiHost.GetStepEvidence` returns `null` (→ 404) only when the *session* does not
+exist; a step id that matches nothing within a real session still gets 200 with the skipped state.
+This mirrors `SilentCheckEnvelope`'s own discipline of never synthesising an entry, in the opposite
+direction: here the type always produces *something*, because "shows that fact rather than an empty
+panel" (the story's own edge case) requires an explicit value for a client to render, not an HTTP
+status a client would have to interpret.
+
+### Thinking is resolved only for a Prompt step, and only from the main thread
+
+`StepEvidenceLookup.FindThinking` scans every `assistant.message` between a turn's own
+`turn_start` and the next `turn_start` (or end of session) for `reasoningText`
+(readable) or `reasoningOpaque` (provider-encrypted, never readable) — the exact distinction the
+mockup's own footer explains (a measured 3.5%–90.3% split depending on model). Only main-thread
+messages count (`envelope.AgentId is null`), the same ownership split
+`Ingestion.ExecutionRecordBuilder.WalkTurns` applies to its own output-token accumulation: a
+subagent's reasoning belongs to its own step's turn context, not its parent's. Every other step kind
+(`ToolCall`/`McpCall`/`Skill`/`Hook`) answers `Unavailable` with a fixed reason — "Thinking is
+recorded per assistant message" — never attempting a lookup, matching the mockup's own wording for
+selecting a non-assistant step.
 
 ## Status
 
@@ -331,8 +434,29 @@ document. The web page targets the route ahead of it.
 second real endpoint: FR-21's masthead and tape, read through `Data.Execution` and assembled by
 `Findings.SessionRecording.Build`. `web/src/routes/SessionPage.tsx` is the client. Returns 404 for a
 session id the store carries no `Session` row for; a session with rows but no steps still serves its
-masthead with an empty `Steps` list. Finding chips (a different data path — findings joined per
-session) and the inspector are S-52/S-53, not served here.
+masthead with an empty `Steps` list. It now also serves `SessionEnvelope.Findings` — FR-21 part 2 of
+3's chip row (S-52, issue #16), assembled from `Findings.SessionFindings.For` — though
+`ApiHost.GetSession` still passes an empty `Finding` list to it today, the same "not yet wired to a
+live corpus" gap `/api/digest` documents above: a chip row is real, but a real browser sees an empty
+one until a later story runs every check orchestrator against the live store.
+
+FR-21 part 3 of 3 (S-53, issue #17) added `Status` (`SessionRecordingStatusEnvelope`) to the same
+envelope: `GetSession` now also runs the session's own RAW events through `Ingestion.
+ExecutionRecordBuilder` for its `SpawnResolutionCheck` alone (see the non-obvious decision above),
+so a session with an unresolved subagent spawn is served as `reconstructionFailed` and one with no
+recorded end as `ingestIncomplete`, distinctly from the ordinary `complete` case.
+
+`GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceEnvelope.cs`,
+`StepEvidenceLookup.cs`, `ApiHost.GetStepEvidence`, S-52, issue #16) is the third real endpoint:
+FR-21 part 2 of 3's inspector — the Thinking and Raw tabs for one selected step, resolved straight
+from the session's own `RawEvent`s. Unlike the session/digest endpoints, this one needs no
+not-yet-wired caveat: `StepEvidenceLookup` reads `RawEvent` rows that already exist the moment a
+session has been ingested, so this endpoint is fully live against any real store today. Returns 404
+only when `sessionId` names no session at all; a step whose raw event cannot be found still answers
+200 with `RawStepEventEnvelope.Skipped` (never a 404) — "shows that fact rather than an empty panel"
+is this story's own edge case, and a 404 would have forced the client to guess why. The Detail tab
+needs no endpoint of its own: `web/src/routes/SessionPage.tsx` renders it straight from the tape
+step already in hand.
 
 `SessionTapeStepEnvelope.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) carry a
 `SessionTapeStepKind.Skill` step's plugin straight across from `Findings.SessionTapeStep` — no

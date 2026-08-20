@@ -222,6 +222,82 @@ public sealed class SessionRecordingTests
         Assert.Null(mainThreadStep.AgentId);
     }
 
+    /// <summary>FR-21, part 3 of 3 (S-53, issue #17), Scenario 1: a session that has recorded its
+    /// end and had no reconstruction problem reads as final.</summary>
+    [Fact]
+    public void A_session_that_ended_cleanly_reads_as_complete()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: "2026-08-16T10:10:00Z");
+
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        Assert.IsType<SessionRecordingStatus.Complete>(recording.Status);
+    }
+
+    /// <summary>Scenario 3: a session with no recorded end has not concluded — nothing about it,
+    /// including today's masthead and tape figures, is the final picture yet.</summary>
+    [Fact]
+    public void A_session_with_no_recorded_end_reads_as_ingest_incomplete()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: null);
+
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        Assert.IsType<SessionRecordingStatus.IngestIncomplete>(recording.Status);
+    }
+
+    /// <summary>Scenario 4: a session that ended but whose reconstruction could not resolve every
+    /// spawn states why, and what was skipped — never a bare count with no explanation.</summary>
+    [Fact]
+    public void A_session_whose_reconstruction_left_a_spawn_unresolved_reads_as_reconstruction_failed_and_names_what_was_skipped()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: "2026-08-16T10:10:00Z");
+        var spawnResolution = SpawnResolutionCheckEntry(examined: 5, unresolved: 2);
+
+        var recording = SessionRecording.Build(session, [], [], [], [], [], spawnResolution);
+
+        var failed = Assert.IsType<SessionRecordingStatus.ReconstructionFailed>(recording.Status);
+        var skipped = Assert.Single(failed.Skipped);
+        Assert.Contains("2", skipped);
+        Assert.Contains("5", skipped);
+    }
+
+    /// <summary>A clean reconstruction (no unresolved spawns) reads as complete, not failed — a
+    /// zero-finding check is a clean run, the same "Ran with FindingCount 0 is clean" discipline
+    /// <c>CheckRegistryEntry</c> documents elsewhere.</summary>
+    [Fact]
+    public void A_session_whose_reconstruction_resolved_every_spawn_reads_as_complete()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: "2026-08-16T10:10:00Z");
+        var spawnResolution = SpawnResolutionCheckEntry(examined: 5, unresolved: 0);
+
+        var recording = SessionRecording.Build(session, [], [], [], [], [], spawnResolution);
+
+        Assert.IsType<SessionRecordingStatus.Complete>(recording.Status);
+    }
+
+    /// <summary>An incomplete session takes priority over a reconstruction problem — the broader,
+    /// more urgent claim wins, the same ordering <c>ProcessDigest.Build</c> gives
+    /// <c>IngestInProgress</c> over its own analysis-state check.</summary>
+    [Fact]
+    public void An_incomplete_session_takes_priority_over_a_reconstruction_failure()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: null);
+        var spawnResolution = SpawnResolutionCheckEntry(examined: 5, unresolved: 2);
+
+        var recording = SessionRecording.Build(session, [], [], [], [], [], spawnResolution);
+
+        Assert.IsType<SessionRecordingStatus.IngestIncomplete>(recording.Status);
+    }
+
+    static CheckRegistryEntry SpawnResolutionCheckEntry(int examined, int unresolved) => new()
+    {
+        CheckId = "unresolvable-spawn",
+        Status = CheckRunStatus.Ran,
+        Population = examined,
+        FindingCount = unresolved,
+    };
+
     static Session SessionWith(
         string startedAt,
         string? endedAt,

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using AecoPostMortem.Data;
 using AecoPostMortem.Data.Execution;
 using AecoPostMortem.Findings;
 using Microsoft.AspNetCore.Builder;
@@ -170,6 +171,96 @@ public sealed class SessionRouteTests
         }
     }
 
+    /// <summary>FR-21 part 3 of 3 (S-53, issue #17), Scenario 3: a session with no recorded end
+    /// states that it is incomplete rather than serving its partial tape as final.</summary>
+    [Fact]
+    public async Task A_session_with_no_recorded_end_is_served_as_ingest_incomplete()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s3",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s3/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s3"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.IsType<SessionRecordingStatusEnvelope.IngestIncomplete>(envelope!.Status);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>Scenario 4: a session whose reconstruction leaves a subagent spawn unresolved
+    /// states that reconstruction failed and what was skipped — read from the session's own RAW
+    /// events, the same events <c>ExecutionRecordBuilder</c> reconstructs from at ingest time.</summary>
+    [Fact]
+    public async Task A_session_with_an_unresolvable_spawn_is_served_as_reconstruction_failed()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s4",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = "2026-08-16T10:10:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s4/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.SaveChanges();
+        }
+
+        // A subagent.started event whose toolCallId never appears as a task tool.execution_start's
+        // own toolCallId — ExecutionRecordBuilder counts it as an unresolvable spawn (Ingestion's
+        // own SpawnResolutionCheck), never silently drops it.
+        const string payload = """{"id":"e1","data":{"toolCallId":"orphan-agent"}}""";
+        using (var context = temporary.Store.Open())
+        {
+            context.RawEvents.Add(new RawEvent(
+                "s4", 0, "subagent.started", "2026-08-16T10:00:05Z", "0.0.339",
+                @"~/.copilot/session-state/s4/events.jsonl", 0,
+                RawPayload.ContentHashOfText(payload), payload));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s4"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var failed = Assert.IsType<SessionRecordingStatusEnvelope.ReconstructionFailed>(envelope!.Status);
+            Assert.Single(failed.Skipped);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     [Fact]
     public async Task An_unknown_session_id_is_reported_as_not_found()
     {
@@ -182,6 +273,103 @@ public sealed class SessionRouteTests
         {
             using var client = HttpClientFor(app);
             var response = await client.GetAsync(ApiHost.SessionRoute("no-such-session"), Cancellation);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    [Fact]
+    public async Task A_tool_calls_raw_event_is_served_verbatim()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s1",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.RawEvents.Add(new RawEvent(
+                "s1", 1, "tool.execution_start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-1",
+                """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var evidence = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "tc1", SessionTapeStepKind.ToolCall), ClientOptions, Cancellation);
+
+            Assert.NotNull(evidence);
+            var raw = Assert.IsType<RawStepEventEnvelope.Present>(evidence!.Raw);
+            Assert.Equal("tool.execution_start", raw.EventType);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    [Fact]
+    public async Task A_step_with_no_matching_raw_event_reports_skipped_not_a_404()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s1",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var evidence = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "tc-missing", SessionTapeStepKind.ToolCall), ClientOptions, Cancellation);
+
+            Assert.NotNull(evidence);
+            Assert.IsType<RawStepEventEnvelope.Skipped>(evidence!.Raw);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    [Fact]
+    public async Task Step_evidence_for_an_unknown_session_is_reported_as_not_found()
+    {
+        using var temporary = new TemporaryStore();
+        temporary.Store.Open().Dispose();
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var response = await client.GetAsync(
+                ApiHost.StepEvidenceRoute("no-such-session", "tc1", SessionTapeStepKind.ToolCall), Cancellation);
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }

@@ -28,7 +28,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
-| `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding` |
+| `SessionRecording.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTapeStepKind`, `SessionTapeStep`, `SessionTape`, `SessionMasthead`, `SessionRecording` — the Flight Recorder's masthead and time-ordered tape, built from plain `Data.Execution` rows, not a `Finding`. FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and `SessionRecording.Status`, plus an optional `CheckRegistryEntry? spawnResolution` parameter on `Build` |
+| `SessionFindings.cs` | FR-21, part 2 of 3 (S-52, issue #16): `SessionFindingChip`, `SessionFindings` — the chip row's own data path, joining `Finding.Recurrence.Occurrences` to one session id, distinct from `SessionRecording`'s tape |
 | `ContradictionCheck.cs` | FR-43 (S-38, issue #47): orchestrates `Rules.ContradictionCheck` — groups sessions by rule-set version before calling in (never comparing statements from two versions), wraps the result in `ContradictionCheck.Result` (`Candidates`, a required `Provenance` always `Inferred`, and the `CheckRegistryEntry`), `CheckId = "contradiction-check"`. Not a `Finding`-producing check — see below |
 | `SubagentAttribution.cs` | FR-49 (S-43, issue #53): `SubagentRuleDisplay` — closed to `Nothing` (the default) or an explicit, caller-stated `AssumedInherited` (always `Provenance.Inferred`, computed not settable) — and `SubagentObservedContext.From(Agent, taskPrompt, sessionSkills)`, the subagent's own spawn description, task prompt and skill invocations, always `Provenance.Observed`. Neither type infers or guesses a rule set; not a `Finding` |
 
@@ -237,6 +238,25 @@ are queryable (`DerivedSchema.EnsureCurrent` creates them on open), they are sim
 later story's ETL populates them, so `Api.ApiHost.GetSession` reads them today exactly as it would
 once that writer exists — no separate code path.
 
+### `SessionRecordingStatus` is a closed union decided inside `Build`, from inputs the caller already resolved
+
+FR-21 part 3 of 3 (S-53, issue #17): whether a session's masthead and tape are ready to be read as
+final is not a boolean a caller could forget to check — `SessionRecordingStatus` is a closed
+three-shape union behind a private constructor, the same mechanism `SessionTokenFigures` already
+uses for its own two shapes. `Build` computes it itself rather than taking it as a caller-supplied
+value outright, because both of its inputs are already in `Build`'s own parameter list or already on
+`Session`: `session.EndedAt is null` (no new parameter — `Session` already carries this) is checked
+first, matching `ProcessDigest.Build`'s own "the more urgent, more specific claim wins" ordering for
+`MastheadCounters.IngestInProgress` over its analysis-state check — while a session has not
+concluded, nothing here can be trusted as final, not even a reconstruction diagnosis over whatever
+partial data has arrived so far. Only then is the optional `spawnResolution` parameter (FR-9's own
+`Ingestion.SpawnResolutionCheck`, an already-resolved plain input, `null` when no reconstruction
+check was run) consulted: a `FindingCount > 0` reads as `ReconstructionFailed`, carrying `Skipped` —
+plain English, never a bare count with no explanation, the same "never a percentage without the
+count that produced it" discipline this project applies to a Waste finding's rate. Every existing
+call site that supplies only six arguments still compiles and still reads `Complete` for a session
+with a recorded end, since `spawnResolution` defaults to `null`.
+
 `SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": Copilot's event
 log carries no separate prompt entity, and `Turn` itself carries no message text
 (`AecoPostMortem.Data/CLAUDE.md` — "messages are read from RAW"), so a prompt step's `Label` is the
@@ -255,12 +275,40 @@ tie-break (PRD §3.8) — two entities can share a timestamp, never a `(kind, id
 session. `SessionTape.HasSteps` is computed from `Steps.Count`, never a second stored flag: an empty
 list already states Scenario 3's "no steps were recorded" on its own.
 
+### A finding chip's "count" is `ProcessDigest.SessionsAffected`, not a per-check evidence lookup
+
+The mockup this story worked from (`docs/product-superpowers/discovery/mockups/flight-recorder.html`)
+shows each chip carrying a different kind of number — "17 failed tool calls", "13× same file
+re-read", "8% rule adherence" — each drawn from that specific check's own evidence shape. Building
+that generically would mean `SessionFindings.For` knowing every check's `EvidenceItem.Field`
+convention by name, which is exactly the kind of check-specific knowledge this project's other
+generic surfaces (`SilentCheckEnvelope`, `ProcessDigest`) deliberately avoid. `SessionFindingChip.
+SessionsAffected` instead reuses `ProcessDigest.SessionsAffected(Finding)` verbatim — the one figure
+every finding class already carries the same way, already trusted as the digest's own ranking key.
+This is a narrower reading of "with its count" than the mockup's own bespoke-per-chip numbers; a
+future story that wants the mockup's exact per-check figures would extend this chip's shape, not
+change how it is joined to a session.
+
+### `SessionFindings.For` joins on `Recurrence.Occurrences`, not on any bare `SessionId` field
+
+`Finding` deliberately carries no `SessionId` (this file's own "the finding record has no `Id` and
+no `SessionId`" note) — a finding's only session-scoped data is `Recurrence.Occurrences`. `For`
+therefore matches by scanning `Occurrences` for the session id, the same join `ProcessDigest`
+implicitly relies on when it ranks by `SessionsAffected`. Both an Inferred finding and one the
+operator already rejected still produce a chip here — provenance and response are for the chip's
+own rendering (`web/src/routes/SessionPage.tsx`'s `data-provenance` attribute) to read, not for this
+join to filter on; FR-21's Scenario 3 says "each finding affecting this session," with no carve-out
+for provenance or operator response.
+
 ### `ProcessDigest.Build` takes plain, already-resolved inputs — the same reason it can prove it never scans
 
 S-36's own edge case says the masthead's totals are the one place this surface could scan the corpus,
 and it must not (counting a million rows measured 126 ms on SQLite and 118 ms on Postgres —
 `docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-latency.md`). `MastheadCounters`
 is therefore a plain input record — "the stored counters maintained at ingest", not a live count —
+(the same guarantee is enforced again one layer out, where it actually costs something: this project
+has no `Data` reference at all, so `AecoPostMortem.Api`'s `MastheadEnvelopeStructureTests` guards the
+served masthead, which does sit in a project that can reach the store)
 the same reasoning `HookFailureFinding.Build` and `FailedToolCallsFinding` give for taking plain
 inputs instead of reading through `Data` directly: no code in this repository yet writes those
 counters at ingest time, so the caller (a later story) supplies them. `ProcessDigestStructureTests`
@@ -664,8 +712,27 @@ landed: `SessionMasthead` states identity, repository, branch, CLI version, elap
 five step-population counts; `SessionTape` orders every `Prompt`/`Hook`/`Skill`/`ToolCall`/`McpCall`
 step by wall-clock time with its offset from session start, and states plainly when it carries none.
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
-`web/src/routes/SessionPage.tsx`. Finding chips (joining findings per session — a different data
-path from the tape) and the inspector/Detail/Thinking/Raw tabs are S-52 and S-53, not built here.
+`web/src/routes/SessionPage.tsx`.
+
+`SessionFindings` (issue #16, S-52, FR-21 part 2 of 3) — the chip row's own data path — has landed:
+`SessionFindings.For(sessionId, findings)` filters to findings whose `Recurrence.Occurrences` names
+that session and pairs each with `ProcessDigest.SessionsAffected` for the chip's own "with its
+count" figure (see "Non-obvious decisions" below). `AecoPostMortem.Api.SessionEnvelope.Findings`
+consumes it; nothing yet runs every check orchestrator against the live store and hands the results
+here — `ApiHost.GetSession` passes an empty `Finding` list today, the same "not yet wired to a live
+corpus" gap `ProcessDigest.Build`'s own status note documents for its own `findings` parameter. The
+inspector's Detail/Thinking/Raw tabs (same story) are built in `AecoPostMortem.Api`
+(`StepEvidenceLookup`, `StepEvidenceEnvelope`) rather than here — they read a session's own
+`RawEvent`s directly, not a `Finding`, so they have no reason to touch this project.
+
+`SessionRecordingStatus` (issue #17, S-53, FR-21 part 3 of 3) closes the remaining gap: virtualised
+rendering and full keyboard reachability at scale are `web/`'s own job (`web/src/session/Tape.tsx`),
+but the two non-happy states — a session still ingesting, and one whose reconstruction left a
+subagent spawn unresolved — are decided here, from `Session.EndedAt` and an already-resolved
+`Ingestion.SpawnResolutionCheck` respectively (see the non-obvious decision above). `AecoPostMortem.
+Api.ApiHost.GetSession` is the first and only caller that supplies a real `spawnResolution` value,
+by running the session's own RAW events through `Ingestion.ExecutionRecordBuilder` purely for that
+diagnostic (`AecoPostMortem.Api/CLAUDE.md`).
 
 `SessionTapeStep.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) close the one gap S-08 left
 in `SessionTapeStepKind.Skill`'s own step: the kind, ordering and lane attribution

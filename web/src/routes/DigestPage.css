@@ -1,3 +1,8 @@
+.digest-page__state {
+  margin: 1rem 0 0;
+  color: #5b6470;
+}
+
 .digest-page__findings {
   margin: 1rem 0 0;
   padding: 0;

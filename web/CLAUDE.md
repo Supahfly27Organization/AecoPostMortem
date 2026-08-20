@@ -24,10 +24,11 @@ passing `--prefix`, for the same reason.
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render |
 | `src/api/useRulesInventory.ts` | the fetch-per-`versionHash` hook `RulesInventoryPage` reads, mirroring `useSession`'s re-fetch-on-change shape rather than `useDigest`'s fetch-once |
 | `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established |
-| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents |
+| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below |
 | `src/api/useDigest.ts` | the fetch-once-on-mount hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape |
 | `src/digest/Masthead.tsx` | FR-41's corpus masthead (S-36, issue #44): sessions, span, repositories, events, tool calls and rule coverage, every figure read straight off `MastheadEnvelope`'s ingest-time counters. Marks itself `data-provisional` mid-ingest and says an empty corpus has no span |
-| `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed |
+| `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed |
+| `src/digest/SessionStrip.tsx` | Mockup parity item #2 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`): one cell per session in `masthead.repositoryScope.sessionIds`, lit where a finding's own `recurrence.occurrences` touched that session — the mockup's `.strip`, ported. Hidden under 820px, mirroring the mockup's own breakpoint |
 | `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone. FR-39 (S-35, issue #43) added `data-emphasis="prominent"` on the percentage span, the marker `MonitorComparisonBlock.tsx`'s own session count shares |
 | `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count |
 | `src/digest/ProvenanceBadge.tsx` | PRD §3.8's three provenance levels, rendered distinguishably — a `data-provenance` attribute drives a distinct colour per level, alongside the badge's own text label |
@@ -203,6 +204,25 @@ rather than against whatever length each finding's recurrence key happens to be.
 `RecurrenceStrip` still names the individual sessions: the count ranks, the names explain. The number
 itself comes from the envelope (`FindingEnvelope.SessionsAffected`), never recounted here from
 `recurrence.occurrences` — see `AecoPostMortem.Api/CLAUDE.md` for why the server owns it.
+
+### The per-finding session strip is scoped to the selected repository, not the whole corpus
+
+Mockup parity item #2's own mockup (`docs/product-superpowers/discovery/mockups/digest.html`)
+assumes one corpus, so its strip's "N" is simply every session the mockup knows about. This app's
+digest is repository-scoped (PRD Part 8 Q5) and every ranked finding's own `recurrence.occurrences`
+is already a subset of the *selected repository's* sessions, never the whole corpus
+(`AecoPostMortem.Findings/CLAUDE.md`'s remarks on `ProcessDigest.Build`'s scoped `findings`
+parameter) — `MastheadEnvelope.sessionCount` deliberately counts every session in the store
+regardless of repository (`AecoPostMortem.Api/CLAUDE.md`'s `GetDigest` remarks), so it is the wrong
+denominator for this strip. `SessionStrip` is instead handed `masthead.repositoryScope.sessionIds`
+(the new field this story added, `RepositoryScopeEnvelope.sessionIds`), the exact session set every
+check `ApiHost.GetDigest` runs was scoped to — a finding's own occurrences can therefore always be
+positioned against it. This was confirmed as a real prerequisite gap during this story's own
+brainstorming pass, not assumed: neither `MastheadEnvelope` nor `DigestEnvelope` exposed any ordered
+session list before this change, only a bare `sessionCount`, so there was no way to answer "which of
+the N sessions" at all — closing it needed a small, real backend addition
+(`Findings.RepositoryScope.SessionIds`, `AecoPostMortem.Api/CLAUDE.md`'s matching note), not a
+pure-frontend change as the item's original prioritisation-doc estimate assumed.
 
 ### Nothing on this page counts anything
 
@@ -382,6 +402,20 @@ designed states' distinct wording; S-54 (issue #45) built row expansion, the rec
 repository scope contract and this route's actual UI. `/api/digest` is now wired to real derived data
 (`ApiHost.GetDigest`, `AecoPostMortem.Api/CLAUDE.md`) — a real browser today renders the live corpus'
 masthead and ranked findings with no change to any file in this directory.
+
+Mockup parity item #2 (the per-finding session strip) added `digest/SessionStrip.tsx` and
+`RepositoryScopeEnvelope.sessionIds`: every ranked row now renders a small lit/unlit cell bar,
+visible while collapsed, positioned against `masthead.repositoryScope.sessionIds` — see "The
+per-finding session strip is scoped to the selected repository, not the whole corpus" above for why
+that field, not `sessionCount`, is the right denominator. This closed a real prerequisite gap this
+story's own brainstorming pass found before writing any frontend code: the item's original
+prioritisation-doc estimate (Effort 4/5, "pure frontend, no backend change") assumed
+`RecurrenceEnvelope.occurrences` alone was enough, but neither `MastheadEnvelope` nor
+`DigestEnvelope` exposed any ordered, full session list before this change — only a bare
+`sessionCount` — so there was no way to answer "which of the N sessions" at all. Verified against
+the live 35-session, two-repository reference corpus in a real browser: the strip renders on every
+row, cell count matches the selected repository's own session count, and lit positions match each
+finding's `sessionsAffected` figure.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
 `session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,

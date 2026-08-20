@@ -56,7 +56,7 @@ describe('FindingRow', () => {
   it('is collapsed by default, showing no evidence or suggestion yet', () => {
     render(
       <ul>
-        <FindingRow finding={waste()} />
+        <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -72,7 +72,7 @@ describe('FindingRow', () => {
   it('shows how many sessions it touched without needing to be expanded first', () => {
     render(
       <ul>
-        <FindingRow finding={waste({ sessionsAffected: 30 })} />
+        <FindingRow finding={waste({ sessionsAffected: 30 })} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -86,7 +86,7 @@ describe('FindingRow', () => {
   it('reads a single-session finding as one session, not as "1 sessions"', () => {
     render(
       <ul>
-        <FindingRow finding={waste({ sessionsAffected: 1 })} />
+        <FindingRow finding={waste({ sessionsAffected: 1 })} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -101,7 +101,7 @@ describe('FindingRow', () => {
     const user = userEvent.setup()
     render(
       <ul>
-        <FindingRow finding={waste()} />
+        <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -117,7 +117,7 @@ describe('FindingRow', () => {
     const user = userEvent.setup()
     render(
       <ul>
-        <FindingRow finding={waste()} />
+        <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -133,7 +133,7 @@ describe('FindingRow', () => {
     const user = userEvent.setup()
     render(
       <ul>
-        <FindingRow finding={waste({ suggestion: { state: 'absent' } })} />
+        <FindingRow finding={waste({ suggestion: { state: 'absent' } })} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -151,7 +151,7 @@ describe('FindingRow', () => {
     const user = userEvent.setup()
     render(
       <ul>
-        <FindingRow finding={adherence()} />
+        <FindingRow finding={adherence()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -172,7 +172,7 @@ describe('FindingRow', () => {
     const user = userEvent.setup()
     render(
       <ul>
-        <FindingRow finding={waste()} />
+        <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -187,7 +187,7 @@ describe('FindingRow', () => {
   it('does not show the percentage until the row is expanded, so it never appears without its resolution', () => {
     render(
       <ul>
-        <FindingRow finding={adherence()} />
+        <FindingRow finding={adherence()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -199,7 +199,7 @@ describe('FindingRow', () => {
     const user = userEvent.setup()
     render(
       <ul>
-        <FindingRow finding={waste()} />
+        <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
       </ul>,
     )
 
@@ -209,5 +209,21 @@ describe('FindingRow', () => {
 
     expect(screen.queryByText(/no suggestion is offered/i)).not.toBeInTheDocument()
     expect(screen.queryByText('Name `rg` instead of repeated `view` calls.')).not.toBeInTheDocument()
+  })
+
+  // Mockup parity item #2: the per-finding session strip is visible on the collapsed row, not
+  // behind expansion the way the recurrence strip is — the whole point is scanning many rows at
+  // once without opening any of them.
+  it('shows the session strip on the collapsed row', () => {
+    render(
+      <ul>
+        <FindingRow finding={waste()} sessionIds={['session-1', 'session-2', 'session-3']} />
+      </ul>,
+    )
+
+    const summary = screen.getByRole('button', { expanded: false })
+    const strip = summary.querySelector('[role="img"]')
+
+    expect(strip).toHaveAttribute('aria-label', '2 of 3 sessions affected')
   })
 })

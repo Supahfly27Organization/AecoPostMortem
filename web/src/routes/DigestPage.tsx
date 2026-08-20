@@ -80,7 +80,11 @@ export function DigestPage() {
 
       <ul className="digest-page__findings">
         {digest.rankedFindings.map((finding) => (
-          <FindingRow key={`${finding.class}:${finding.recurrence.key}`} finding={finding} />
+          <FindingRow
+            key={`${finding.class}:${finding.recurrence.key}`}
+            finding={finding}
+            sessionIds={digest.masthead.repositoryScope.sessionIds}
+          />
         ))}
       </ul>
     </div>

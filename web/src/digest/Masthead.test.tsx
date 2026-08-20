@@ -15,6 +15,7 @@ function counters(overrides: Partial<MastheadEnvelope> = {}): MastheadEnvelope {
     repositoryScope: {
       selectedRepository: 'aeco/AecoPostMortem',
       availableRepositories: ['aeco/AecoPostMortem'],
+      sessionIds: [],
     },
     ...overrides,
   }

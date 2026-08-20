@@ -113,6 +113,7 @@ public sealed class DigestEnvelopeTests
     {
         SelectedRepository = "aeco/AecoPostMortem",
         AvailableRepositories = ["aeco/AecoPostMortem"],
+        SessionIds = ["session-1", "session-2"],
     };
 
     static Finding InferredFinding(string toolName, params string[] sessionIds) => new()
@@ -215,6 +216,7 @@ public sealed class DigestEnvelopeTests
         {
             SelectedRepository = "aeco/AecoPostMortem",
             AvailableRepositories = ["aeco/AecoLedger", "aeco/AecoPostMortem", "aeco/Upfront"],
+            SessionIds = ["session-1", "session-2"],
         };
 
         var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], scope);
@@ -225,6 +227,28 @@ public sealed class DigestEnvelopeTests
         Assert.Equal(
             ["aeco/AecoLedger", "aeco/AecoPostMortem", "aeco/Upfront"],
             envelope.Masthead.RepositoryScope.AvailableRepositories);
+    }
+
+    // Mirrors RepositoryScope exactly (this file's own established pattern for
+    // SelectedRepository/AvailableRepositories) — a per-finding session strip needs the scope's
+    // session ids on the wire, in the same order the domain type carries them.
+    [Fact]
+    public void The_masthead_envelope_carries_the_scopes_session_ids_in_order()
+    {
+        var scope = new RepositoryScope
+        {
+            SelectedRepository = "aeco/AecoPostMortem",
+            AvailableRepositories = ["aeco/AecoPostMortem"],
+            SessionIds = ["session-3", "session-1", "session-2"],
+        };
+
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], scope);
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        Assert.Equal(
+            ["session-3", "session-1", "session-2"],
+            envelope.Masthead.RepositoryScope.SessionIds);
     }
 
     [Fact]
@@ -284,7 +308,7 @@ public sealed class DigestEnvelopeTests
             },
             new CheckRegistry { Entries = [] },
             [],
-            new RepositoryScope { SelectedRepository = null, AvailableRepositories = [] });
+            new RepositoryScope { SelectedRepository = null, AvailableRepositories = [], SessionIds = [] });
 
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 

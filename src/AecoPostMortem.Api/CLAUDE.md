@@ -9,7 +9,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-41 (issue #44, S-36) added `SessionsAffected`, the served ranking key; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
-| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings` |
+| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
@@ -264,6 +264,18 @@ every other masthead field. It does not re-derive or re-filter anything — `Dig
 `RankedFindings` mapping is untouched by which repository is selected, because the caller of
 `ProcessDigest.Build` (`AecoPostMortem.Findings/CLAUDE.md`) already scoped `findings` to one
 repository before this envelope is ever assembled.
+
+Mockup parity item #2 (the per-finding session strip, `docs/product-superpowers/discovery/2026-08-21-
+ui-mockup-parity.md`) added a third field the same way: `SessionIds`, mirroring `RepositoryScope.
+SessionIds` verbatim. This closed a real gap the item's own scoring had missed — neither this
+envelope nor `MastheadEnvelope` exposed an ordered, full session list before this change, only a bare
+`SessionCount`, so a client had no way to know *which* of the scope's own sessions a finding's
+`Recurrence.Occurrences` touched, only how many. `ApiHost.BuildRepositoryScope` (below) is where the
+ordering is decided — chronological by the session's own `StartedAt`, never by session id text (the
+same PR #108/#112 lesson `RuleSetVersioning`/`RuleSetVersionAdjacency` already learned for exactly
+this reason, `AecoPostMortem.Rules/CLAUDE.md`) — and `GetDigest` now reuses that one ordered list to
+build `scopedSessionIds` too, rather than re-deriving the same repository filter a second time: the
+served strip positions and the sessions every check ranks over can therefore never disagree.
 
 ### `RulesInventoryEnvelope` serves the status counts rather than letting a client recount them
 
@@ -831,3 +843,17 @@ RuleSetVersion.FirstSessionStartedAt` (`Rules/CLAUDE.md`'s own remarks) is the f
 field instead of `FirstSessionId` text. Confirmed against the live corpus, before and after: of 22
 real consecutive version pairs in the dominant repository, 17 flipped from wrongly-refused (404) to
 correctly succeeding.
+
+Mockup parity item #2 (the per-finding session strip) added `RepositoryScope.SessionIds`/
+`RepositoryScopeEnvelope.SessionIds` — every session id in the currently selected repository,
+chronologically ordered by `Session.StartedAt` (`ApiHost.BuildRepositoryScope`, the "`RepositoryScope
+Envelope` mirrors..." remark above). This was a genuine, verified gap, not the pure-frontend change
+the mockup-parity prioritisation doc's own effort estimate assumed: before this change, neither
+`MastheadEnvelope` nor `DigestEnvelope` served any ordered, full session list, only a bare
+`SessionCount` — there was no way for a client to know *which* positions in a strip of N sessions
+should be lit. `GetDigest` now builds `scopedSessionIds` from `repositoryScope.SessionIds` directly
+rather than re-deriving the same repository filter a second time, so the served strip and the
+sessions every check ranks over are structurally guaranteed to agree. Verified against the live
+35-session, two-repository reference corpus: a real browser renders a real chip bar (dominant
+repository, `web/src/digest/SessionStrip.tsx`) whose cell count matches that repository's own session
+count and whose lit positions match each finding's own `sessionsAffected` figure.

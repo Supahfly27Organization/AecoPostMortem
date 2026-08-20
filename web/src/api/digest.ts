@@ -122,6 +122,11 @@ export type FindingEnvelope =
 export interface RepositoryScopeEnvelope {
   selectedRepository: string | null
   availableRepositories: string[]
+  /** Every session id in this scope, chronologically ordered — mirrors
+   * `AecoPostMortem.Findings.RepositoryScope.SessionIds`. A per-finding session strip needs this:
+   * which of the scope's own sessions a finding's `recurrence.occurrences` touched, and in what
+   * position, not only how many. */
+  sessionIds: string[]
 }
 
 export interface MastheadEnvelope {

@@ -3,6 +3,7 @@ import type { FindingEnvelope } from '../api/digest'
 import { AdherenceFigureBlock } from './AdherenceFigureBlock'
 import { ProvenanceBadge } from './ProvenanceBadge'
 import { RecurrenceStrip } from './RecurrenceStrip'
+import { SessionStrip } from './SessionStrip'
 import { SuggestionBlock } from './SuggestionBlock'
 import './FindingRow.css'
 
@@ -15,8 +16,19 @@ import './FindingRow.css'
  * the key the list is ranked by, and its whole purpose is to make a finding touching one session
  * read as an anecdote beside one touching thirty. Behind an expander it could not do that, so it
  * leads the summary at display size rather than annotating it. The full session list is still the
- * expanded `RecurrenceStrip`'s job — the count ranks, the names explain. */
-export function FindingRow({ finding }: { finding: FindingEnvelope }) {
+ * expanded `RecurrenceStrip`'s job — the count ranks, the names explain.
+ *
+ * Mockup parity item #2: `SessionStrip` joins `sessionsAffected` on the collapsed row for the same
+ * reason — which sessions, in what pattern, is also worth scanning without expanding. `sessionIds`
+ * is the caller's `masthead.repositoryScope.sessionIds` (`DigestPage`), the same session set every
+ * ranked finding was scoped to. */
+export function FindingRow({
+  finding,
+  sessionIds,
+}: {
+  finding: FindingEnvelope
+  sessionIds: string[]
+}) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -34,6 +46,7 @@ export function FindingRow({ finding }: { finding: FindingEnvelope }) {
           </span>
         </span>
         <span className="finding-row__key">{finding.recurrence.key}</span>
+        <SessionStrip sessionIds={sessionIds} occurrences={finding.recurrence.occurrences} />
         <ProvenanceBadge provenance={finding.provenance} />
       </button>
 

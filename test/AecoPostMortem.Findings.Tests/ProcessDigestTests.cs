@@ -22,6 +22,7 @@ public sealed class ProcessDigestTests
     {
         SelectedRepository = "aeco/AecoPostMortem",
         AvailableRepositories = ["aeco/AecoPostMortem"],
+        SessionIds = ["session-1", "session-2"],
     };
 
     static CheckRegistry EmptyRegistry() => new() { Entries = [] };
@@ -256,6 +257,7 @@ public sealed class ProcessDigestTests
         {
             SelectedRepository = "aeco/AecoPostMortem",
             AvailableRepositories = ["aeco/AecoLedger", "aeco/AecoPostMortem", "aeco/Upfront"],
+            SessionIds = ["session-1", "session-2"],
         };
 
         var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], scope);
@@ -263,5 +265,26 @@ public sealed class ProcessDigestTests
         Assert.Equal("aeco/AecoPostMortem", digest.Masthead.RepositoryScope.SelectedRepository);
         Assert.Equal(3, digest.Masthead.RepositoryScope.AvailableRepositories.Count);
         Assert.Contains("aeco/AecoPostMortem", digest.Masthead.RepositoryScope.AvailableRepositories);
+    }
+
+    // The strip a per-finding session component would render needs the scope's session ids, in
+    // order — RepositoryScope is an already-resolved plain input (this project's own established
+    // pattern for MastheadCounters/RepositoryScope), so ProcessDigest.Build passes it through
+    // unchanged rather than re-deriving or re-sorting it.
+    [Fact]
+    public void The_masthead_carries_the_scopes_session_ids_verbatim_and_in_the_order_the_caller_gave_them()
+    {
+        var scope = new RepositoryScope
+        {
+            SelectedRepository = "aeco/AecoPostMortem",
+            AvailableRepositories = ["aeco/AecoPostMortem"],
+            SessionIds = ["session-3", "session-1", "session-2"],
+        };
+
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], scope);
+
+        Assert.Equal(
+            ["session-3", "session-1", "session-2"],
+            digest.Masthead.RepositoryScope.SessionIds);
     }
 }

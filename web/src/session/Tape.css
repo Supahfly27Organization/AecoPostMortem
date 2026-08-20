@@ -65,6 +65,11 @@
   min-width: 4.5rem;
 }
 
+.session-tape__plugin {
+  color: #888;
+  font-size: 0.8rem;
+}
+
 .session-tape__empty {
   color: #666;
 }

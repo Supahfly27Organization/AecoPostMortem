@@ -734,6 +734,15 @@ Api.ApiHost.GetSession` is the first and only caller that supplies a real `spawn
 by running the session's own RAW events through `Ingestion.ExecutionRecordBuilder` purely for that
 diagnostic (`AecoPostMortem.Api/CLAUDE.md`).
 
+`SessionTapeStep.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) close the one gap S-08 left
+in `SessionTapeStepKind.Skill`'s own step: the kind, ordering and lane attribution
+(`OwnerKind`/`AgentId`) already worked generically for every step kind since S-08, but the step
+carried only the skill's own name (`Label`) — never its plugin. `BuildStep` now takes the plugin
+pair as two more optional parameters, populated only from the `Skill` loop in `Build`; every other
+step kind still passes neither, so both fields stay `null` there. No new lane-attribution mechanism
+was needed — a skill invoked inside a subagent already got `skill.OwnerKind`/`skill.AgentId` passed
+straight through `BuildStep`, the same as a subagent's tool calls and hooks.
+
 `ContradictionCheck` (issue #47, S-38, FR-43) publishes the third of PRD §3.9's special-purpose
 checks, alongside `Ingestion.MalformedLineCheck` and `Ingestion.SpawnResolutionCheck`: pairwise,
 self-match-excluding, keyword-polarity detection (`Rules.ContradictionCheck`) scoped to one

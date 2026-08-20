@@ -14,6 +14,11 @@ export interface SessionTapeStep {
   kind: SessionTapeStepKind
   stepId: string
   label: string
+  // FR-25 (S-12, issue #21): a 'skill' step's plugin and version, carried alongside `label` (the
+  // skill's own name) rather than folded into it. Null for every other step kind, and for a skill
+  // Copilot recorded no plugin for.
+  pluginName: string | null
+  pluginVersion: string | null
   timestamp: string
   offsetMs: number
   ownerKind: OwnerKind

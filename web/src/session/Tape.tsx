@@ -25,6 +25,17 @@ function formatOffset(offsetMs: number): string {
   return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
+/** FR-25 (S-12, issue #21): a skill step's plugin, alongside its version when both are recorded —
+ * neither is rendered alone, matching `SessionTapeStep.pluginVersion`'s own "never populated
+ * without `pluginName`" contract. */
+function formatPlugin(step: SessionTapeStep): string | null {
+  if (step.pluginName === null) {
+    return null
+  }
+
+  return step.pluginVersion === null ? step.pluginName : `${step.pluginName} v${step.pluginVersion}`
+}
+
 /**
  * FR-21, part 3 of 3 (S-53, issue #17): the tape at scale. Windowing (Scenario 1) and full
  * keyboard reachability (Scenario 2) are the same mechanism here, not two separate features bolted
@@ -170,6 +181,7 @@ export function Tape({
       {visible.map((step, offset) => {
         const index = firstVisible + offset
         const isSelected = index === selectedIndex
+        const plugin = formatPlugin(step)
 
         return (
           <li
@@ -187,6 +199,7 @@ export function Tape({
               <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
               <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
               <span className="session-tape__label">{step.label}</span>
+              {plugin !== null && <span className="session-tape__plugin">{plugin}</span>}
             </button>
           </li>
         )

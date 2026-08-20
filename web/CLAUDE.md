@@ -334,6 +334,15 @@ real chip row's *shape* but an empty one — nothing wires a live `Finding` list
 Thinking/Raw tabs are fully live against any ingested store, since they read `RawEvent` rows
 directly rather than a not-yet-wired derived pipeline.
 
+FR-25 (S-12, issue #21) added `SessionTapeStep.pluginName`/`.pluginVersion` — a `'skill'` step's
+plugin and version, rendered next to its name (`session-tape__plugin`, shown only when
+`pluginName` is non-null; `formatPlugin` in `session/Tape.tsx` — the tape's own row rendering,
+after S-53's extraction — joins the version in only when both are present). A subagent's skill
+already carried `ownerKind`/`agentId` correctly since S-08 (the
+same generic attribution every step kind gets) — this story only closed the plugin/version gap, it
+added no new lane-rendering: the tape still renders one flat, wall-clock-ordered list, and grouping
+steps visually by lane is S-09's job (FR-22), not built here.
+
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there
 rather than shared) and `src/vitest-setup.ts` (jest-dom matchers, and `afterEach(cleanup)` since

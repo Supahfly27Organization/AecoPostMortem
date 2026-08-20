@@ -16,6 +16,8 @@ function buildSteps(count: number): SessionTapeStep[] {
     kind: index % 2 === 0 ? 'prompt' : 'toolCall',
     stepId: `step-${index}`,
     label: `Step ${index}`,
+    pluginName: null,
+    pluginVersion: null,
     timestamp: '2026-08-16T10:00:00Z',
     offsetMs: index * 1_000,
     ownerKind: 'main',

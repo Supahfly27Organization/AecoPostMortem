@@ -115,6 +115,64 @@ public sealed class SessionEnvelopeTests
         Assert.Empty(envelope.Steps);
     }
 
+    /// <summary>S-12, Scenario 1 (FR-25, issue #21): a skill step's plugin name and version travel
+    /// onto the wire alongside its name (<see cref="SessionTapeStepEnvelope.Label"/>), not folded
+    /// into it.</summary>
+    [Fact]
+    public void A_skill_steps_plugin_name_and_version_are_carried_on_the_wire()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var skills = new[]
+        {
+            new Skill
+            {
+                SessionId = "s1",
+                EventId = "sk1",
+                Name = "code-review",
+                InvokedAt = "2026-08-16T10:00:01Z",
+                PluginName = "superpowers",
+                PluginVersion = "6.3.0",
+                OwnerKind = OwnerKind.Main,
+            },
+        };
+
+        var recording = SessionRecording.Build(session, [], [], [], skills, []);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Equal("code-review", step.Label);
+        Assert.Equal("superpowers", step.PluginName);
+        Assert.Equal("6.3.0", step.PluginVersion);
+    }
+
+    /// <summary>S-12, Scenario 2 (FR-25, issue #21): a skill invoked inside a subagent serialises
+    /// its lane attribution (<c>ownerKind: "agent"</c> plus its <c>agentId</c>) rather than the main
+    /// thread's.</summary>
+    [Fact]
+    public void A_skill_invoked_inside_a_subagent_serialises_that_agents_lane()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var skills = new[]
+        {
+            new Skill
+            {
+                SessionId = "s1",
+                EventId = "sk1",
+                Name = "test-driven-development",
+                InvokedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Agent,
+                AgentId = "a1",
+            },
+        };
+
+        var recording = SessionRecording.Build(session, [], [], [], skills, []);
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Equal(OwnerKind.Agent, step.OwnerKind);
+        Assert.Equal("a1", step.AgentId);
+    }
+
     /// <summary>FR-21 part 3 of 3 (S-53, issue #17): a complete session's status serialises to the
     /// closed union's "complete" shape, not a bare boolean.</summary>
     [Fact]

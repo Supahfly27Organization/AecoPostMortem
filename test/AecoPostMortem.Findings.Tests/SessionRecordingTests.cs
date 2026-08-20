@@ -163,6 +163,65 @@ public sealed class SessionRecordingTests
         Assert.Throws<ArgumentNullException>(() => SessionRecording.Build(null!, [], [], [], [], []));
     }
 
+    /// <summary>S-12, Scenario 1 (FR-25, issue #21): a skill step carries its plugin name and
+    /// version, not only the skill's own name (already carried as <see cref="SessionTapeStep.Label"/>).</summary>
+    [Fact]
+    public void A_skill_step_carries_its_plugin_name_and_version()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: null);
+        var skills = new[]
+        {
+            BuildSkill("s1", "sk1", "code-review", "2026-08-16T10:00:01Z", pluginName: "superpowers", pluginVersion: "6.3.0"),
+        };
+
+        var recording = SessionRecording.Build(session, [], [], [], skills, []);
+
+        var step = Assert.Single(recording.Tape.Steps);
+        Assert.Equal("code-review", step.Label);
+        Assert.Equal("superpowers", step.PluginName);
+        Assert.Equal("6.3.0", step.PluginVersion);
+    }
+
+    /// <summary>A skill invoked with no plugin recorded (Copilot's own built-in skills) carries no
+    /// plugin name or version, rather than an empty string standing in for absence.</summary>
+    [Fact]
+    public void A_skill_step_with_no_recorded_plugin_carries_neither_field()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: null);
+        var skills = new[] { BuildSkill("s1", "sk1", "code-review", "2026-08-16T10:00:01Z") };
+
+        var recording = SessionRecording.Build(session, [], [], [], skills, []);
+
+        var step = Assert.Single(recording.Tape.Steps);
+        Assert.Null(step.PluginName);
+        Assert.Null(step.PluginVersion);
+    }
+
+    /// <summary>S-12, Scenario 2 (FR-25, issue #21): a skill invoked inside a subagent is attributed
+    /// to that subagent's lane (<see cref="OwnerKind.Agent"/> plus its <c>AgentId</c>) rather than
+    /// the main thread — the same generic <c>BuildStep</c> attribution every other step kind already
+    /// gets from S-06/S-08, exercised here for <see cref="SessionTapeStepKind.Skill"/> specifically.</summary>
+    [Fact]
+    public void A_skill_invoked_inside_a_subagent_is_attributed_to_that_subagents_lane()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: null);
+        var skills = new[]
+        {
+            BuildSkill("s1", "sk1", "code-review", "2026-08-16T10:00:01Z", ownerKind: OwnerKind.Agent, agentId: "a1"),
+            BuildSkill("s1", "sk2", "test-driven-development", "2026-08-16T10:00:02Z"),
+        };
+
+        var recording = SessionRecording.Build(session, [], [], [], skills, []);
+
+        var subagentStep = Assert.Single(recording.Tape.Steps, step => step.StepId == "sk1");
+        Assert.Equal(OwnerKind.Agent, subagentStep.OwnerKind);
+        Assert.Equal("a1", subagentStep.AgentId);
+
+        var mainThreadStep = Assert.Single(recording.Tape.Steps, step => step.StepId == "sk2");
+        Assert.Equal(OwnerKind.Main, mainThreadStep.OwnerKind);
+        Assert.Null(mainThreadStep.AgentId);
+    }
+
     /// <summary>FR-21, part 3 of 3 (S-53, issue #17), Scenario 1: a session that has recorded its
     /// end and had no reconstruction problem reads as final.</summary>
     [Fact]
@@ -300,13 +359,24 @@ public sealed class SessionRecordingTests
         Outcome = AgentOutcome.Completed,
     };
 
-    static Skill BuildSkill(string sessionId, string eventId, string name, string invokedAt) => new()
+    static Skill BuildSkill(
+        string sessionId,
+        string eventId,
+        string name,
+        string invokedAt,
+        string? pluginName = null,
+        string? pluginVersion = null,
+        OwnerKind ownerKind = OwnerKind.Main,
+        string? agentId = null) => new()
     {
         SessionId = sessionId,
         EventId = eventId,
         Name = name,
         InvokedAt = invokedAt,
-        OwnerKind = OwnerKind.Main,
+        PluginName = pluginName,
+        PluginVersion = pluginVersion,
+        OwnerKind = ownerKind,
+        AgentId = agentId,
     };
 
     static Hook BuildHook(string sessionId, string eventId, string name, string startedAt) => new()

@@ -78,6 +78,63 @@ public sealed class SessionRouteTests
         }
     }
 
+    /// <summary>S-12 (FR-25, issue #21): a skill invocation is served as its own tape step carrying
+    /// its name, plugin and plugin version (Scenario 1), and a skill invoked inside a subagent
+    /// serves that subagent's lane rather than the main thread's (Scenario 2) — read through the
+    /// real <c>Data.Execution.Skill</c> table, the same read path <c>ApiHost.GetSession</c> already
+    /// exercises for every other step kind.</summary>
+    [Fact]
+    public async Task A_reconstructed_sessions_skill_invocations_serve_as_their_own_steps_with_lane_attribution()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s3",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s3/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.Skills.Add(new Skill
+            {
+                SessionId = "s3",
+                EventId = "sk1",
+                Name = "code-review",
+                InvokedAt = "2026-08-16T10:00:01Z",
+                PluginName = "superpowers",
+                PluginVersion = "6.3.0",
+                OwnerKind = OwnerKind.Agent,
+                AgentId = "a1",
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s3"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var step = Assert.Single(envelope!.Steps);
+            Assert.Equal(SessionTapeStepKind.Skill, step.Kind);
+            Assert.Equal("code-review", step.Label);
+            Assert.Equal("superpowers", step.PluginName);
+            Assert.Equal("6.3.0", step.PluginVersion);
+            Assert.Equal(OwnerKind.Agent, step.OwnerKind);
+            Assert.Equal("a1", step.AgentId);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     [Fact]
     public async Task A_session_with_no_recorded_steps_still_serves_its_masthead_with_an_empty_tape()
     {

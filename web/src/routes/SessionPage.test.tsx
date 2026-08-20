@@ -95,11 +95,11 @@ describe('The tape is ordered by real time', () => {
         contextSize: { kind: 'notRecorded' },
       },
       steps: [
-        { kind: 'prompt', stepId: 't1', label: 'Completed', timestamp: '2026-08-16T10:00:00Z', offsetMs: 0, ownerKind: 'main', agentId: null },
-        { kind: 'hook', stepId: 'h1', label: 'pre-commit', timestamp: '2026-08-16T10:00:02Z', offsetMs: 2_000, ownerKind: 'main', agentId: null },
-        { kind: 'skill', stepId: 'sk1', label: 'code-review', timestamp: '2026-08-16T10:00:03Z', offsetMs: 3_000, ownerKind: 'main', agentId: null },
-        { kind: 'mcpCall', stepId: 'tc2', label: 'search_graph', timestamp: '2026-08-16T10:00:04Z', offsetMs: 4_000, ownerKind: 'main', agentId: null },
-        { kind: 'toolCall', stepId: 'tc1', label: 'view', timestamp: '2026-08-16T10:00:05Z', offsetMs: 5_000, ownerKind: 'main', agentId: null },
+        { kind: 'prompt', stepId: 't1', label: 'Completed', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:00Z', offsetMs: 0, ownerKind: 'main', agentId: null },
+        { kind: 'hook', stepId: 'h1', label: 'pre-commit', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:02Z', offsetMs: 2_000, ownerKind: 'main', agentId: null },
+        { kind: 'skill', stepId: 'sk1', label: 'code-review', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:03Z', offsetMs: 3_000, ownerKind: 'main', agentId: null },
+        { kind: 'mcpCall', stepId: 'tc2', label: 'search_graph', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:04Z', offsetMs: 4_000, ownerKind: 'main', agentId: null },
+        { kind: 'toolCall', stepId: 'tc1', label: 'view', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:05Z', offsetMs: 5_000, ownerKind: 'main', agentId: null },
       ],
       status: { kind: 'complete' },
       findings: [],
@@ -159,6 +159,53 @@ describe('A session with no tool calls still renders', () => {
   })
 })
 
+/** S-12, Scenario 1 (FR-25, issue #21): a skill invocation appears as its own step carrying its
+ * name, plugin and plugin version. */
+describe('A skill invocation is its own step', () => {
+  beforeEach(() => {
+    respondWith({
+      masthead: {
+        sessionId: 'session-1',
+        repository: null,
+        branch: null,
+        copilotVersion: '0.0.339',
+        elapsedMs: null,
+        turnCount: 0,
+        toolCallCount: 0,
+        subagentCount: 0,
+        skillCount: 1,
+        modelCount: null,
+        contextSize: { kind: 'notRecorded' },
+      },
+      steps: [
+        {
+          kind: 'skill',
+          stepId: 'sk1',
+          label: 'code-review',
+          pluginName: 'superpowers',
+          pluginVersion: '6.3.0',
+          timestamp: '2026-08-16T10:00:03Z',
+          offsetMs: 3_000,
+          ownerKind: 'main',
+          agentId: null,
+        },
+      ],
+      status: { kind: 'complete' },
+      findings: [],
+    })
+  })
+
+  it('renders the skill name, plugin and plugin version', async () => {
+    renderAtSession('session-1')
+
+    const rows = await screen.findAllByRole('listitem')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('code-review')
+    expect(rows[0]).toHaveTextContent('superpowers')
+    expect(rows[0]).toHaveTextContent('6.3.0')
+  })
+})
+
 describe('No session is selected', () => {
   it('states that plainly rather than showing a blank page', () => {
     renderAtSession(null)
@@ -199,7 +246,7 @@ describe('A session still ingesting says so', () => {
         contextSize: { kind: 'notRecorded' },
       },
       steps: [
-        { kind: 'prompt', stepId: 't1', label: 'Completed', timestamp: '2026-08-16T10:00:00Z', offsetMs: 0, ownerKind: 'main', agentId: null },
+        { kind: 'prompt', stepId: 't1', label: 'Completed', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:00Z', offsetMs: 0, ownerKind: 'main', agentId: null },
       ],
       status: { kind: 'ingestIncomplete' },
       findings: [],
@@ -263,7 +310,7 @@ const ONE_STEP_ENVELOPE: SessionEnvelope = {
     contextSize: { kind: 'notRecorded' },
   },
   steps: [
-    { kind: 'toolCall', stepId: 'tc1', label: 'view', timestamp: '2026-08-16T10:00:05Z', offsetMs: 5_000, ownerKind: 'main', agentId: null },
+    { kind: 'toolCall', stepId: 'tc1', label: 'view', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:05Z', offsetMs: 5_000, ownerKind: 'main', agentId: null },
   ],
   status: { kind: 'complete' },
   findings: [

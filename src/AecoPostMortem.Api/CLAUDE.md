@@ -457,3 +457,10 @@ only when `sessionId` names no session at all; a step whose raw event cannot be 
 is this story's own edge case, and a 404 would have forced the client to guess why. The Detail tab
 needs no endpoint of its own: `web/src/routes/SessionPage.tsx` renders it straight from the tape
 step already in hand.
+
+`SessionTapeStepEnvelope.PluginName`/`.PluginVersion` (FR-25, S-12, issue #21) carry a
+`SessionTapeStepKind.Skill` step's plugin straight across from `Findings.SessionTapeStep` — no
+resolution of their own, the same passthrough `From` already does for `Label`. Both are `null` for
+every other step kind. No endpoint change: `GetSession`'s query already read `context.Skills`
+(S-08), so this story only widened the wire shape two fields, plus one row in
+`SessionTapeStepEnvelope.From`.

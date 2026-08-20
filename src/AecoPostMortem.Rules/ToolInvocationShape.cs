@@ -27,4 +27,10 @@ public sealed record ToolInvocationShape
     /// <summary>The call produced a subagent — a structural fact (it matches a spawned agent's
     /// record), not a name read from the call's own arguments.</summary>
     public bool SpawnsAgent { get; init; }
+
+    /// <summary>The MCP server the call was logged against, e.g. the provider's own
+    /// <c>mcpServerName</c> field — an opaque label like <see cref="ToolName"/>, carried so
+    /// <see cref="OperandResolver"/>'s second layer can match it structurally. <c>null</c> for a
+    /// tool the provider did not log against any server.</summary>
+    public string? McpServerName { get; init; }
 }

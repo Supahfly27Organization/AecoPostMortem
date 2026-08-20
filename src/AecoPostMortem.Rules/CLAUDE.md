@@ -7,10 +7,11 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 
 | File | What it holds |
 |---|---|
-| `ToolInvocationShape.cs` | one observed tool call reduced to its argument shape — booleans for path, pattern, replacement, file text, command, and whether it spawned an agent. `ToolName` is carried as an opaque label; nothing reads it as meaning |
+| `ToolInvocationShape.cs` | one observed tool call reduced to its argument shape — booleans for path, pattern, replacement, file text, command, and whether it spawned an agent, plus `McpServerName` (the provider's own logged server field). `ToolName` and `McpServerName` are carried as opaque labels; nothing reads either as meaning |
 | `ToolVocabulary.cs` | `ToolVocabulary.Build` — the distinct tool names in whatever corpus is passed in (FR-29) |
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
+| `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
 | `HookFailureCheck.cs` | FR-17's check shape: `SessionHookOutcome` (plain per-session input), `SessionCount` and `HookFailureCounts` (the paired-denominator result), `HookFailureCheck.Evaluate` |
 | `RepeatedReadCheck.cs` | FR-15's check shape (issue #25): `ReadEvent` (a session and a path — generic, no tool name), `RepeatedReadOccurrence`, and `RepeatedReadCheck.Run`, which groups events per `(SessionId, Path)` and reports the groups at or above `Threshold` (4) |
 | `FailedToolCallsCheck.cs` | FR-16 (S-14, issue #26): `ToolCallOutcome` (the plain per-call input), `FailureRate` and `ToolFailureRate` (the check-shape result), and the check itself |
@@ -22,6 +23,10 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `DeclaredIntent.cs` | FR-19's plain input (issue #29): one self-declared phase — `SessionId`, `Phase` (an opaque label) and `Sequence` (the corpus-wide chronological order, the only ordering input this project trusts) |
 | `PhaseOrdering.cs` | `PhaseOrdering.Derive` — the distinct phases in the corpus, ordered by each phase's earliest `Sequence` across every session (FR-19; the S-21 vocabulary pattern applied to phase labels) |
 | `PhaseChurnCheck.cs` | FR-19's check shape (issue #29): `PhaseChurnResult` (a session's returns, its own total intents, and the vocabulary/ordering that produced it), `PhaseChurnCheck.Run`, which derives the ordering once and evaluates each session independently |
+| `RuleSetVersion.cs` | FR-27 (S-20, issue #33): `SessionRuleSet` (a session's repository, start time and blocks — plain input), `RuleSetVersionId` (repository + content hash, a version's identity), `RuleSetVersion` (the identity plus its window — `FirstSessionId`/`LastSessionId` — and `SessionCount`) |
+| `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
+| `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
+| `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
 
 ## The invariant
 
@@ -263,9 +268,118 @@ rendered result is never separated from the derivation that could make two imple
 grouping is over the intents themselves — there is no session-enumeration side channel that could
 produce a zero for it.
 
+### Operand resolution is layered lookups over S-21's own outputs, not a parallel classifier
+
+`OperandResolver.Resolve` tries `ToolVocabulary.Build` (exact name), then a structural equality
+check against each call's own `McpServerName` (the server-field layer), then
+`ToolRoleDeriver.Derive` (the role layer) — in that order, returning on the first layer that
+produces at least one tool. It reuses S-21's two functions rather than re-deriving vocabulary or
+roles its own way, so a future change to how a role is classified only has one place to change.
+
+### The server-field layer is a structural equality check, never a substring match on `ToolName`
+
+FR-31's own worked example is the reason this exists: a rule about one MCP server must exclude a
+different server's tool whose name happens to contain the same text (measured 28 tools resolve
+correctly under this layer; issue #51's edge case documents the same failure mode discovered from
+the other direction — a circularity check that matched a substring pulled in 9 calls to a different
+server and 2 to a variant name). `OperandResolver.Resolve` compares `operandText` against
+`ToolInvocationShape.McpServerName` with `string.Equals(..., StringComparison.Ordinal)` — never
+`Contains` — and collects every tool whose calls carry that exact server name.
+`The_server_field_is_a_structural_match_not_a_substring_match_on_tool_names` in
+`OperandResolverTests` proves it with a tool whose own name contains the server text as a substring
+but whose logged server field names a different server.
+
+### The role layer matches an operand's text against `ToolRole`'s own member names
+
+FR-31 names "the derived role" as the third layer without stating what text a rule's own operand
+would carry to select one. Rather than guess a display convention (`"file-read"`, `"Search tools"`,
+...) this project cannot verify against Copilot's actual rule phrasing, `Resolve` parses
+`operandText` directly against `ToolRole`'s five member names (`Enum.TryParse<ToolRole>(operandText,
+ignoreCase: false, ...)`). This keeps the layer exact and closed to the same five-member vocabulary
+`ToolRole.cs` already defines, with nothing here able to invent a sixth label. Whatever project
+extracts operand text from a rule statement's own phrasing (S-25, FR-34) is responsible for
+normalising it to one of these five names before calling in, the same way every other check in this
+project takes an already-resolved plain input rather than doing its own text interpretation.
+
+### `Unresolved` is a fourth enum member, not an empty `Tools` set on a resolved layer
+
+FR-31's fourth layer is required to be reported, never silently dropped. `Resolve` only returns a
+resolved layer (`ExactToolName`, `McpServerField`, `DerivedRole`) when that layer actually produced
+at least one tool — an empty match at any layer falls through to the next one, and running out of
+layers is `Unresolved`, its own enum value rather than an empty `Tools` set on a layer that claims
+to have matched. `Layer == Unresolved` is therefore the one condition a downstream caller (S-26,
+FR-35 — "this rule names a tool your agent does not have") checks to build its finding, with no
+count-based inference needed.
+
+### Subtraction only ever removes from operand B; operand A is returned unchanged
+
+FR-32 states the tie-break as "A winning", not "the more/less confident layer winning" — the two
+operands can resolve through different layers entirely (the discovery finding 8 defect was exactly
+this: an exact-name match for one operand colliding with a role-layer match for the other) and A
+still wins regardless of which layer produced either side. `ResolveTwoOperands` therefore performs
+one direction of subtraction only: `OperandB.Tools = ResolvedB.Tools - ResolvedA.Tools`, with
+`OperandA` returned exactly as `Resolve` produced it. `OperandB.Layer` is left as whatever layer
+originally resolved it, even if subtraction empties its `Tools` — that is a different fact ("B's
+own claim was entirely absorbed by A") from `Unresolved` ("nothing matched B in the first place"),
+and collapsing the two would make a resolution's own record of what happened lie about which one
+occurred.
+
+### A version's identity is the (repository, hash) pair, groups by hash within chronological order
+
+`RuleSetVersioning.Compute` orders each repository's sessions by `StartedAt` (ordinal, `SessionId`
+breaking ties — the same discipline `AbortedTurnCheck` and `PhaseOrdering` use) and then groups the
+already-ordered sequence by its sessions' content hash. `IEnumerable.GroupBy` preserves first-seen
+order both across groups and within one, so a group's first and last members are automatically the
+chronologically first and last sessions that carried that hash — `FirstSessionId`/`LastSessionId`
+never need a separate min/max pass. Two sessions with the identical hash are the same version even
+if a different-hash session sits between them in time (a rule edited, then reverted); this was not
+in the measured corpus and the acceptance criteria only ask for "the first and last session carrying
+it," so this project does not split a reappearing hash into two windows.
+
+### The version hash is order-insensitive over blocks, order-preserving within one
+
+`RuleSetVersionHasher.ComputeHash` canonicalizes each block to `SourceFile` followed by its
+statements in extraction order, then sorts the canonicalized blocks themselves
+(`StringComparer.Ordinal`) before hashing — PRD Part 8 Q4 records that whether a session's blocks
+arrive in a stable order was never measured, so two sessions carrying the identical set in a
+different order must hash identically. Statement order *within* a block is left alone: it comes from
+`RuleStatementExtractor` reading the same source document top to bottom, which is not the axis Q4
+left open.
+
+### Fields are length-prefixed, never joined with a separator character
+
+`RuleSetVersionHasher.LengthPrefixed` encodes every field (a block's source file, each statement) as
+`"{length}:{value}"` (netstring-style) rather than joining fields with a delimiter character. A
+delimiter is only collision-safe if it is guaranteed absent from every field's own content, and
+extracted rule text is arbitrary, unvalidated operator prose — a first version of this hasher joined
+fields with ASCII control characters on exactly that unenforced assumption, and code review caught
+the seam it left open: a source file and statement text that happened to contain the same control
+character could canonicalize to the identical string as a different split of the same characters,
+colliding two different block sets onto the same hash. Length-prefixing has no such seam — the
+encoding of a sequence of fields is injective regardless of what those fields contain, so it needs no
+assumption about what extracted text does or does not include.
+
+### The refusal is a primitive, not wired to an adherence figure yet
+
+FR-28 says a figure spanning a rule edit "must be impossible to compute, not merely discouraged,"
+but no adherence check exists in this project yet (that is later work). `RuleSetVersionScope.
+RequireSingleVersion` is deliberately generic: it takes whatever `SessionRuleSet`s a future figure
+would be computed over and throws `MixedRuleSetVersionException` unless they share one repository
+and one hash — the same `RuleSetVersionId` `RuleSetVersioning` produces — so a later check calls it
+first and cannot construct a figure across an edit even by accident, mirroring how `HookFailureCounts`
+makes a bare denominator uncompilable rather than merely undocumented.
+
 ## Status
 
-Tool vocabulary and role derivation (S-21, issue #34) has landed. The check-shape catalogue has
+Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
+resolution (S-23, issue #37, FR-31/FR-32): `OperandResolver.Resolve` and `.ResolveTwoOperands` are
+the mechanism every check shape with a named operand (S-25's catalogue, S-26's "tool your agent
+does not have") builds on rather than reimplementing tool classification. Nothing yet extracts
+operand text from a rule statement's own phrasing — that is S-25's job (FR-34); this story
+publishes the resolution mechanism the way S-21 published vocabulary/role derivation ahead of
+anything calling it with real rule text.
+
+The check-shape catalogue has
 six entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
 `AbortedTurnCheck` (issue #28, FR-18) and `PhaseChurnCheck` (issue #29, FR-19). The shape they
@@ -276,8 +390,13 @@ in this project should follow.
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and
 `RuleStatementDeduplication.Deduplicate` collapses identical statements across sessions while
-preserving which sessions carried each one. Nothing yet resolves a real corpus's `RawEvent`s into
-`SessionInstructionBlocks` at scale and dedupes the whole store in one pass — that wiring, and
-rule-set versioning by content hash of the block set (FR-27), are S-20's job; this project only
-publishes the shapes S-20 builds against, the same way S-49 published NORMALIZED's eight shapes
-ahead of anything populating them.
+preserving which sessions carried each one.
+
+Rule-set versioning (S-20, issue #33, FR-27/FR-28) has also landed: `RuleSetVersioning.Compute` turns
+a corpus of `SessionRuleSet`s into `RuleSetVersion`s (identity, window, sample size) per repository,
+and `RuleSetVersionScope.RequireSingleVersion` is the refusal primitive a later adherence figure
+scopes itself with. Nothing yet resolves a real corpus's `RawEvent`s into `SessionRuleSet`/
+`SessionInstructionBlocks` at scale and dedupes or versions the whole store in one pass — that
+wiring, and the adherence figure itself, are later work; this project only publishes the shapes that
+work builds against, the same way S-49 published NORMALIZED's eight shapes ahead of anything
+populating them.

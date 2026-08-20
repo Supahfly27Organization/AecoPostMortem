@@ -27,6 +27,10 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `ExecutionRecordBuilder.cs` | FR-8/FR-9: rebuilds one session's `RawEvent`s into `Data.Execution.Turn`/`ToolCall`/`Agent` rows plus the causality map, pure and deterministic over `RawEvent.Sequence` order |
 | `SpawnResolutionCheck.cs` | turns an `ExecutionRecordBuilder` agent-reconstruction pass into the `unresolvable-spawn` `CheckRegistryEntry` (issue #23, PRD §3.9's name for it) |
 | `SessionRuleExtractor.cs` | FR-26 (S-19, issue #32): resolves a session's `<custom_instruction>` blocks from its own `system.message` `RawEvent`s — the only caller that supplies `Rules.RuleStatementExtractor` its prompt text from the ingested store rather than from a file |
+| `SessionBuilder.cs` | builds one `Data.Execution.Session` row from a session's own `session.start` (identity, `context.*`) and, when present, `session.shutdown` (`EndedAt`, token totals summed across every model) |
+| `SkillBuilder.cs` | builds one `Data.Execution.Skill` row per `skill.invoked` event, keyed by that event's own envelope id |
+| `HookBuilder.cs` | builds one `Data.Execution.Hook` row per `hook.start`/`hook.end` pair, matched by their shared `data.hookInvocationId` |
+| `NormalizedLayerWriter.cs` | ties `SessionBuilder`, `ExecutionRecordBuilder`, `SkillBuilder` and `HookBuilder` together: derives one session's rows across all six tables, deleting whatever that session already carried first — what `ingest` and `rebuild` both call |
 
 ## References
 
@@ -222,14 +226,38 @@ scenario needs the last few percent. A future story that needs `ResultSizeBytes`
 `result.content` should add the `toolTelemetry` fallback to `GetResultSizeBytes` rather than treating
 its absence as a gap in this one.
 
-### `ExecutionRecordBuilder` is a pure in-memory builder, not yet wired into the store
+### `ExecutionRecordBuilder` is a pure in-memory builder; `NormalizedLayerWriter` is what persists it
 
-It takes `RawEvent`s and returns `Data.Execution` records plus a `CheckRegistryEntry` — nothing here
-opens a `PostMortemContext` or writes a derived table. None of this story's acceptance scenarios ask
-for persistence, and `DerivedSchema.Rebuild`/`EnsureCurrent` (`AecoPostMortem.Data/CLAUDE.md`)
-already leave the derived tables empty on purpose, pending a reader. Wiring this builder's output
-into those tables — the actual `rebuild`-populates-rows step — is left for whichever later story
-does that wiring; keeping the two concerns separate mirrors `SessionIngestor` staying RAW-only.
+`Build` still takes `RawEvent`s and returns `Data.Execution` records plus a `CheckRegistryEntry` —
+nothing here opens a `PostMortemContext` or writes a derived table itself, and that stays true.
+`NormalizedLayerWriter.cs` is the separate piece that does: it calls `SessionBuilder.Build`,
+`ExecutionRecordBuilder.Build`, `SkillBuilder.Build` and `HookBuilder.Build` for one session, deletes
+whatever that session already carries in the six tables it owns, and writes the fresh rows —
+`IngestionRun.Run` calls it once per successfully ingested session, and `AecoPostMortem.Cli.
+CommandRunner.Rebuild` calls it once per session RAW still holds, after `DerivedSchema.Rebuild`.
+Keeping this separate from `ExecutionRecordBuilder` itself mirrors `SessionIngestor` staying
+RAW-only: reconstruction and persistence stay two concerns, not one.
+
+### `SessionBuilder`, `SkillBuilder` and `HookBuilder` complete the picture `ExecutionRecordBuilder` leaves open
+
+`ExecutionRecordBuilder` only ever built `Turn`/`ToolCall`/`Agent` — it never parsed `session.start`/
+`session.shutdown`, `skill.invoked`, or `hook.start`/`hook.end` pairs, so three of `GetSession`'s six
+tables (`Session`, `Skill`, `Hook`) had no builder at all until now. `SessionBuilder.Build` reads a
+session's own `session.start` (identity, `context.*`, `EventSchemaVersion`) and, when present,
+`session.shutdown` (`EndedAt`, token totals summed across every model in `data.modelMetrics` —
+`Session`'s own remarks already documented this shape, nothing here parsed it before). Every field
+read defends against absence the same way `SessionStartContext.ExtractCwd` already does — RAW never
+discards unknown or absent JSON, so a bare `session.start` (valid JSON, no `data` at all) must
+produce a `Session` with defaults, not throw; a hand-seeded fixture in `CommandRunnerTests` exercises
+exactly this shape. `SkillBuilder.Build` and `HookBuilder.Build` reuse `EventEnvelopeReader` for
+`id`/`agentId` the same way `ExecutionRecordBuilder` does, then read their own event-specific fields
+off `envelope.Data`. `HookBuilder` pairs `hook.start`/`hook.end` by their shared
+`data.hookInvocationId` — neither event's own envelope id ties the pair together, unlike `Skill`,
+where the envelope id alone is the row's identity — and reports a start with no matching end as
+unfinished (`EndedAt`/`Success` null) rather than dropping it; an end with no matching start produces
+no row, since `Hook.StartedAt` is `required` and there is nothing honest to put there.
+`AecoPostMortem.Data`'s own "unfinished, not malformed" discipline `SessionEventReader` already
+applies to a trailing partial line.
 
 ### `SessionRuleExtractor` never opens a file — its only input is `RawEvent`
 
@@ -356,14 +384,21 @@ FR-14, FR-26). `ExecutionRecordBuilder` is the first caller of `ToolArguments` �
 `path` out of an object-shaped `arguments` value. The `ingest` CLI command (`AecoPostMortem.Cli`,
 `CommandRunner.Ingest`) now calls `IngestionRun.Run` and writes the resulting `CoverageReport` to
 stdout per FR-58 — the RAW-persistence half of the wiring this section used to call outstanding.
-`ExecutionRecordBuilder` is still not called from the CLI: populating the derived
-`Turn`/`ToolCall`/`Agent` tables from RAW is a separate piece of work, open for both `ingest` and
-`rebuild` alike (`AecoPostMortem.Cli/CLAUDE.md`'s own non-obvious-decisions section names it);
-`ApiHost.GetSession` already reconstructs a session's execution record live from RAW for the Flight
-Recorder, so nothing downstream is blocked on that table-population step landing. `SessionRuleExtractor`
-likewise resolves one session's own `RawEvent`s, already in hand — nothing yet walks the whole store
-calling it per session and feeding the results into `Rules.RuleStatementDeduplication.Deduplicate`;
-that corpus-wide wiring, and rule-set versioning by content hash (FR-27), are S-20's job.
+`ExecutionRecordBuilder`, `SessionBuilder`, `SkillBuilder` and `HookBuilder` are now all called from
+the CLI, through `NormalizedLayerWriter`: both `ingest` (per session, after a successful non-excluded
+ingest) and `rebuild` (per session RAW still holds, after `DerivedSchema.Rebuild`) populate all six
+tables `ApiHost.GetSession` reads. Verified end to end against the live 35-session reference corpus —
+2,384 turns, 16,085 tool calls, 470 agents, 794 skills, 3,027 hooks, matching the RAW census exactly,
+and the Flight Recorder renders a real session's masthead, tape and inspector against it. Getting
+there surfaced a real defect in already-shipped code: `Turn`'s original key, `(SessionId, TurnId)`,
+assumed `data.turnId` is unique within a session — measurably false on 27 of 35 real sessions, since
+nothing before `NormalizedLayerWriter` ever persisted these rows through a keyed table. `Turn` is now
+keyed by `(SessionId, EventId)` instead (`AecoPostMortem.Data/CLAUDE.md`'s own non-obvious-decision
+entry has the full story). `SessionRuleExtractor` still resolves one session's own `RawEvent`s,
+already in hand — nothing yet walks the whole store calling it per session and feeding the results
+into `Rules.RuleStatementDeduplication.Deduplicate`; that corpus-wide wiring, and rule-set versioning
+by content hash (FR-27), are S-20's job, and the digest/rules-inventory/monitor-comparison endpoints
+that would consume it are still not wired in `ApiHost` (`AecoPostMortem.Api/CLAUDE.md`).
 
 Phase A's exit criterion is verified against the frozen fixture corpus
 (`test/AecoPostMortem.Ingestion.Tests/CorpusVerificationTests.cs`,

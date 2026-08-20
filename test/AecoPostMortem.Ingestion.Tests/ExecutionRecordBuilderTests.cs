@@ -216,6 +216,27 @@ public sealed class ExecutionRecordBuilderTests
         Assert.Null(turn.EndedAt);
     }
 
+    /// <summary>RAW never discards unknown or absent JSON (FR-2) — a `turn_start` missing its own
+    /// `turnId` still reaches RAW so long as it parsed. `Turn` is now keyed by its own event id, not
+    /// `TurnId` (`AecoPostMortem.Data/CLAUDE.md`), so there is no longer a reason to drop this turn
+    /// silently the way the identity-by-`TurnId` design once implied — it must still close and
+    /// persist, with `TurnId` defaulting to empty rather than null (a `required` field).</summary>
+    [Fact]
+    public void A_turn_start_missing_its_own_turn_id_still_closes_with_an_empty_turn_id()
+    {
+        var events = new[]
+        {
+            Event(0, "assistant.turn_start", "e0", null, null, new { }),
+            Event(1, "assistant.turn_end", "e1", "e0", null, new { }),
+        };
+
+        var record = ExecutionRecordBuilder.Build(SessionId, events);
+
+        var turn = Assert.Single(record.Turns);
+        Assert.Equal(string.Empty, turn.TurnId);
+        Assert.Equal(TurnOutcome.Completed, turn.Outcome);
+    }
+
     [Fact]
     public void A_completed_tool_call_carries_success_and_a_derived_result_size()
     {

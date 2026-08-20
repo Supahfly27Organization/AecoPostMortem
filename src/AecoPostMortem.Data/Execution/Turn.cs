@@ -21,6 +21,15 @@ public sealed record Turn : IDerivedEntity, IOwned
 {
     public required string SessionId { get; init; }
 
+    /// <summary>The key: the <c>assistant.turn_start</c> event's own envelope <c>id</c>. Measured
+    /// against the live reference corpus, <c>data.turnId</c> repeats within a session on 27 of 35
+    /// sessions — it is a small, cycling display counter, not a stable identity — so this entity is
+    /// keyed the same way <see cref="Skill"/>/<see cref="Hook"/> already are: Copilot writes no
+    /// natural id for the thing itself, so the event's own id is the local key.</summary>
+    public required string EventId { get; init; }
+
+    /// <summary>The displayed turn number Copilot itself reports — not unique within a session, and
+    /// not this entity's key (see <see cref="EventId"/>). Carried verbatim for display only.</summary>
     public required string TurnId { get; init; }
 
     public required string StartedAt { get; init; }

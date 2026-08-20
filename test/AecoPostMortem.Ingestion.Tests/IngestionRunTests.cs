@@ -130,6 +130,42 @@ public sealed class IngestionRunTests
         Assert.Equal(2, secondRun.LinesParsed);
     }
 
+    /// <summary>The NORMALIZED writer (<see cref="NormalizedLayerWriter"/>) is called for every
+    /// session this run actually ingests — previously nothing populated these tables, so
+    /// <c>AecoPostMortem.Api.ApiHost.GetSession</c> always 404'd against a real store.</summary>
+    [Fact]
+    public void An_ingested_sessions_normalized_rows_are_derived()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        workspace.WriteEventsFile("session-1", trailingNewline: true, SessionStart, TurnStart);
+
+        using var context = workspace.Store.Open();
+        IngestionRun.Run(context, workspace.SessionStateRoot, []);
+
+        var session = Assert.Single(context.Sessions);
+        Assert.Equal("session-1", session.SessionId);
+    }
+
+    /// <summary>FR-7's "no event from that session is persisted" has to hold for the derived layer
+    /// too, not only RAW: a session ingested before its cwd was excluded, then re-ingested after,
+    /// must lose its NORMALIZED rows the same way <c>RawEventBatch.DeleteBySession</c> already
+    /// purges its RAW ones — otherwise the Flight Recorder would still show a session the operator
+    /// asked to exclude.</summary>
+    [Fact]
+    public void A_session_excluded_after_already_being_derived_has_its_normalized_rows_purged_too()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        workspace.WriteEventsFile("session-1", trailingNewline: true, ExcludedSessionStart, TurnStart);
+
+        using var context = workspace.Store.Open();
+        IngestionRun.Run(context, workspace.SessionStateRoot, []);
+        Assert.Single(context.Sessions);
+
+        IngestionRun.Run(context, workspace.SessionStateRoot, [@"C:\repo\AecoPostMortem"]);
+
+        Assert.Empty(context.Sessions);
+    }
+
     [Fact]
     public void An_empty_root_reports_zero_across_the_board()
     {

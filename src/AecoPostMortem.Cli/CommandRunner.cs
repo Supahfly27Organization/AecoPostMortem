@@ -183,9 +183,10 @@ public static class CommandRunner
 
     /// <summary>
     /// S-46's rebuild: drop and re-derive the NORMALIZED and FINDINGS layers from RAW
-    /// (<see cref="DerivedSchema.Rebuild"/>). <paramref name="store"/> is opened and RAW is only
-    /// read to report the count the derivation ran against — nothing here accepts or reads a source
-    /// directory, so that requirement holds by construction rather than by a check.
+    /// (<see cref="DerivedSchema.Rebuild"/>), then re-populate the six tables
+    /// <see cref="NormalizedLayerWriter"/> owns for every session RAW still holds — the source
+    /// directory is never read, so "re-derived from RAW alone" holds by construction rather than by
+    /// a check.
     /// </summary>
     static int Rebuild(LocalStore store, TextWriter stdout)
     {
@@ -194,6 +195,12 @@ public static class CommandRunner
         var rawEventCount = context.RawEvents.Count();
 
         DerivedSchema.Rebuild(context);
+
+        var sessionIds = context.RawEvents.Select(raw => raw.SessionId).Distinct().ToList();
+        foreach (var sessionId in sessionIds)
+        {
+            NormalizedLayerWriter.Derive(context, sessionId);
+        }
 
         stdout.WriteLine(string.Create(
             CultureInfo.InvariantCulture,

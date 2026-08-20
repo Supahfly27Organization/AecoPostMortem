@@ -23,38 +23,38 @@ failing — FR-58 requires the surface to enumerate itself before what sits behi
 It defaults to `LocalStore.AtDefaultLocation()`, which is the operator's real store. Tests pass a
 throwaway one; without that argument the only way to test `purge` would be to delete it.
 
-### `rebuild` drops and recreates the derived layer, and takes no arguments
+### `rebuild` drops, recreates, and repopulates the derived layer, and takes no arguments
 
 `rebuild` calls `DerivedSchema.Rebuild` (unconditional drop-and-recreate, distinct from the
-version-gated rebuild `LocalStore.Open` already runs via `EnsureCurrent`) and reports the RAW event
-count it ran against. It opens the store and nothing else — there is no path argument on its
-`CommandSpec` (`Arguments` is `""`, unlike `ingest [path]`), so "the source directory is not read"
-holds structurally rather than by a runtime check (S-46, issue #24). The actual re-derivation of
-NORMALIZED/FINDINGS rows from RAW is not implemented yet — that logic lands with the E1 ingestion
-stories; today `rebuild` empties the derived tables rather than repopulating them, which is the
-honest behaviour for a RAW that has no reader yet.
+version-gated rebuild `LocalStore.Open` already runs via `EnsureCurrent`), then calls
+`AecoPostMortem.Ingestion.NormalizedLayerWriter.Derive` once for every distinct `SessionId` RAW still
+holds, so the six NORMALIZED tables come back populated rather than empty. It opens the store and
+nothing else — there is no path argument on its `CommandSpec` (`Arguments` is `""`, unlike
+`ingest [path]`), so "the source directory is not read" holds structurally rather than by a runtime
+check (S-46, issue #24): repopulation reads only RAW, already in the store.
 
-### `ingest` writes RAW and the coverage report; it does not populate the derived layer
+### `ingest` writes RAW, populates the derived layer, and reports the coverage report
 
 `CommandRunner.Ingest` resolves the session-state root — the optional positional `[path]` argument
 if given, otherwise `copilotSessionStateRoot` (`serve`'s own default-override parameter, reused
 here) — loads the exclusion list from beside the store actually opened
 (`Path.Combine(store.Folder, ExclusionListSource.FileName)`, not
 `ExclusionListSource.DefaultPath`, so a test store's run never depends on the real machine's own
-`exclusions.json`), and calls `AecoPostMortem.Ingestion.IngestionRun.Run`. The returned
+`exclusions.json`), and calls `AecoPostMortem.Ingestion.IngestionRun.Run`, which now also derives
+each successfully ingested session's NORMALIZED rows via `NormalizedLayerWriter` as it goes (and
+purges them, alongside RAW, for a session excluded after already being ingested). The returned
 `CoverageReport` is written to stdout — sessions found/ingested/excluded with reasons, lines
 parsed/skipped, events by type sorted `StringComparer.Ordinal` for a deterministic run-to-run
 diff — which is `ingest`'s whole `CommandSpec.OutputChannel` contract (FR-58, FR-14). A missing
 Copilot root is not a special case here: `SessionDiscovery.Discover` already reports it as zero
 sessions rather than throwing, so the report says so on its own.
 
-This wires FR-1 through FR-7's RAW ingestion, nothing more. `ExecutionRecordBuilder` — the
-NORMALIZED-layer reconstruction (`Turn`/`ToolCall`/`Agent`) — is not called from here; populating
-those tables from RAW is still the separate, larger piece both this command and `rebuild` are
-missing (`AecoPostMortem.Ingestion/CLAUDE.md`'s own Status section names it). `ApiHost.GetSession`
-already reconstructs a session's execution record live from RAW for the Flight Recorder, so the
-product functions today without that table-population step; `rebuild` still only empties the
-derived tables rather than repopulating them.
+Verified end to end against the live 35-session reference corpus, not only against fixtures: the
+Flight Recorder (`ApiHost.GetSession`) now renders a real session's masthead, tape and inspector
+straight from a real `ingest` run. Getting there surfaced a real defect in already-shipped code —
+`Data.Execution.Turn`'s original key assumed `data.turnId` is unique within a session, which is false
+on 27 of 35 real sessions — fixed in `Data`/`Ingestion` (see both projects' own CLAUDE.md), not in
+this project.
 
 ### `serve` prints the URL, then blocks — `runHost` is the seam that makes that testable
 
@@ -92,9 +92,9 @@ The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `C
 `CommandRunner`, `Program`), and all four commands are wired. `serve` builds and runs the local API
 and web shell host (`AecoPostMortem.Api.ApiHost`) on a stated default port
 (`CommandRunner.DefaultPort`), overridable with `--port <n>`. `ingest` persists RAW through
-`IngestionRun.Run` and reports the coverage report; it does not yet populate the NORMALIZED
-derived tables (see the non-obvious decision above) — that wiring is still open for both `ingest`
-and `rebuild`.
+`IngestionRun.Run`, populates the NORMALIZED derived tables through `NormalizedLayerWriter` as it
+goes, and reports the coverage report; `rebuild` repopulates the same six tables for every session
+RAW holds. Both are verified end to end against the live reference corpus, not only fixtures.
 
 ## Playbook — adding a command
 

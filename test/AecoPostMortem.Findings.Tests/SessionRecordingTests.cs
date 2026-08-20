@@ -325,6 +325,7 @@ public sealed class SessionRecordingTests
     static Turn BuildTurn(string sessionId, string turnId, string startedAt) => new()
     {
         SessionId = sessionId,
+        EventId = $"e-{turnId}",
         TurnId = turnId,
         StartedAt = startedAt,
         Outcome = TurnOutcome.Completed,

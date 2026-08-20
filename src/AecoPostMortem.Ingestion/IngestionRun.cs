@@ -45,6 +45,11 @@ public static class IngestionRun
             if (result.Exclusion.Excluded)
             {
                 sessionsExcluded.Add(new ExcludedSession(session.SessionId, result.Exclusion.Reason!));
+
+                // FR-7's "no event from that session is persisted" has to hold for the derived
+                // layer too, not only RAW — a session ingested before its cwd was excluded still
+                // carries NORMALIZED rows from that earlier run until they are purged here.
+                NormalizedLayerWriter.DeleteForSession(context, session.SessionId);
                 continue;
             }
 
@@ -64,6 +69,8 @@ public static class IngestionRun
             {
                 eventsByType[raw.EventType] = eventsByType.GetValueOrDefault(raw.EventType) + 1;
             }
+
+            NormalizedLayerWriter.Derive(context, session.SessionId);
         }
 
         return new CoverageReport(

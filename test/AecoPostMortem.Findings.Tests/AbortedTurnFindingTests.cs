@@ -116,6 +116,7 @@ public sealed class AbortedTurnFindingTests
         string? abortReason = null) => new()
     {
         SessionId = sessionId,
+        EventId = $"e-{turnId}",
         TurnId = turnId,
         StartedAt = startedAt,
         Outcome = outcome,

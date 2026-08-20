@@ -71,6 +71,7 @@ public sealed class OwnershipTests
     static Turn MainThreadTurn() => new()
     {
         SessionId = "session-1",
+        EventId = "e1",
         TurnId = "turn-1",
         StartedAt = "2026-08-09T20:14:36.758Z",
         Outcome = TurnOutcome.Completed,

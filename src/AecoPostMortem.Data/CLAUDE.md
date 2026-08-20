@@ -21,7 +21,7 @@ The `DbContext`, the entity model and the EF Core migrations; the only project t
 | `Execution/IDerivedEntity.cs` | empty marker interface for the NORMALIZED/FINDINGS layers |
 | `Execution/Session.cs` | the first derived entity: one Copilot session, keyed by `SessionId` |
 | `Execution/IOwned.cs` | `OwnerKind` (`Main`/`Agent`) and the `IOwned` contract every subagent-ownable derived entity carries |
-| `Execution/Turn.cs` | one assistant turn, bounded by `assistant.turn_start`/`turn_end`, keyed by `(SessionId, TurnId)` |
+| `Execution/Turn.cs` | one assistant turn, bounded by `assistant.turn_start`/`turn_end`, keyed by `(SessionId, EventId)` — its `turn_start` event's own envelope id, not `TurnId` (see below) |
 | `Execution/ToolCall.cs` | one tool invocation, bounded by `tool.execution_start`/`execution_complete`, keyed by `(SessionId, ToolCallId)`; carries its five measured indexes |
 | `Execution/Agent.cs` | one subagent, keyed by `(SessionId, AgentId)`; carries `AgentOutcome`'s four completion states instead of `IOwned` — it is the owner |
 | `Execution/EventScopedEntities.cs` | `Skill`, `Hook`, `Permission`, `WriteUnit` — the four shapes Copilot writes no natural id for, each keyed `(SessionId, EventId)` off the envelope's own `id`; completes the contract's eight shapes |
@@ -127,6 +127,19 @@ describes could not be compared against them, so it cannot be re-derived the way
 FINDINGS are. `MapStoreMetadata` runs first in `OnModelCreating`, immediately after the `rawEvent`
 block and before `MapSession`, so its placement can't drift as later mappings are added.
 
+### `Turn` is keyed by its own event id, not by `data.turnId` — a real-corpus finding, not a design preference
+
+The original key was `(SessionId, TurnId)`, on the assumption `assistant.turn_start.data.turnId`
+is unique within a session. It measurably is not: scanning the live reference corpus (not the
+frozen fixture, which never exercised persistence of these rows) showed `turnId` repeating within
+the same session on 27 of 35 real sessions — it is a small, cycling display counter Copilot itself
+reuses, not a stable identity. This went undetected until `NormalizedLayerWriter` (`AecoPostMortem.
+Ingestion`) became the first code to ever persist `Turn` rows through a keyed `DbSet`; the in-memory
+`List<Turn>` `ExecutionRecordBuilder` built before that never enforced uniqueness, so no existing
+test caught it. `Turn.EventId` — the `turn_start` event's own envelope `id` — is the fix, the same
+"no natural id, so the event's own id is the key" pattern `Skill`/`Hook` already use. `TurnId` stays
+on the entity as a plain, non-key display field; nothing else about its meaning changed.
+
 ### `Rebuild` is unconditional; `EnsureCurrent` is conditional
 
 Both drop and recreate the derived tables, but they answer different questions.
@@ -134,12 +147,14 @@ Both drop and recreate the derived tables, but they answer different questions.
 when it has — that is what makes opening a current store cheap. `Rebuild` is the operator asking for
 a rebuild regardless of version (PRD §3.2, §3.8, S-46): the CLI's `rebuild` command calls it
 directly, never `EnsureCurrent`, because "nothing changed" is not a reason to refuse the operator's
-own request. Neither method populates the recreated tables from RAW — that derivation logic
-(session discovery, execution record reconstruction) lands with the E1 ingestion stories; today both
-leave the tables empty, which is the honest answer for "re-derived from a RAW that has no reader
-yet." `DerivedSchemaTests` covers `Rebuild`'s determinism: two rebuilds against the same model
-produce the same tables, in the same order, with the same version hash, and RAW rows are untouched
-by either method — see `Rebuild_leaves_RAW_unchanged` and
+own request. Neither method populates the recreated tables itself — that is
+`AecoPostMortem.Ingestion.NormalizedLayerWriter`'s job, called once per session immediately after
+`Rebuild`/`EnsureCurrent` runs (`AecoPostMortem.Cli.CommandRunner.Rebuild`, `IngestionRun.Run`), not
+folded into either method here: `Rebuild`/`EnsureCurrent` answer "what should the schema look like",
+population answers "what should the rows say", and the two stay separable so a schema-only rebuild
+is still testable on its own. `DerivedSchemaTests` covers `Rebuild`'s determinism: two rebuilds
+against the same model produce the same tables, in the same order, with the same version hash, and
+RAW rows are untouched by either method — see `Rebuild_leaves_RAW_unchanged` and
 `Rebuilding_twice_produces_identical_schema_content_and_order`.
 
 ### The determinism contract is enforced by a source scan, not by a reference check

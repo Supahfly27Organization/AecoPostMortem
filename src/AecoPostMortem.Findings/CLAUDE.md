@@ -239,12 +239,11 @@ judged, so `SessionRecording.Build` takes a `Session` plus `Turn`/`ToolCall`/`Ag
 lists as plain inputs and returns `SessionMasthead`/`SessionTape` directly, never reading through
 `PostMortemContext` itself. This project cannot query the store on its own by design (see
 `References`, above); the caller — `AecoPostMortem.Api`'s session endpoint — is the one that reads
-`Data.Execution` and decides where its rows come from. That matters here specifically because
-nothing in this repository yet *writes* those rows at ingest time
-(`AecoPostMortem.Ingestion/CLAUDE.md`, "not yet wired into the store"): the derived tables exist and
-are queryable (`DerivedSchema.EnsureCurrent` creates them on open), they are simply empty until a
-later story's ETL populates them, so `Api.ApiHost.GetSession` reads them today exactly as it would
-once that writer exists — no separate code path.
+`Data.Execution` and decides where its rows come from.
+`AecoPostMortem.Ingestion.NormalizedLayerWriter` is now what writes those rows, called by both
+`ingest` and `rebuild` (`AecoPostMortem.Ingestion/CLAUDE.md`), so `Api.ApiHost.GetSession` reads real
+rows against a live store today — the same read path this file's own build was always written
+against, with no separate code path needed once the writer landed.
 
 ### `SessionRecordingStatus` is a closed union decided inside `Build`, from inputs the caller already resolved
 

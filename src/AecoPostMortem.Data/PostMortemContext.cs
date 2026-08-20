@@ -178,9 +178,10 @@ public sealed class PostMortemContext : DbContext
         var turn = modelBuilder.Entity<Turn>();
 
         turn.ToTable("turn");
-        turn.HasKey(row => new { row.SessionId, row.TurnId });
+        turn.HasKey(row => new { row.SessionId, row.EventId });
 
         turn.Property(row => row.SessionId).HasColumnName("session_id");
+        turn.Property(row => row.EventId).HasColumnName("event_id");
         turn.Property(row => row.TurnId).HasColumnName("turn_id");
         turn.Property(row => row.StartedAt).HasColumnName("started_at");
         turn.Property(row => row.EndedAt).HasColumnName("ended_at");

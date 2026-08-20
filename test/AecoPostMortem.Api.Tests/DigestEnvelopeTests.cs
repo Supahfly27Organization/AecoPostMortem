@@ -47,6 +47,39 @@ public sealed class DigestEnvelopeTests
         ],
     };
 
+    static Finding InferredFinding(string toolName, params string[] sessionIds) => new()
+    {
+        Class = FindingClass.MissingCapability,
+        Provenance = Provenance.Inferred,
+        Evidence = [new EvidenceItem { Field = "data.toolName", Value = toolName }],
+        Recurrence = new Recurrence
+        {
+            Key = toolName,
+            Occurrences = [.. sessionIds.Select(id => new RecurrenceOccurrence { SessionId = id })],
+        },
+    };
+
+    /// <summary>FR-48 (issue #52, S-42): the served digest carries Inferred findings in their own
+    /// section, never inside <c>RankedFindings</c> — the same separation
+    /// <see cref="Findings.ProcessDigest"/> already draws, just mapped to the wire shape.</summary>
+    [Fact]
+    public void InferredFindings_are_served_separately_from_the_ranked_list()
+    {
+        var digest = ProcessDigest.Build(
+            Counters(),
+            RanCleanRegistry(),
+            [WasteFinding("src/hot.cs", "session-1"), InferredFinding("web_fetch", "session-1")]);
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        Assert.Single(envelope.RankedFindings);
+        Assert.DoesNotContain(envelope.RankedFindings, f => f.Provenance == Provenance.Inferred);
+
+        Assert.Single(envelope.InferredFindings);
+        Assert.Equal(Provenance.Inferred, envelope.InferredFindings[0].Provenance);
+        Assert.Equal("web_fetch", envelope.InferredFindings[0].Recurrence.Key);
+    }
+
     [Fact]
     public void From_carries_the_digest_state_and_maps_every_ranked_finding_in_order()
     {

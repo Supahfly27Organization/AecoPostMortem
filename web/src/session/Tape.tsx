@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent, UIEvent } from 'react'
+import type { CSSProperties, KeyboardEvent, UIEvent } from 'react'
 import type { SessionTapeStep } from '../api/session'
 import './Tape.css'
 
@@ -23,6 +23,22 @@ const OVERSCAN_ROWS = 6
 
 function formatOffset(offsetMs: number): string {
   return `${(offsetMs / 1000).toFixed(1)}s`
+}
+
+/** FR-22 (S-09, issue #18), Scenario 5: a deterministic lane index (0-7) for one subagent's own
+ * `agentId`, cheap enough to recompute per row rather than carried in state — two rows sharing an
+ * `agentId` always land in the same lane, and this needs no lane list to be passed in at all
+ * (`Tape` only ever sees the steps, never the full `SessionAgentLane[]`), which is what keeps two
+ * concurrent subagents' steps visually distinct even though they can interleave in wall-clock order
+ * rather than arriving as one contiguous block each. */
+const LANE_COUNT = 8
+
+function laneIndex(agentId: string): number {
+  let hash = 0
+  for (let i = 0; i < agentId.length; i += 1) {
+    hash = (hash * 31 + agentId.charCodeAt(i)) >>> 0
+  }
+  return hash % LANE_COUNT
 }
 
 /** FR-25 (S-12, issue #21): a skill step's plugin, alongside its version when both are recorded —
@@ -183,6 +199,11 @@ export function Tape({
         const isSelected = index === selectedIndex
         const plugin = formatPlugin(step)
 
+        const rowStyle: CSSProperties & { '--session-tape-lane'?: number } = { top: index * ROW_HEIGHT_PX }
+        if (step.ownerKind === 'agent' && step.agentId !== null) {
+          rowStyle['--session-tape-lane'] = laneIndex(step.agentId)
+        }
+
         return (
           <li
             key={step.stepId}
@@ -190,7 +211,10 @@ export function Tape({
             className="session-tape__step"
             aria-selected={isSelected}
             data-selected={isSelected ? 'true' : undefined}
-            style={{ top: index * ROW_HEIGHT_PX }}
+            data-owner-kind={step.ownerKind}
+            data-agent-id={step.agentId ?? undefined}
+            data-agent-lane={step.ownerKind === 'agent' && step.agentId !== null ? laneIndex(step.agentId) : undefined}
+            style={rowStyle}
           >
             {/* tabIndex={-1}: a mouse/screen-reader click target, not a second tab stop — the
              * roving tab stop above stays the list's only one, per the doc comment's own

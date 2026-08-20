@@ -34,6 +34,23 @@
   outline-offset: -1px;
 }
 
+/* FR-22 (S-09, issue #18), Scenario 5: each subagent gets its own coloured lane marker
+   (`--session-tape-lane`, set per row in Tape.tsx from a deterministic hash of its `agentId`), and
+   the main thread carries none — "the main thread is distinguishable from all of them" holds for a
+   row-by-row marker rather than a block grouping, since two concurrent subagents' steps can
+   interleave in wall-clock order instead of arriving as one contiguous run each. */
+.session-tape__step[data-owner-kind='agent'] {
+  border-left: 3px solid hsl(calc(var(--session-tape-lane, 0) * 47), 55%, 45%);
+}
+
+.session-tape__step[data-owner-kind='agent'] .session-tape__step-button {
+  padding-left: calc(0.6rem + 0.75rem);
+}
+
+.session-tape__step[data-owner-kind='main'] {
+  border-left: 3px solid transparent;
+}
+
 /* tabIndex={-1} (see Tape.tsx): a click target, not a real tab stop, so no focus ring of its own —
    the outer <ul>'s :focus-visible rule above is the only focus indicator this row ever needs. */
 .session-tape__step-button {

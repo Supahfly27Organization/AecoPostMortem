@@ -130,3 +130,43 @@ describe('An empty tape', () => {
     expect(screen.queryByRole('list', { name: 'Tape' })).not.toBeInTheDocument()
   })
 })
+
+/** FR-22 (S-09, issue #18), Scenario 5: "each agent occupies its own lane and the main thread is
+ * distinguishable from all of them" — a per-row marker, not a block grouping, since two concurrent
+ * subagents' steps can interleave in wall-clock order rather than arriving as contiguous runs. */
+describe('Lanes are visually separable from the main thread', () => {
+  it('marks a main-thread step distinctly from a subagent-owned step', () => {
+    const steps: SessionTapeStep[] = [
+      { kind: 'prompt', stepId: 'main-1', label: 'Completed', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:00Z', offsetMs: 0, ownerKind: 'main', agentId: null },
+      { kind: 'toolCall', stepId: 'agent-1', label: 'view', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:01Z', offsetMs: 1_000, ownerKind: 'agent', agentId: 'a1' },
+    ]
+    render(<Tape steps={steps} />)
+
+    const mainRow = screen.getByText('Completed').closest('li')
+    const agentRow = screen.getByText('view').closest('li')
+
+    expect(mainRow).toHaveAttribute('data-owner-kind', 'main')
+    expect(agentRow).toHaveAttribute('data-owner-kind', 'agent')
+    expect(agentRow).toHaveAttribute('data-agent-id', 'a1')
+  })
+
+  it('gives two different concurrent subagents their own, distinct lane', () => {
+    const steps: SessionTapeStep[] = [
+      { kind: 'toolCall', stepId: 'agent-1', label: 'view', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:01Z', offsetMs: 1_000, ownerKind: 'agent', agentId: 'a1' },
+      { kind: 'toolCall', stepId: 'agent-2', label: 'grep', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:02Z', offsetMs: 2_000, ownerKind: 'agent', agentId: 'a2' },
+      { kind: 'toolCall', stepId: 'agent-3', label: 'apply_patch', pluginName: null, pluginVersion: null, timestamp: '2026-08-16T10:00:03Z', offsetMs: 3_000, ownerKind: 'agent', agentId: 'a1' },
+    ]
+    render(<Tape steps={steps} />)
+
+    const a1First = screen.getByText('view').closest('li')
+    const a2 = screen.getByText('grep').closest('li')
+    const a1Second = screen.getByText('apply_patch').closest('li')
+
+    const laneOf = (row: Element | null) => row?.getAttribute('data-agent-lane')
+
+    expect(laneOf(a1First)).not.toBeNull()
+    expect(laneOf(a1First)).not.toBe(laneOf(a2))
+    // The same agent keeps the same lane across two non-contiguous rows of its own steps.
+    expect(laneOf(a1First)).toBe(laneOf(a1Second))
+  })
+})

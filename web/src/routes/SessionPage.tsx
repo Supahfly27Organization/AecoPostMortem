@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import type { RawStepEventEnvelope, SessionEnvelope, SessionFindingChip, SessionTapeStep, ThinkingEnvelope } from '../api/session'
+import type { RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
 import { useStepEvidence } from '../api/useStepEvidence'
 import { Tape } from '../session/Tape'
@@ -140,6 +140,62 @@ function FindingChips({ chips }: { chips: SessionFindingChip[] }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+const OUTCOME_LABEL: Record<SessionAgentLane['outcome'], string> = {
+  running: 'Running',
+  completed: 'Completed',
+  completedCostUnknown: 'Completed (cost unknown)',
+  failed: 'Failed',
+}
+
+/** FR-22 (S-09, issue #18): the report a subagent's lane actually shows — its own closed
+ * three-shape union (present/notRecorded/failed), the same "a stated value, never inferred from
+ * which fields happen to be present" discipline `ThinkingEnvelope` already renders with. `failed`
+ * never falls back to the parent's stub, and neither does `notRecorded` — the two are rendered
+ * distinctly so a subagent that simply produced nothing reads differently from one that failed. */
+function SubagentOutputPanel({ output }: { output: SubagentOutputEnvelope }) {
+  if (output.kind === 'present') {
+    return <p className="agent-lane__output-text">{output.text}</p>
+  }
+
+  if (output.kind === 'failed') {
+    return (
+      <p className="agent-lane__output-failed" role="alert">
+        {output.error}
+      </p>
+    )
+  }
+
+  return <p className="agent-lane__output-empty">{output.reason}</p>
+}
+
+/** FR-22 (S-09, issue #18): one entry per subagent this session spawned, each with the report it
+ * actually produced — "so I can judge what a subagent did rather than reading the stub its parent
+ * recorded" (the story's own goal). A session with no subagents renders no section at all, the same
+ * "nothing to show" discipline `FindingChips` renders explicitly instead — here there is no chip
+ * row equivalent worth stating, since `masthead.subagentCount` already states the zero. */
+function AgentLanes({ lanes }: { lanes: SessionAgentLane[] }) {
+  if (lanes.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="agent-lanes" role="region" aria-label="Subagent lanes">
+      <h3 className="agent-lanes__heading">Subagent lanes</h3>
+      <ul className="agent-lanes__list">
+        {lanes.map((lane) => (
+          <li key={lane.agentId} className="agent-lane" data-outcome={lane.outcome} data-agent-id={lane.agentId}>
+            <div className="agent-lane__header">
+              <span className="agent-lane__name">{lane.displayName}</span>
+              <span className="agent-lane__outcome">{OUTCOME_LABEL[lane.outcome]}</span>
+            </div>
+            <SubagentOutputPanel output={lane.output} />
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
@@ -285,6 +341,7 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
       {envelope.status.kind === 'complete' ? (
         <>
           <FindingChips chips={envelope.findings} />
+          <AgentLanes lanes={envelope.lanes} />
           <div className="session-page__body">
             <Tape steps={envelope.steps} onSelectStep={setSelectedStep} />
             <Inspector sessionId={sessionId} selectedStep={selectedStep} />

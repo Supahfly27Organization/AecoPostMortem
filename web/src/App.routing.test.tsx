@@ -124,6 +124,7 @@ describe('App routing', () => {
             steps: [],
             status: { kind: 'complete' },
             findings: [],
+            lanes: [],
           }),
           { status: 200 },
         )

@@ -229,13 +229,62 @@ public sealed record SessionFindingChipEnvelope
     }
 }
 
+/// <summary>FR-22 (S-09, issue #18): the wire shape for one subagent's own lane — its identity, how
+/// it finished, and the report it actually produced (<see cref="SubagentOutputEnvelope"/>), resolved
+/// once per agent so a client can render each subagent's own lane distinctly from the main thread
+/// (Scenario 5) without a second per-lane request. <see cref="Outcome"/> is <see cref="AgentOutcome"/>
+/// itself, not re-declared here — the same reuse <see cref="SessionTapeStepEnvelope.OwnerKind"/>
+/// already establishes for its own enum.</summary>
+public sealed record SessionAgentLaneEnvelope
+{
+    public required string AgentId { get; init; }
+
+    /// <summary><see langword="null"/> means spawned from the main thread, matching
+    /// <see cref="Agent.ParentAgentId"/>'s own nullability.</summary>
+    public string? ParentAgentId { get; init; }
+
+    public required string Name { get; init; }
+
+    public required string DisplayName { get; init; }
+
+    public required AgentOutcome Outcome { get; init; }
+
+    /// <summary>From <c>subagent.failed.data.error</c> — populated only when <see cref="Outcome"/> is
+    /// <see cref="AgentOutcome.Failed"/>, matching <see cref="Agent.Error"/>'s own nullability.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>The report this subagent actually produced, resolved by
+    /// <see cref="SubagentOutputLookup.Find"/> from the session's own <see cref="RawEvent"/>s — not
+    /// resolved here, since that lookup needs RAW events this type has no access to.</summary>
+    public required SubagentOutputEnvelope Output { get; init; }
+
+    public static SessionAgentLaneEnvelope From(Agent agent, SubagentOutputEnvelope output)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(output);
+
+        return new SessionAgentLaneEnvelope
+        {
+            AgentId = agent.AgentId,
+            ParentAgentId = agent.ParentAgentId,
+            Name = agent.Name,
+            DisplayName = agent.DisplayName,
+            Outcome = agent.Outcome,
+            Error = agent.Error,
+            Output = output,
+        };
+    }
+}
+
 /// <summary>
 /// FR-21's served masthead and tape (S-08, issue #15), FR-21 part 2 of 3's finding chip row (S-52,
 /// issue #16), and FR-21 part 3 of 3's finality state (S-53, issue #17): the wire shape a client
 /// reads <see cref="SessionRecording"/> and <see cref="SessionFindings"/> through, the same layering
 /// <see cref="DigestEnvelope"/> already establishes for <see cref="ProcessDigest"/> (S-36).
 /// <see cref="Status"/> carries FR-21 part 3 of 3's finality state alongside the masthead, steps and
-/// chips — a client checks it before rendering the tape as the session's final picture.
+/// chips — a client checks it before rendering the tape as the session's final picture. FR-22 (S-09,
+/// issue #18) added <see cref="Lanes"/>, one entry per subagent, each carrying the report it
+/// actually produced rather than the parent's truncated <c>read_agent</c> stub.
 /// </summary>
 public sealed record SessionEnvelope
 {
@@ -251,8 +300,21 @@ public sealed record SessionEnvelope
     /// area (see `web/CLAUDE.md`).</summary>
     public required IReadOnlyList<SessionFindingChipEnvelope> Findings { get; init; }
 
+    /// <summary>FR-22 (S-09, issue #18): one entry per subagent this session spawned. An empty list
+    /// is the designed "no subagents" state, the same discipline <see cref="Findings"/> already
+    /// establishes — never a missing field.</summary>
+    public required IReadOnlyList<SessionAgentLaneEnvelope> Lanes { get; init; }
+
+    /// <summary><paramref name="lanes"/> defaults to <see langword="null"/> (served as an empty
+    /// list) rather than being required, the same additive-parameter shape
+    /// <see cref="SessionRecording.Build"/> already uses for its own <c>spawnResolution</c>
+    /// parameter — every existing call site that supplies no lanes still compiles and still serves
+    /// an empty list.</summary>
     public static SessionEnvelope From(
-        SessionRecording recording, SessionFindings findings, Func<Finding, FindingEnvelope> mapFinding)
+        SessionRecording recording,
+        SessionFindings findings,
+        Func<Finding, FindingEnvelope> mapFinding,
+        IReadOnlyList<SessionAgentLaneEnvelope>? lanes = null)
     {
         ArgumentNullException.ThrowIfNull(recording);
         ArgumentNullException.ThrowIfNull(findings);
@@ -264,6 +326,7 @@ public sealed record SessionEnvelope
             Steps = recording.Tape.Steps.Select(SessionTapeStepEnvelope.From).ToList(),
             Status = SessionRecordingStatusEnvelope.From(recording.Status),
             Findings = findings.Chips.Select(chip => SessionFindingChipEnvelope.From(chip, mapFinding)).ToList(),
+            Lanes = lanes ?? [],
         };
     }
 }

@@ -39,7 +39,8 @@ public sealed class RulesProjectNamesNothingTests
         // The verbs and particles the shapes match on — English grammar, not a vocabulary of tools.
         "prefer", "prefers", "preferring", "preferred", "favor", "favors", "favour", "favours",
         "over", "rather", "than", "instead", "of", "in", "preference",
-        "never", "do", "not", "don", "must", "cannot", "may", "shall", "should",
+        "never", "do", "does", "not", "don", "doesn", "must", "mustn", "cannot", "may", "shall",
+        "should", "shouldn",
         "avoid", "refrain", "from", "without",
         "read", "reads", "reading", "open", "opens", "opening", "access", "accessing",
         "modify", "modifying", "edit", "editing", "write", "writing", "list", "listing",

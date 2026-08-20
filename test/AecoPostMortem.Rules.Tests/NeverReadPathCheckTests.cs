@@ -88,6 +88,27 @@ public sealed class NeverReadPathCheckTests
     }
 
     [Fact]
+    public void Matching_is_case_insensitive_because_real_observed_paths_are_windows_filesystem_paths()
+    {
+        // Windows filesystem paths are case-insensitive; the same precedent this codebase already
+        // follows for path-prefix matching (Ingestion.SessionExclusion.Normalize/IsExcluded, which
+        // uses OrdinalIgnoreCase for exactly this reason).
+        var mentions = new[]
+        {
+            new NeverReadPathMention { SourceText = "Never read `UpFront.Data/Migrations/`.", NamedPath = "UpFront.Data/Migrations/" },
+        };
+        ReadEvent[] events =
+        [
+            new ReadEvent { SessionId = "s1", Path = @"F:\git\upfront\upfront.data\migrations\0001_Init.cs" },
+        ];
+
+        var results = NeverReadPathCheck.Run(mentions, events);
+
+        var violation = Assert.Single(results);
+        Assert.Equal(1, violation.AccessCount);
+    }
+
+    [Fact]
     public void A_single_file_operand_matches_only_that_exact_file_at_the_end_of_the_path()
     {
         var mentions = new[]

@@ -18,6 +18,16 @@ public static class NeverReadPathFinding
 {
     public const string CheckId = "never-read-path-used";
 
+    /// <summary>NeverReadPath's own grammar (<c>Rules.RuleShapeCatalogue</c>) covers
+    /// read/open/access/modify/edit/list — never "create". A <c>create</c> call writes a brand-new
+    /// file; it reads nothing and touches no pre-existing content the rule could plausibly be
+    /// protecting, so counting it would mislabel a fresh write as a violation of a "never read" rule.
+    /// This is the one tool name this file is allowed to name (Repo Rule 6 binds
+    /// <c>AecoPostMortem.Rules</c> only) — the same "Findings decides which raw calls count"
+    /// discipline <c>RepeatedFileReadFindingCheck</c> already documents for its own "view"-only
+    /// mapping.</summary>
+    const string CreateToolName = "create";
+
     public sealed record Result
     {
         public required IReadOnlyList<Finding> Findings { get; init; }
@@ -38,7 +48,7 @@ public static class NeverReadPathFinding
             .ToArray();
 
         var events = toolCalls
-            .Where(call => call.Path is not null)
+            .Where(call => call.Path is not null && call.ToolName != CreateToolName)
             .Select(call => new ReadEvent { SessionId = call.SessionId, Path = call.Path! })
             .ToArray();
 

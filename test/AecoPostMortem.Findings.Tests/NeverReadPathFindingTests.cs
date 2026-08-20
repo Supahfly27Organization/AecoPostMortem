@@ -87,6 +87,21 @@ public sealed class NeverReadPathFindingTests
     }
 
     [Fact]
+    public void A_create_call_under_the_banned_path_is_not_counted()
+    {
+        // NeverReadPath's own grammar (RuleShapeCatalogue) covers read/open/access/modify/edit/list —
+        // never "create". A create call writes a brand-new file, which reads nothing and involves no
+        // access to any pre-existing content the rule could plausibly be protecting; counting it would
+        // mislabel a fresh write as a violation of a "never read" rule.
+        var matches = new[] { NeverReadPathMatch("Never read `src/Secrets/`.", "src/Secrets/") };
+        var toolCalls = new[] { Call("session-1", "create", @"F:\git\AecoPostMortem\src\Secrets\new-file.txt") };
+
+        var result = NeverReadPathFinding.Run(matches, toolCalls);
+
+        Assert.Empty(result.Findings);
+    }
+
+    [Fact]
     public void A_banned_path_touched_across_two_sessions_lists_both_as_occurrences()
     {
         var matches = new[] { NeverReadPathMatch("Never read `src/Secrets/`.", "src/Secrets/") };

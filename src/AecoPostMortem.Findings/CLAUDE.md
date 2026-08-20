@@ -26,7 +26,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `AbortedTurnFinding.cs` | FR-18 (S-16, issue #28): reads `AecoPostMortem.Data.Execution.Turn` rows, calls `AecoPostMortem.Rules.AbortedTurnCheck`, and writes one `Finding` per aborted turn — never grouped — plus a `CheckRegistryEntry` |
 | `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
 | `BannedToolFinding.cs` | Piece 3's second slice: orchestrates `Rules.BannedToolCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — every `BannedToolUsage` the check returns is already a violation, so no further filtering; reads `Data.Execution.ToolCall` directly for session attribution, the same split `RepeatedFileReadFindingCheck` draws between its generic operand and its own entity read; `BannedToolFinding.Result` bundles the findings and a `CheckRegistryEntry` |
-| `NeverReadPathFinding.cs` | Piece 3's third slice: orchestrates `Rules.NeverReadPathCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — no `ToolInvocationShape` corpus needed; builds `Rules.ReadEvent`s straight from every `Data.Execution.ToolCall` carrying a non-null `Path`, regardless of tool name, since `NeverReadPath`'s own grammar covers read/open/access/modify/edit/list, broader than `RepeatedFileReadFindingCheck`'s narrower "view only" mapping for its own, different question; `NeverReadPathFinding.Result` bundles the findings and a `CheckRegistryEntry` |
+| `NeverReadPathFinding.cs` | Piece 3's third slice: orchestrates `Rules.NeverReadPathCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — no `ToolInvocationShape` corpus needed; builds `Rules.ReadEvent`s from every `Data.Execution.ToolCall` carrying a non-null `Path` except `create` calls (see below), since `NeverReadPath`'s own grammar covers read/open/access/modify/edit/list, broader than `RepeatedFileReadFindingCheck`'s narrower "view only" mapping for its own, different question; `NeverReadPathFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
@@ -249,6 +249,18 @@ reusing `ToolVocabularyMismatchCheck`. `named_tool`, `call_count` and one `resol
 tool the operand resolved to ride in `Evidence` instead — the same "a percentage never appears
 without the count that produced it" discipline this note already documents for `FailedToolCallsFinding`,
 applied here to a plain count with no percentage at all.
+
+### `NeverReadPathFinding` excludes `create` calls — the one tool name this file is allowed to name
+
+`NeverReadPath`'s own grammar (`Rules.RuleShapeCatalogue`) covers read/open/access/modify/edit/list —
+never "create". A `create` call writes a brand-new file: it reads nothing and touches no pre-existing
+content the rule could plausibly be protecting, so counting it the same as a real read/edit would
+mislabel a fresh write as a violation of a "never read" rule (caught in code review — the first
+version counted every path-carrying call regardless of tool name). `NeverReadPathFinding.CreateToolName`
+is the literal `"create"`, the same "Findings decides which raw calls count as reads" discipline
+`RepeatedFileReadFindingCheck` already documents for its own narrower `view`-only mapping — this file
+may name a tool identity (Repo Rule 6 binds `AecoPostMortem.Rules` only), the same way
+`InterruptionLoadFinding` names `"ask_user"`.
 
 ### `SessionTokenFigures` is not a `Finding`, deliberately
 

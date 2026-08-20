@@ -73,10 +73,12 @@ public static class NeverReadPathCheck
     /// <summary>A normalized observed path matches a normalized operand when the operand appears
     /// whole, aligned on a '/' boundary at both ends (or the string's own start/end) — as the whole
     /// path, a leading segment run, a trailing segment run, or a segment run in the middle. Never a
-    /// bare <see cref="string.Contains(string)"/>.</summary>
+    /// bare <see cref="string.Contains(string)"/>. Case-insensitive: real observed paths are Windows
+    /// filesystem paths, and Windows filesystems are case-insensitive — the same reasoning
+    /// <c>Ingestion.SessionExclusion</c>'s own path-prefix matcher already follows.</summary>
     static bool Matches(string operand, string observed) =>
-        observed.Equals(operand, StringComparison.Ordinal)
-        || observed.StartsWith(operand + "/", StringComparison.Ordinal)
-        || observed.EndsWith("/" + operand, StringComparison.Ordinal)
-        || observed.Contains("/" + operand + "/", StringComparison.Ordinal);
+        observed.Equals(operand, StringComparison.OrdinalIgnoreCase)
+        || observed.StartsWith(operand + "/", StringComparison.OrdinalIgnoreCase)
+        || observed.EndsWith("/" + operand, StringComparison.OrdinalIgnoreCase)
+        || observed.Contains("/" + operand + "/", StringComparison.OrdinalIgnoreCase);
 }

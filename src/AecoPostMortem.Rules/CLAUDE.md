@@ -398,7 +398,11 @@ cautionary tale) — an operand like `Data` would wrongly match a directory name
 boundary at both ends (whole path, leading segment run, trailing segment run, or a segment run in the
 middle) — verified against the live corpus: a real rule naming `UpFront.Data/Migrations/` correctly
 matches paths under it and does not match the lookalike `UpFront.Auth.Data/Migrations/` directory,
-since the two do not share a contiguous substring at all.
+since the two do not share a contiguous substring at all. Matching is case-insensitive
+(`OrdinalIgnoreCase`) — real observed paths are Windows filesystem paths, and Windows filesystems are
+case-insensitive, the same reasoning `Ingestion.SessionExclusion`'s own path-prefix matcher already
+follows (caught in code review: an earlier version used `Ordinal`, which would silently miss a real
+violation whose operand and observed path differed only in case).
 
 ### `NeverReadPathCheck` needs no `OperandResolver`, unlike every other adherence check in this file
 

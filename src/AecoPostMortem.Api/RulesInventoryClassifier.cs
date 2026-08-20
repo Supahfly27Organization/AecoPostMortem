@@ -57,6 +57,15 @@ public static class RulesInventoryClassifier
 
     static RuleStatementStatus ClassifyMatch(RuleShapeMatch match, IReadOnlyList<ToolInvocationShape> invocations)
     {
+        if (match.Kind == RuleShapeKind.NeverReadPath)
+        {
+            // Unlike a tool-name operand, a path operand always produces a determinate real/no-access
+            // verdict against the ToolCall corpus (Rules/NeverReadPathCheck.cs) — there is no
+            // "unresolved" state to fall through to, so a matched statement is Watched
+            // unconditionally rather than gated on this classifier's invocation corpus.
+            return RuleStatementStatus.Watched;
+        }
+
         if (match.Kind == RuleShapeKind.ToolIsBanned)
         {
             var resolved = OperandResolver.Resolve(match.OperandAText, invocations);

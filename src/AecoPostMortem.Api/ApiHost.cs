@@ -244,14 +244,15 @@ public static class ApiHost
         var interruption = InterruptionLoadFinding.Run(scopedPermissions, scopedToolCalls);
         var phaseChurn = PhaseChurnFinding.Run(declaredIntents);
 
-        var bannedToolMatches = RuleShapeCatalogue.MatchAll(
+        var ruleShapeMatches = RuleShapeCatalogue.MatchAll(
             SessionRuleSetLookup.BuildAll(scopedSessions, scopedRawEvents)
                 .SelectMany(set => set.Blocks)
                 .SelectMany(block => block.Statements)
                 .Distinct()
                 .ToList()).Matches;
         var invocations = ToolInvocationShapeLookup.BuildAll(scopedToolCalls, scopedAgents, scopedRawEvents);
-        var bannedTool = BannedToolFinding.Run(bannedToolMatches, invocations, scopedToolCalls);
+        var bannedTool = BannedToolFinding.Run(ruleShapeMatches, invocations, scopedToolCalls);
+        var neverReadPath = NeverReadPathFinding.Run(ruleShapeMatches, scopedToolCalls);
 
         var findings = repeatedReads.Findings
             .Concat(failedCalls.Findings)
@@ -260,6 +261,7 @@ public static class ApiHost
             .Concat(interruption.Findings)
             .Concat(phaseChurn.Findings)
             .Concat(bannedTool.Findings)
+            .Concat(neverReadPath.Findings)
             .ToList();
 
         var checkRegistry = new CheckRegistry
@@ -273,6 +275,7 @@ public static class ApiHost
                 interruption.RegistryEntry,
                 phaseChurn.RegistryEntry,
                 bannedTool.RegistryEntry,
+                neverReadPath.RegistryEntry,
             ],
         };
 

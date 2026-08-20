@@ -23,6 +23,10 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `DeclaredIntent.cs` | FR-19's plain input (issue #29): one self-declared phase — `SessionId`, `Phase` (an opaque label) and `Sequence` (the corpus-wide chronological order, the only ordering input this project trusts) |
 | `PhaseOrdering.cs` | `PhaseOrdering.Derive` — the distinct phases in the corpus, ordered by each phase's earliest `Sequence` across every session (FR-19; the S-21 vocabulary pattern applied to phase labels) |
 | `PhaseChurnCheck.cs` | FR-19's check shape (issue #29): `PhaseChurnResult` (a session's returns, its own total intents, and the vocabulary/ordering that produced it), `PhaseChurnCheck.Run`, which derives the ordering once and evaluates each session independently |
+| `RuleSetVersion.cs` | FR-27 (S-20, issue #33): `SessionRuleSet` (a session's repository, start time and blocks — plain input), `RuleSetVersionId` (repository + content hash, a version's identity), `RuleSetVersion` (the identity plus its window — `FirstSessionId`/`LastSessionId` — and `SessionCount`) |
+| `RuleSetVersionHasher.cs` | `RuleSetVersionHasher.ComputeHash` — the order-insensitive content hash of a block set (FR-27; PRD Part 8 Q4) |
+| `RuleSetVersioning.cs` | `RuleSetVersioning.Compute` — groups sessions by repository, orders them chronologically, and groups by hash to produce each `RuleSetVersion` and its window |
+| `RuleSetVersionScope.cs` | FR-28's refusal: `RuleSetVersionScope.RequireSingleVersion` returns the one `RuleSetVersionId` a set of sessions share, or throws `MixedRuleSetVersionException` — the primitive a later adherence figure scopes itself with before computing anything |
 
 ## The invariant
 
@@ -320,6 +324,51 @@ own claim was entirely absorbed by A") from `Unresolved` ("nothing matched B in 
 and collapsing the two would make a resolution's own record of what happened lie about which one
 occurred.
 
+### A version's identity is the (repository, hash) pair, groups by hash within chronological order
+
+`RuleSetVersioning.Compute` orders each repository's sessions by `StartedAt` (ordinal, `SessionId`
+breaking ties — the same discipline `AbortedTurnCheck` and `PhaseOrdering` use) and then groups the
+already-ordered sequence by its sessions' content hash. `IEnumerable.GroupBy` preserves first-seen
+order both across groups and within one, so a group's first and last members are automatically the
+chronologically first and last sessions that carried that hash — `FirstSessionId`/`LastSessionId`
+never need a separate min/max pass. Two sessions with the identical hash are the same version even
+if a different-hash session sits between them in time (a rule edited, then reverted); this was not
+in the measured corpus and the acceptance criteria only ask for "the first and last session carrying
+it," so this project does not split a reappearing hash into two windows.
+
+### The version hash is order-insensitive over blocks, order-preserving within one
+
+`RuleSetVersionHasher.ComputeHash` canonicalizes each block to `SourceFile` followed by its
+statements in extraction order, then sorts the canonicalized blocks themselves
+(`StringComparer.Ordinal`) before hashing — PRD Part 8 Q4 records that whether a session's blocks
+arrive in a stable order was never measured, so two sessions carrying the identical set in a
+different order must hash identically. Statement order *within* a block is left alone: it comes from
+`RuleStatementExtractor` reading the same source document top to bottom, which is not the axis Q4
+left open.
+
+### Fields are length-prefixed, never joined with a separator character
+
+`RuleSetVersionHasher.LengthPrefixed` encodes every field (a block's source file, each statement) as
+`"{length}:{value}"` (netstring-style) rather than joining fields with a delimiter character. A
+delimiter is only collision-safe if it is guaranteed absent from every field's own content, and
+extracted rule text is arbitrary, unvalidated operator prose — a first version of this hasher joined
+fields with ASCII control characters on exactly that unenforced assumption, and code review caught
+the seam it left open: a source file and statement text that happened to contain the same control
+character could canonicalize to the identical string as a different split of the same characters,
+colliding two different block sets onto the same hash. Length-prefixing has no such seam — the
+encoding of a sequence of fields is injective regardless of what those fields contain, so it needs no
+assumption about what extracted text does or does not include.
+
+### The refusal is a primitive, not wired to an adherence figure yet
+
+FR-28 says a figure spanning a rule edit "must be impossible to compute, not merely discouraged,"
+but no adherence check exists in this project yet (that is later work). `RuleSetVersionScope.
+RequireSingleVersion` is deliberately generic: it takes whatever `SessionRuleSet`s a future figure
+would be computed over and throws `MixedRuleSetVersionException` unless they share one repository
+and one hash — the same `RuleSetVersionId` `RuleSetVersioning` produces — so a later check calls it
+first and cannot construct a figure across an edit even by accident, mirroring how `HookFailureCounts`
+makes a bare denominator uncompilable rather than merely undocumented.
+
 ## Status
 
 Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
@@ -341,8 +390,13 @@ in this project should follow.
 FR-26's extraction contract (S-19, issue #32) has also landed: `RuleStatementExtractor.ExtractBlocks`
 parses `<custom_instruction>` blocks from plain prompt text, and
 `RuleStatementDeduplication.Deduplicate` collapses identical statements across sessions while
-preserving which sessions carried each one. Nothing yet resolves a real corpus's `RawEvent`s into
-`SessionInstructionBlocks` at scale and dedupes the whole store in one pass — that wiring, and
-rule-set versioning by content hash of the block set (FR-27), are S-20's job; this project only
-publishes the shapes S-20 builds against, the same way S-49 published NORMALIZED's eight shapes
-ahead of anything populating them.
+preserving which sessions carried each one.
+
+Rule-set versioning (S-20, issue #33, FR-27/FR-28) has also landed: `RuleSetVersioning.Compute` turns
+a corpus of `SessionRuleSet`s into `RuleSetVersion`s (identity, window, sample size) per repository,
+and `RuleSetVersionScope.RequireSingleVersion` is the refusal primitive a later adherence figure
+scopes itself with. Nothing yet resolves a real corpus's `RawEvent`s into `SessionRuleSet`/
+`SessionInstructionBlocks` at scale and dedupes or versions the whole store in one pass — that
+wiring, and the adherence figure itself, are later work; this project only publishes the shapes that
+work builds against, the same way S-49 published NORMALIZED's eight shapes ahead of anything
+populating them.

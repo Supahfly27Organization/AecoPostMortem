@@ -3,8 +3,9 @@ using System.Text.Json;
 namespace AecoPostMortem.Ingestion;
 
 /// <summary>
-/// FR-2/FR-6's envelope fields — <c>type</c> and <c>ts</c> — read out of one line. A line that is
-/// not a JSON object, or is missing either field as a string, is malformed rather than parsed.
+/// FR-2/FR-6's envelope fields — <c>type</c> and <c>timestamp</c> — read out of one line. A line
+/// that is not a JSON object, or is missing either field as a string, is malformed rather than
+/// parsed.
 /// </summary>
 public interface IEventEnvelopeParser
 {
@@ -44,7 +45,7 @@ public sealed class EventEnvelopeParserV1 : IEventEnvelopeParser
                 return false;
             }
 
-            if (!TryGetString(root, "ts", out timestamp))
+            if (!TryGetString(root, "timestamp", out timestamp))
             {
                 return false;
             }

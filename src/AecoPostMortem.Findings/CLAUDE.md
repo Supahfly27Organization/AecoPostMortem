@@ -27,6 +27,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `PhaseChurnFinding.cs` | FR-19's orchestration (issue #29): takes `Rules.DeclaredIntent` operands directly (no `Data` reference — see below), orchestrates `Rules.PhaseChurnCheck` into one `Finding` per churning session (`FindingClass.Waste`, `Provenance.Derived`) plus a `CheckRegistryEntry`; `PhaseChurnFinding.Result` bundles both |
 | `BannedToolFinding.cs` | Piece 3's second slice: orchestrates `Rules.BannedToolCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — every `BannedToolUsage` the check returns is already a violation, so no further filtering; reads `Data.Execution.ToolCall` directly for session attribution, the same split `RepeatedFileReadFindingCheck` draws between its generic operand and its own entity read; `BannedToolFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `NeverReadPathFinding.cs` | Piece 3's third slice: orchestrates `Rules.NeverReadPathCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — no `ToolInvocationShape` corpus needed; builds `Rules.ReadEvent`s from every `Data.Execution.ToolCall` carrying a non-null `Path` except `create` calls (see below), since `NeverReadPath`'s own grammar covers read/open/access/modify/edit/list, broader than `RepeatedFileReadFindingCheck`'s narrower "view only" mapping for its own, different question; `NeverReadPathFinding.Result` bundles the findings and a `CheckRegistryEntry` |
+| `UseAAfterBFinding.cs` | Piece 3's fourth slice: orchestrates `Rules.UseAAfterBCheck` into `FindingClass.RuleAdherenceToolChoice` findings (`Provenance.Derived`) — resolves both operands against a real `ToolInvocationShape` corpus, the same way `BannedToolFinding`'s single operand does; builds `Rules.TimedToolCall`s straight from `Data.Execution.ToolCall.StartedAt`, already a real, populated column, so ordering needs no new RAW parsing either; `UseAAfterBFinding.Result` bundles the findings and a `CheckRegistryEntry` |
 | `OperatorResponseLog.cs` | FR-45 (issue #49, S-39): `OperatorResponseRecord` (one recorded response against a finding identity and its provenance level) and `OperatorResponseLog` — the append-only history, `CurrentResponses()` (latest per finding), and `Apply(Finding)` to populate `Finding.OperatorResponse` |
 | `Guardrail.cs` | PRD §5.4 (issue #49, S-39, FR-45): `Guardrail.Compute(OperatorResponseLog)` — the rejection share and the share of adjudicated (accepted-or-rejected) findings that were `Provenance.Inferred` |
 | `ToolFailureClusterFinding.cs` | FR-46 (S-40, issue #51): `MandatedTool` (a tool identity paired with the `Rules.RuleStatement` that mandates it, plain input); `ToolFailureClusterFinding.Run` reuses `Rules.FailedToolCallsCheck` (S-14) rather than recomputing rates, and turns each rate into one `FindingClass.MissingCapability` finding (`Provenance.Inferred`) plus a `CheckRegistryEntry`; `ToolFailureClusterResult` bundles both |
@@ -125,6 +126,15 @@ directly, the same split `BannedToolFinding` draws, but builds `Rules.ReadEvent`
 itself rather than depending on a `ToolInvocationShape` corpus; `AecoPostMortem.Api.ApiHost.GetDigest`
 is its real caller today, reusing the same `RuleShapeMatch` list `BannedToolFinding` already filters
 from (`Api/CLAUDE.md`'s own remarks).
+
+`UseAAfterBFinding` (piece 3's fourth slice) is the fifth caller of `Rules.OperandResolver`, again
+indirectly through the check (`Rules.UseAAfterBCheck.Run` calls `ResolveTwoOperands`) — the third
+`FindingClass.RuleAdherenceToolChoice` finding this project builds. It reads
+`Data.Execution.ToolCall` directly, the same split every `RuleAdherenceToolChoice` finding in this
+file draws, but builds `Rules.TimedToolCall`s from that read rather than `Rules.ReadEvent`s — the
+generic ordering shape `UseAAfterBCheck` needs instead of a path. `AecoPostMortem.Api.ApiHost.
+GetDigest` is its real caller today, reusing the same `ruleShapeMatches`/`invocations` pair
+`BannedToolFinding` already built (`Api/CLAUDE.md`'s own remarks).
 
 ## Non-obvious decisions
 
@@ -261,6 +271,15 @@ is the literal `"create"`, the same "Findings decides which raw calls count as r
 `RepeatedFileReadFindingCheck` already documents for its own narrower `view`-only mapping — this file
 may name a tool identity (Repo Rule 6 binds `AecoPostMortem.Rules` only), the same way
 `InterruptionLoadFinding` names `"ask_user"`.
+
+### `UseAAfterBFinding` carries its ordering evidence the same way `BannedToolFinding` carries its count — in Evidence, never in Resolution
+
+`FromTwoOperands` is built for a two-operand *rate*: how many calls each side produced, not whether
+one preceded the other in time. An ordering violation has no percentage to serve at all — a session
+either has the defect or it doesn't — so `UseAAfterBFinding.ToFinding` leaves `Resolution` null and
+carries `later_tool`, `earlier_tool` and `violation_count` as `EvidenceItem`s instead, the same "a
+count with no percentage rides in Evidence" discipline this file already documents for
+`BannedToolFinding`'s own single-operand count.
 
 ### `SessionTokenFigures` is not a `Finding`, deliberately
 
@@ -763,7 +782,14 @@ detection logic this project actually builds, reusing `Rules.BannedToolCheck`. `
 verified against the live 35-session reference corpus, the first piece-3 adherence check to find a
 real violation rather than an honest empty state: 99 real accesses to a real `NeverReadPath` rule's
 banned path (`UpFront.Data/Migrations/`, `supahfly27/UpFront`'s own rule, phrased two ways across
-rule-set versions). No check exists in
+rule-set versions). `UseAAfterBFinding` (piece 3's fourth slice, `CheckId = "use-a-after-b"`) is the
+eleventh, the third `FindingClass.RuleAdherenceToolChoice` detection logic, reusing
+`Rules.UseAAfterBCheck` — verified against the live corpus, the same repository carries a real
+`UseAAfterB`-shaped statement (`` Use `get_code_snippet` after `search_graph` to read function
+source ``) that the catalogue genuinely matches, but at least one operand stays unresolved against
+this corpus' own tool vocabulary, so it produces no finding — an honest empty result, the same
+"mechanism real, corpus doesn't happen to fully exercise it" story `BannedToolFinding` already told.
+No check exists in
 `AecoPostMortem.Rules` yet to bind a real `SuggestionTemplate.CheckId` to — `SuggestionWorkedExampleTests`
 exercises the suggestion mechanism against a synthetic tool-choice check result standing in for the
 story that will supply a real one, and `BannedToolFinding` builds no `Suggestion` either (unlike

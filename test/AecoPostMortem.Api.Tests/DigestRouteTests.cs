@@ -341,6 +341,62 @@ public sealed class DigestRouteTests
         }
     }
 
+    const string UseAAfterBPrompt = """
+        <custom_instruction>
+        CLAUDE.md
+        - Use rg after glob.
+        </custom_instruction>
+        """;
+
+    /// <summary>Piece 3's fourth slice: a later-tool call with no earlier prerequisite call serves a
+    /// <see cref="FindingClass.RuleAdherenceToolChoice"/> finding, wired the same way the other eight
+    /// checks already are.</summary>
+    [Fact]
+    public async Task A_later_tool_call_with_no_earlier_prerequisite_serves_a_rule_adherence_finding()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1"));
+            context.RawEvents.Add(SystemMessage("s1", UseAAfterBPrompt));
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc1",
+                ToolName = "rg",
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc2",
+                ToolName = "glob",
+                StartedAt = "2026-08-16T10:00:02Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var finding = Assert.Single(
+                envelope!.RankedFindings, f => f.Class == FindingClass.RuleAdherenceToolChoice);
+            Assert.Contains(finding.Evidence, item => item.Field == "later_tool" && item.Value == "rg");
+            Assert.Contains(finding.Evidence, item => item.Field == "earlier_tool" && item.Value == "glob");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     static RawEvent Intent(string sessionId, long sequence, string timestamp, string intent)
     {
         var payload = JsonSerializer.Serialize(new

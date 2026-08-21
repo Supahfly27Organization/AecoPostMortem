@@ -1012,8 +1012,18 @@ public static class ApiHost
         var thinkingByPromptStepId = StepEvidenceLookup.FindThinkingForPromptSteps(rawEvents, promptStepIds);
         var promptTextByStepId = PromptTextLookup.FindForPromptSteps(rawEvents, promptStepIds);
 
+        // What triggered a hook (this task): resolved the identical "eager, batch, no fetch" way
+        // promptTextByStepId is, above — bounded by this session's own hook step ids, from the same
+        // rawEvents already read for SessionRecording.Build/SpawnResolutionCheck, no second RAW read.
+        var hookStepIds = recording.Tape.Steps
+            .Where(step => step.Kind == SessionTapeStepKind.Hook)
+            .Select(step => step.StepId)
+            .ToList();
+        var triggeredByToolNameByStepId = HookTriggerNameLookup.FindForHookSteps(rawEvents, hookStepIds);
+
         return SessionEnvelope.From(
-            recording, findings, FindingEnvelope.From, lanes, stepFindings, thinkingByPromptStepId, promptTextByStepId);
+            recording, findings, FindingEnvelope.From, lanes, stepFindings, thinkingByPromptStepId,
+            promptTextByStepId, triggeredByToolNameByStepId);
     }
 
     /// <summary>

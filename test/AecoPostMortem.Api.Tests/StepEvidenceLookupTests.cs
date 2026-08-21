@@ -1,5 +1,6 @@
 using AecoPostMortem.Data;
 using AecoPostMortem.Findings;
+using AecoPostMortem.Ingestion;
 
 namespace AecoPostMortem.Api.Tests;
 
@@ -128,18 +129,41 @@ public sealed class StepEvidenceLookupTests
         Assert.Equal("skill.invoked", raw.EventType);
     }
 
+    /// <summary>A hook step's own StepId is <c>data.hookInvocationId</c> — the pair's own natural
+    /// key <c>Ingestion.HookBuilder</c> deliberately keys <c>Data.Execution.Hook.EventId</c> by
+    /// (that file's own doc comment: "unlike Skill, neither event's own envelope id ties the two
+    /// together") — never the envelope's own <c>id</c>. This was a real, verified mismatch this
+    /// task's own real-corpus check caught: a live hook.start's envelope id and its own
+    /// hookInvocationId are two different values, so matching on the envelope id (as this lookup
+    /// once did) resolved zero of 3,027 real hook steps.</summary>
     [Fact]
-    public void A_hook_steps_raw_event_is_matched_by_the_envelopes_own_id()
+    public void A_hook_steps_raw_event_is_matched_by_its_own_hookInvocationId_not_the_envelopes_id()
     {
         var events = new[]
         {
-            Ev(1, "hook.start", """{"id":"h1","data":{"name":"pre-commit"}}"""),
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv-1","hookType":"preCommit"}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv-1");
+
+        var raw = Assert.IsType<RawStepEventEnvelope.Present>(result.Raw);
+        Assert.Equal("hook.start", raw.EventType);
+    }
+
+    /// <summary>The envelope id alone is not this step's identity — a request naming it rather than
+    /// the real hookInvocationId must not resolve, the same "wrong field, no match" discipline this
+    /// project's other identity fixes (`data.turnId` vs. a turn's own envelope id) already prove.</summary>
+    [Fact]
+    public void A_hook_step_requested_by_its_envelope_id_instead_of_its_hookInvocationId_resolves_nothing()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv-1","hookType":"preCommit"}}"""),
         };
 
         var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "h1");
 
-        var raw = Assert.IsType<RawStepEventEnvelope.Present>(result.Raw);
-        Assert.Equal("hook.start", raw.EventType);
+        Assert.IsType<RawStepEventEnvelope.Skipped>(result.Raw);
     }
 
     [Fact]
@@ -423,5 +447,170 @@ public sealed class StepEvidenceLookupTests
         Assert.DoesNotContain("gpt", unavailable.Reason);
         Assert.NotNull(unavailable.ReadabilityByModel);
         Assert.Empty(unavailable.ReadabilityByModel!);
+    }
+
+    /// <summary>What triggered a hook — real `hook.start.data.input` payloads confirmed against the
+    /// live 35-session reference corpus: a `postToolUse` hook carries `toolName`/`toolArgs`/
+    /// `toolResult`, all three joined here from the identical `hook.start` event `Raw` already
+    /// resolved, never a second raw-event lookup.</summary>
+    [Fact]
+    public void A_postToolUse_hooks_trigger_names_the_tool_and_carries_its_arguments_and_result()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":"skill","toolArgs":{"skill":"using-superpowers"},"toolResult":{"resultType":"success","sessionLog":"Skill loaded"}}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        var trigger = Assert.IsType<HookTriggerEnvelope.ToolInvocation>(result.Trigger);
+        Assert.Equal("skill", trigger.ToolName);
+        Assert.Equal(ToolArgumentKind.Object, trigger.Arguments.Kind);
+        Assert.Contains("\"skill\":\"using-superpowers\"", trigger.Arguments.Raw);
+        Assert.NotNull(trigger.Result);
+        Assert.Contains("Skill loaded", trigger.Result);
+    }
+
+    /// <summary>The real, measured wrinkle: 840 of 2,992 real `postToolUse` `hook.start` events in the
+    /// live corpus carry a string-shaped `toolArgs` (`apply_patch`'s own whole patch body), never an
+    /// object — the identical `Object`/`String`/`Unparsed` distinction `Ingestion.ToolArguments`
+    /// already makes for `tool.execution_start.data.arguments` (FR-4), reused here rather than
+    /// assuming an object.</summary>
+    [Fact]
+    public void A_string_shaped_toolArgs_is_recorded_as_string_not_coerced_into_an_object()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":"apply_patch","toolArgs":"*** Begin Patch\n+hello\n*** End Patch","toolResult":{"resultType":"success"}}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        var trigger = Assert.IsType<HookTriggerEnvelope.ToolInvocation>(result.Trigger);
+        Assert.Equal(ToolArgumentKind.String, trigger.Arguments.Kind);
+        Assert.Contains("Begin Patch", trigger.Arguments.Raw);
+    }
+
+    /// <summary>A `sessionStart` hook carries `initialPrompt`/`source`/`cwd`, never `toolName` —
+    /// verified against the live corpus (35 real `sessionStart` hook.start events, none with a
+    /// `toolName`). "No trigger" is this shape's own distinct, stated `Absent` case, never an empty
+    /// string standing in for "blank" or "unknown."</summary>
+    [Fact]
+    public void A_sessionStart_hook_has_no_tool_trigger_and_states_why()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"sessionStart","input":{"sessionId":"s1","cwd":"C:\\repo","source":"new","initialPrompt":"do the thing"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        var absent = Assert.IsType<HookTriggerEnvelope.Absent>(result.Trigger);
+        Assert.Contains("sessionStart", absent.Reason);
+        Assert.Contains("no tool trigger", absent.Reason);
+    }
+
+    /// <summary>Only a hook step has a trigger at all — every other step kind states that plainly
+    /// rather than attempting a lookup, the same short-circuit `Result` already applies to a
+    /// non-tool-call step kind.</summary>
+    [Fact]
+    public void A_non_hook_step_reports_its_trigger_as_not_applicable_to_this_step_kind()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_start", """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.ToolCall, "tc1");
+
+        var absent = Assert.IsType<HookTriggerEnvelope.Absent>(result.Trigger);
+        Assert.Contains("this step kind does not", absent.Reason);
+    }
+
+    /// <summary>A hook step whose own `hook.start` cannot be found still answers with a stated
+    /// absence, never a blank Trigger block.</summary>
+    [Fact]
+    public void A_hook_step_with_no_matching_raw_event_reports_its_trigger_as_a_stated_absence()
+    {
+        var events = Array.Empty<RawEvent>();
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "h-missing");
+
+        var absent = Assert.IsType<HookTriggerEnvelope.Absent>(result.Trigger);
+        Assert.NotEmpty(absent.Reason);
+    }
+
+    /// <summary>Measured 100% of real `postToolUse` `hook.start` events in the live corpus carry a
+    /// `toolResult` — but this is still modelled as nullable rather than assumed, so a call whose
+    /// trigger genuinely carries none states that fact rather than an empty string.</summary>
+    [Fact]
+    public void A_postToolUse_hook_with_no_recorded_toolResult_reports_a_null_result()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":"report_intent","toolArgs":{"intent":"Locating EF projects"}}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        var trigger = Assert.IsType<HookTriggerEnvelope.ToolInvocation>(result.Trigger);
+        Assert.Null(trigger.Result);
+    }
+
+    /// <summary>Code review: `GetRawText()` on a JSON `null` value returns the four-character text
+    /// `"null"`, not a C# `null` — a `toolResult` that is present but explicitly JSON-null must still
+    /// report a C# `null`, the same "no result was recorded" state a genuinely missing key
+    /// reports.</summary>
+    [Fact]
+    public void A_postToolUse_hook_with_an_explicit_json_null_toolResult_still_reports_a_null_result()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":"report_intent","toolArgs":{},"toolResult":null}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        var trigger = Assert.IsType<HookTriggerEnvelope.ToolInvocation>(result.Trigger);
+        Assert.Null(trigger.Result);
+    }
+
+    /// <summary>Code review: an empty `toolName` (present, string-typed, zero-length) is treated the
+    /// same as a missing one — never a `ToolInvocation` with a blank name — matching the identical
+    /// guard `HookTriggerNameLookup.GetToolName` applies to the eager Detail-tab field, so the two
+    /// readers agree on what counts as "a real trigger" for the same step.</summary>
+    [Fact]
+    public void A_postToolUse_hook_with_an_empty_toolName_reports_a_stated_absence_not_a_blank_name()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":""}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        Assert.IsType<HookTriggerEnvelope.Absent>(result.Trigger);
+    }
+
+    /// <summary>Code review: two `hook.start` events sharing one `hookInvocationId` must resolve to
+    /// the *last* one's own tool name, matching `FindByDataField`'s own overwrite-on-duplicate
+    /// semantics (the same rule `Two_completions_sharing_one_toolCallId_resolve_to_the_last_one_not_
+    /// the_first` already proves for a tool call's own result) — and, critically, must resolve
+    /// identically to `HookTriggerNameLookupTests`' own regression case for the same scenario, so the
+    /// eager Detail-tab field and this on-demand Raw-tab field can never disagree about the same
+    /// step's trigger.</summary>
+    [Fact]
+    public void Two_hook_starts_sharing_one_hookInvocationId_resolve_to_the_last_ones_own_tool_name()
+    {
+        var events = new[]
+        {
+            Ev(1, "hook.start", """{"id":"h1","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":"edit"}}}"""),
+            Ev(2, "hook.start", """{"id":"h2","data":{"hookInvocationId":"inv1","hookType":"postToolUse","input":{"toolName":"view"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Hook, "inv1");
+
+        var trigger = Assert.IsType<HookTriggerEnvelope.ToolInvocation>(result.Trigger);
+        Assert.Equal("view", trigger.ToolName);
     }
 }

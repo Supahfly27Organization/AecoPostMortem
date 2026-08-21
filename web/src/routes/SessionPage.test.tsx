@@ -12,6 +12,14 @@ import { SessionPage } from './SessionPage'
 const NO_RECORDED_COMPLETION_REASON =
   'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.'
 
+/** The server's own "wrong step kind" reason for a trigger (`StepEvidenceLookup.TriggerNotApplicableReason`)
+ * — `ONE_STEP_ENVELOPE`'s one step is a `toolCall`, so every fixture below that reuses it needs a
+ * trigger too, and every one of them is this same not-applicable state. */
+const TRIGGER_NOT_APPLICABLE: StepEvidenceEnvelope['trigger'] = {
+  kind: 'absent',
+  reason: 'Only a hook step has a trigger; this step kind does not.',
+}
+
 function respondWith(envelope: SessionEnvelope) {
   vi.stubGlobal(
     'fetch',
@@ -421,6 +429,7 @@ describe('The finding chips summarise the session', () => {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -437,6 +446,7 @@ describe('Nothing selected is a designed state', () => {
       thinking: { kind: 'unavailable', reason: 'irrelevant' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -453,6 +463,7 @@ describe('Selecting a step shows its evidence', () => {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message; this step kind carries none of its own.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -479,6 +490,7 @@ describe("A tool call's own result", () => {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message; this step kind carries none of its own.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}' },
       result: { kind: 'present', eventType: 'tool.execution_complete', payload: '{"id":"e2","data":{"toolCallId":"tc1","success":true,"result":{"content":"ok"}}}' },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -496,6 +508,7 @@ describe("A tool call's own result", () => {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message; this step kind carries none of its own.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -504,6 +517,129 @@ describe("A tool call's own result", () => {
     await user.click(screen.getByRole('tab', { name: 'Raw' }))
 
     expect(await screen.findByText(/may still be running/i)).toBeInTheDocument()
+  })
+})
+
+/** A hook row said a hook ran, never what it ran in response to. `HOOK_STEP_ENVELOPE`'s one step is
+ * a `hook`, unlike `ONE_STEP_ENVELOPE`'s `toolCall` — resolving its trigger is what this task adds. */
+function hookStepEnvelope(triggeredBy: string | null): SessionEnvelope {
+  return {
+    ...ONE_STEP_ENVELOPE,
+    steps: [
+      {
+        kind: 'hook',
+        stepId: 'h1',
+        label: 'postToolUse',
+        pluginName: null,
+        pluginVersion: null,
+        triggeredBy,
+        timestamp: '2026-08-16T10:00:05Z',
+        offsetMs: 5_000,
+        ownerKind: 'main',
+        agentId: null,
+      },
+    ],
+  }
+}
+
+describe("A hook step's own trigger", () => {
+  it('shows the triggering tool name on the Detail tab, eagerly, with no fetch needed', async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(hookStepEnvelope('edit'), {
+      thinking: { kind: 'unavailable', reason: 'irrelevant' },
+      raw: { kind: 'present', eventType: 'hook.start', payload: '{}' },
+      result: { kind: 'skipped', reason: 'irrelevant' },
+      trigger: { kind: 'toolInvocation', toolName: 'view', arguments: { kind: 'object', raw: '{}' }, result: null },
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /postToolUse/i })
+    await user.click(step)
+
+    const detailPanel = (await screen.findByText('Triggered by')).closest('div')
+    expect(detailPanel).toHaveTextContent('edit')
+  })
+
+  it('states plainly when a hook has no resolved trigger name, rather than a blank field', async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(hookStepEnvelope(null), {
+      thinking: { kind: 'unavailable', reason: 'irrelevant' },
+      raw: { kind: 'present', eventType: 'hook.start', payload: '{}' },
+      result: { kind: 'skipped', reason: 'irrelevant' },
+      trigger: { kind: 'absent', reason: 'The sessionStart hook carries no tool trigger; it did not fire in response to a tool call.' },
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /postToolUse/i })
+    await user.click(step)
+
+    expect(await screen.findByText('Triggered by')).toBeInTheDocument()
+    expect(screen.getByText(/see raw tab/i)).toBeInTheDocument()
+  })
+
+  it("shows the full trigger — tool, arguments and result — on the Raw tab", async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(hookStepEnvelope(null), {
+      thinking: { kind: 'unavailable', reason: 'irrelevant' },
+      raw: { kind: 'present', eventType: 'hook.start', payload: '{"id":"h1","data":{"hookType":"postToolUse"}}' },
+      result: { kind: 'skipped', reason: 'irrelevant' },
+      trigger: {
+        kind: 'toolInvocation',
+        toolName: 'skill',
+        arguments: { kind: 'object', raw: '{"skill":"using-superpowers"}' },
+        result: '{"resultType":"success","sessionLog":"Skill loaded successfully"}',
+      },
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /postToolUse/i })
+    await user.click(step)
+    await user.click(screen.getByRole('tab', { name: 'Raw' }))
+
+    expect(await screen.findByText('Trigger')).toBeInTheDocument()
+    expect(screen.getByText('skill')).toBeInTheDocument()
+    expect(screen.getByText(/"skill":"using-superpowers"/)).toBeInTheDocument()
+    expect(screen.getByText(/Skill loaded successfully/)).toBeInTheDocument()
+  })
+
+  it('states why a hook has no trigger on the Raw tab — e.g. sessionStart — rather than a blank block', async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(hookStepEnvelope(null), {
+      thinking: { kind: 'unavailable', reason: 'irrelevant' },
+      raw: { kind: 'present', eventType: 'hook.start', payload: '{"id":"h1","data":{"hookType":"sessionStart"}}' },
+      result: { kind: 'skipped', reason: 'irrelevant' },
+      trigger: { kind: 'absent', reason: 'The sessionStart hook carries no tool trigger; it did not fire in response to a tool call.' },
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /postToolUse/i })
+    await user.click(step)
+    await user.click(screen.getByRole('tab', { name: 'Raw' }))
+
+    expect(await screen.findByText(/sessionStart hook carries no tool trigger/i)).toBeInTheDocument()
+  })
+
+  /** Code review: a trigger is meaningful for exactly one step kind — showing "Only a hook step has
+   * a trigger; this step kind does not." on every non-hook step's Raw tab would be structural noise
+   * on the large majority of steps, the same "no section unless there is a real reason for one"
+   * discipline `Pager`/`StepFlag`/`CleanChecks` already follow. */
+  it('renders no Trigger block at all on a non-hook steps Raw tab', async () => {
+    const user = userEvent.setup()
+    respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
+      thinking: { kind: 'unavailable', reason: 'irrelevant' },
+      raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
+      result: { kind: 'skipped', reason: 'irrelevant' },
+      trigger: TRIGGER_NOT_APPLICABLE,
+    })
+    renderAtSession('session-1')
+
+    const step = await screen.findByRole('button', { name: /view/i })
+    await user.click(step)
+    await user.click(screen.getByRole('tab', { name: 'Raw' }))
+
+    expect(await screen.findByText('Call')).toBeInTheDocument()
+    expect(screen.queryByText('Trigger')).not.toBeInTheDocument()
+    expect(screen.queryByText(/only a hook step has a trigger/i)).not.toBeInTheDocument()
   })
 })
 
@@ -516,6 +652,7 @@ describe('Readable reasoning is shown', () => {
       thinking: { kind: 'present', text: 'Checking the failing assertion before writing a fix.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -544,6 +681,7 @@ describe('Encrypted reasoning is explained, not blanked', () => {
       },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 
@@ -570,6 +708,7 @@ describe('A step whose raw event was skipped at ingest', () => {
       thinking: { kind: 'unavailable', reason: 'No reasoning was recorded for this step.' },
       raw: { kind: 'skipped', reason: 'No raw event was found for this step; it may have been skipped at ingest.' },
       result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
+      trigger: TRIGGER_NOT_APPLICABLE,
     })
     renderAtSession('session-1')
 

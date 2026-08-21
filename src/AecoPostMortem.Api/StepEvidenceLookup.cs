@@ -13,10 +13,12 @@ namespace AecoPostMortem.Api;
 /// nor <see cref="Data.Execution.ToolCall"/> carries a foreign key back to the <see cref="RawEvent"/>
 /// row that produced it (`AecoPostMortem.Data/CLAUDE.md`: the payload stays authoritative, and
 /// nothing lifts an envelope's own <c>id</c> out into a NORMALIZED column). A step's own identity —
-/// <c>SessionTapeStep.StepId</c> — is exactly the field each event kind's envelope already carries
-/// (a turn's, skill's or hook's own envelope <c>id</c>; a tool call's <c>data.toolCallId</c>, the one
-/// natural id Copilot writes for the thing itself — per <c>SessionRecording.cs</c>'s own remarks), so
-/// this is a lookup by that same field, not a new identity scheme.
+/// <c>SessionTapeStep.StepId</c> — is exactly the field each event kind's own row is keyed by
+/// (a turn's or skill's own envelope <c>id</c>; a tool call's <c>data.toolCallId</c>, the one natural
+/// id Copilot writes for the thing itself; a hook's own <c>data.hookInvocationId</c> — <em>not</em>
+/// its envelope <c>id</c>, see "What triggered a hook" below for the real mismatch this once was —
+/// per <c>SessionRecording.cs</c>'s own remarks), so this is a lookup by that same field, not a new
+/// identity scheme.
 ///
 /// A prompt step is matched on the <c>assistant.turn_start</c> envelope's own <c>id</c>, never on
 /// <c>data.turnId</c>: that field is Copilot's own cycling display counter, repeated within one
@@ -44,6 +46,12 @@ public static class StepEvidenceLookup
     const string NoRecordedCompletionReason =
         "No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.";
 
+    /// <summary>The "wrong step kind" reason for <see cref="FindTrigger"/> — only a <c>Hook</c> step
+    /// has a trigger at all, the same short-circuit <see cref="ResultNotApplicableReason"/> already
+    /// gives its own field.</summary>
+    const string TriggerNotApplicableReason =
+        "Only a hook step has a trigger; this step kind does not.";
+
     public static StepEvidenceEnvelope Find(
         IReadOnlyList<RawEvent> sessionEvents,
         SessionTapeStepKind kind,
@@ -60,7 +68,15 @@ public static class StepEvidenceLookup
             SessionTapeStepKind.ToolCall or SessionTapeStepKind.McpCall =>
                 FindByDataField(ordered, "tool.execution_start", "toolCallId", stepId),
             SessionTapeStepKind.Skill => FindByEnvelopeId(ordered, "skill.invoked", stepId),
-            SessionTapeStepKind.Hook => FindByEnvelopeId(ordered, "hook.start", stepId),
+            // Not the envelope's own `id` — `Data.Execution.Hook.EventId` (this step's own `StepId`)
+            // is `data.hookInvocationId`, the pair's own natural key `HookBuilder` deliberately keys
+            // the row by (its own doc comment: "unlike Skill, neither event's own envelope id ties
+            // the two together"). A real hook.start's envelope id and its own hookInvocationId are
+            // two different values — confirmed against the live 35-session reference corpus, where
+            // matching on the envelope id instead resolved zero of 3,027 real hook steps before this
+            // fix (this task's own real-corpus verification caught it; see the non-obvious decision
+            // in this project's own CLAUDE.md).
+            SessionTapeStepKind.Hook => FindByDataField(ordered, "hook.start", "hookInvocationId", stepId),
             _ => null,
         };
 
@@ -75,6 +91,7 @@ public static class StepEvidenceLookup
                 // result must still surface here rather than inheriting the call's own absence
                 // (code review).
                 Result = FindResult(ordered, kind, stepId),
+                Trigger = FindTrigger(kind, null),
             };
         }
 
@@ -92,6 +109,10 @@ public static class StepEvidenceLookup
                 Payload = found.Raw.Payload,
             },
             Result = FindResult(ordered, kind, stepId),
+            // The Hook step's own anchor *is* its `hook.start` event — the exact event `Trigger`
+            // reads `data.input` off, so this is the same lookup `Raw` already resolved, never a
+            // second raw-event scan.
+            Trigger = FindTrigger(kind, found.Envelope),
         };
     }
 
@@ -120,6 +141,81 @@ public static class StepEvidenceLookup
         {
             EventType = found.Raw.EventType,
             Payload = found.Raw.Payload,
+        };
+    }
+
+    /// <summary>What triggered a hook — <c>hook.start.data.input</c>'s own <c>toolName</c>/
+    /// <c>toolArgs</c>/<c>toolResult</c>, verified against the live 35-session reference corpus.
+    /// Only a <see cref="SessionTapeStepKind.Hook"/> step has a trigger at all — every other step
+    /// kind reports the fixed "not applicable" reason without attempting anything, the same
+    /// short-circuit <see cref="FindResult"/> already applies. <paramref name="anchorEnvelope"/> is
+    /// the Hook step's own <c>hook.start</c> envelope — already resolved by <see cref="Find"/>'s own
+    /// anchor lookup, so this never re-scans <c>sessionEvents</c> a second time for the same
+    /// event.</summary>
+    static HookTriggerEnvelope FindTrigger(SessionTapeStepKind kind, EventEnvelope? anchorEnvelope)
+    {
+        if (kind != SessionTapeStepKind.Hook)
+        {
+            return new HookTriggerEnvelope.Absent { Reason = TriggerNotApplicableReason };
+        }
+
+        if (anchorEnvelope is not { } envelope)
+        {
+            return new HookTriggerEnvelope.Absent { Reason = NoRawEventFoundReason };
+        }
+
+        var data = envelope.Data;
+        // An empty toolName (`ValueKind.String` but zero-length) is treated the same as a missing
+        // one — never a `ToolInvocation` with a blank name — matching the identical `{ Length: > 0 }`
+        // guard `HookTriggerNameLookup.GetToolName` already applies to the eager Detail-tab field
+        // (code review): the two readers must agree on what counts as "a real trigger" for the
+        // identical step, not diverge on an edge case neither has observed in the live corpus.
+        if (data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("input", out var input)
+            || input.ValueKind != JsonValueKind.Object
+            || !input.TryGetProperty("toolName", out var toolNameProperty)
+            || toolNameProperty.ValueKind != JsonValueKind.String
+            || toolNameProperty.GetString() is not { Length: > 0 } toolName)
+        {
+            // The real, measured case this covers: a `sessionStart` hook carries `initialPrompt`/
+            // `source`/`cwd` instead of `toolName` — it did not fire in response to any tool call, so
+            // "no trigger" is a structural fact about this hookType, not a gap in the read.
+            var hookType = GetString(data, "hookType");
+            return new HookTriggerEnvelope.Absent
+            {
+                Reason = hookType is null
+                    ? "This hook carries no tool trigger; it did not fire in response to a tool call."
+                    : $"The {hookType} hook carries no tool trigger; it did not fire in response to a tool call.",
+            };
+        }
+
+        // `toolArgs` is parsed the identical polymorphic way `ToolArguments` parses
+        // `tool.execution_start.data.arguments` (FR-4) — a measured 840 of 2,992 real `postToolUse`
+        // `hook.start` events in the live reference corpus carry a string-shaped `toolArgs`
+        // (`apply_patch`'s own patch body), never an object. A missing `toolArgs` key parses "null"
+        // through the identical code path (Unparsed) rather than a special case of its own.
+        var argumentsJson = input.TryGetProperty("toolArgs", out var toolArgsProperty)
+            ? toolArgsProperty.GetRawText()
+            : "null";
+        var toolArguments = ToolArguments.Parse(argumentsJson);
+
+        // Measured 100% (2,992 of 2,992) of real `postToolUse` triggers in the live reference corpus
+        // carry a `toolResult`, but this still defends against its absence rather than assuming it —
+        // `null` states "no result was recorded," never an empty string. A JSON `null` value (present
+        // but explicitly null, as distinct from an omitted key) is treated the same way — `GetRawText()`
+        // on a JSON `null` returns the four-character text `"null"`, not a C# `null`, so this checks
+        // `ValueKind` explicitly rather than trusting `TryGetProperty` alone to have ruled that out
+        // (code review).
+        var result = input.TryGetProperty("toolResult", out var toolResultProperty)
+            && toolResultProperty.ValueKind != JsonValueKind.Null
+                ? toolResultProperty.GetRawText()
+                : null;
+
+        return new HookTriggerEnvelope.ToolInvocation
+        {
+            ToolName = toolName,
+            Arguments = new HookTriggerArguments { Kind = toolArguments.Kind, Raw = toolArguments.Raw },
+            Result = result,
         };
     }
 

@@ -13,6 +13,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest?from=&to=` (`DigestRoute`, `FromParameter`/`ToParameter` — the pager & date-range filter task's optional `DateOnly` bounds, both omittable, a caller error on `from > to` answering 400), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
+| `HookTriggerNameLookup.cs` | What triggered a hook, sibling task: `FindForHookSteps` resolves a `Hook` step's own trigger tool name eagerly (batched, keyed by `StepId`), the same "additive, no-fetch" shape `PromptTextLookup` established for a Prompt step's own text — deliberately a separate, narrower reader from `StepEvidenceLookup`'s own `FindTrigger` (below), which resolves the fuller, on-demand trigger evidence once a step is selected. See the non-obvious decision below for why these stay two readers rather than one |
 | `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
 | `SessionRuleSetLookup.cs` | FR-27's own not-yet-wired gap, closed: `SessionRuleSetLookup.BuildAll` resolves a whole store's `RawEvent`s into one `Rules.SessionRuleSet` per `Data.Execution.Session` row, calling `Ingestion.SessionRuleExtractor.Extract` per session — the corpus-wide walk nothing did before this landed |
 | `ToolInvocationShapeLookup.cs` | The real `Rules.ToolInvocationShape` corpus (piece 3), closed: `BuildAll` reads `HasPath`/`McpServerName` straight off `Data.Execution.ToolCall` (already real columns) and `SpawnsAgent` off `Data.Execution.Agent.SpawningToolCallId` (already structural) — no new RAW parsing for any of the three — and reads `HasPattern`/`HasReplacement`/`HasFileText`/`HasCommand` from each call's own RAW `tool.execution_start.data.arguments`, field names verified against the live 35-session reference corpus: `pattern` (`rg`/`grep`/`glob`), `old_str`/`new_str` (`edit`), `file_text` (`create`), `command` (`powershell`). `apply_patch`'s own `arguments` is a JSON string (the whole patch body), not an object — a real wrinkle the corpus check caught — so all four are `false` for a string-shaped call rather than guessed at. The public `BuildAll(rawEvents)` overload parses RAW itself; an `internal BuildAll(argumentsByCall)` overload (piece 3's fifth slice, code review) takes an already-built dictionary instead, so `GetDigest` can share one parse pass with `ParamCarryingCallLookup` rather than each lookup parsing the same payloads separately |
@@ -20,10 +21,10 @@ Endpoints for the three surfaces, and the host that serves them.
 | `ParamCarryingCallLookup.cs` | Piece 3's fifth and final slice: the real `Rules.ParamCarryingCall` corpus `Rules.AlwaysPassParamCheck` resolves its mentions against. `SpawnsAgent` reuses `Agent.SpawningToolCallId` the same structural way `ToolInvocationShapeLookup` does; `ArgumentKeys` reads every field name a call's own RAW arguments carried (`Ingestion.ToolArguments.PropertyNames`, new this slice) rather than one fixed set, since the parameter a rule names is arbitrary — unlike `ToolInvocationShapeLookup`'s four closed booleans. `ArgumentsRecorded` (code review) is `true` only when a call's own arguments were object-shaped, so "no record at all" never collapses into "recorded with no keys". The public `BuildAll(rawEvents)` and an `internal BuildAll(argumentsByCall)` overload mirror `ToolInvocationShapeLookup`'s own split (below) |
 | `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` or `AlwaysPassParam` match is `Watched` unconditionally, no resolution involved (piece 3's third and fifth slices — neither operand is a tool name); every other matched shape stays `CheckableNotYetBuilt`. Mockup parity item #18 gave the caller-supplied `NotCheckable(reason)` its first real constructor: an unmatched, directive statement (`UnmatchedStatementDisposition.CheckableNotBuilt`) gated on whether an action was *needed*/*necessary*/*relevant* to "the task" (`TaskRelevanceObligation`) is `NotCheckable`, everything else in that disposition stays `CheckableNotYetBuilt` |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions. Mockup parity item #7 added `RuleViolationCountEnvelope` (`"counted"`/`"notAvailable"`) and `RulesInventoryRowEnvelope.ViolationCount` — a Watched row's own violation count, `null` for every other status |
-| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles). Mockup parity item #14 added `SessionMastheadEnvelope.StartedAt` (`required DateTimeOffset`) and `.EndedAt` (`DateTimeOffset?`), passed through unchanged from `Findings.SessionMasthead`. Mockup parity item #17 added `SessionTapeStepEnvelope.Findings` (`required IReadOnlyList<FindingEnvelope>`, defaulting to `[]` via a new optional `findings` parameter on `From`) and a matching optional `stepFindings` parameter on `SessionEnvelope.From` — see `SessionTapeStepFindingLookup.cs` below for what populates it |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles). Mockup parity item #14 added `SessionMastheadEnvelope.StartedAt` (`required DateTimeOffset`) and `.EndedAt` (`DateTimeOffset?`), passed through unchanged from `Findings.SessionMasthead`. Mockup parity item #17 added `SessionTapeStepEnvelope.Findings` (`required IReadOnlyList<FindingEnvelope>`, defaulting to `[]` via a new optional `findings` parameter on `From`) and a matching optional `stepFindings` parameter on `SessionEnvelope.From` — see `SessionTapeStepFindingLookup.cs` below for what populates it. What triggered a hook (sibling task) added `SessionTapeStepEnvelope.TriggeredBy` (a `Hook` step's own trigger tool name, `string?`, `null` for every other kind) and a matching optional `triggeredByToolNameByStepId` parameter on `SessionEnvelope.From`, the identical additive shape `promptTextByStepId` already established — see `HookTriggerNameLookup.cs` above for what populates it |
 | `SessionTapeStepFindingLookup.cs` | Mockup parity item #17: attaches a finding to the specific tape step(s) it is unambiguously about, for the narrow set of finding shapes whose own `Finding.Evidence` names an identity (a tool name, a hook name) a session's own `ToolCall`/`Hook` rows can be matched against exactly — `Build(sessionFindings, toolCalls, hooks)` returns a `(SessionTapeStepKind, StepId)`-keyed map. Covers exactly two shapes today, matched by the marker `EvidenceItem.Field` name(s) each orchestrator already writes (the same technique `RulesInventoryEnvelope.cs`'s own `BuildViolationCounts` already uses to join a served count back to its source check, applied here to a new question): a `toolIdentity` field (`FailedToolCallsFinding`/`ToolFailureClusterFinding`) matches every failed `ToolCall` of that exact tool identity in the session — every failing call, not a guessed "first" or "most recent" one, since the finding's own evidence is an aggregate rate over all of them; a `data.success`/`data.error` field pair (`HookFailureFinding`) matches every failed `Hook` row whose `Name` equals the finding's own `Recurrence.Key`. Every other finding-producing check (`RepeatedFileReadFindingCheck`, `AbortedTurnFinding`, `InterruptionLoadFinding`, `PhaseChurnFinding`, `BannedToolFinding`, `NeverReadPathFinding`, `UseAAfterBFinding`, `AlwaysPassParamFinding`) is deliberately left uncovered — see the non-obvious decision below for why each one doesn't fit |
-| `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason. A tool call's own result added `StepEvidenceEnvelope.Result`, reusing `RawStepEventEnvelope` for a second event (`tool.execution_complete`) rather than a new type — see the non-obvious decision below |
-| `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does. FR-23 (S-10, issue #19) added `StepEvidenceLookup.ReasoningReadabilityByModel`, scanning the whole session's own main-thread `assistant.message` events (not just the current turn) to build the per-model readable share. A tool call's own result added `StepEvidenceLookup.FindResult`, joining `tool.execution_complete` by the same `toolCallId` field the call itself is already joined by |
+| `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason. A tool call's own result added `StepEvidenceEnvelope.Result`, reusing `RawStepEventEnvelope` for a second event (`tool.execution_complete`) rather than a new type — see the non-obvious decision below. What triggered a hook (sibling task) added `HookTriggerEnvelope` (`ToolInvocation`/`Absent`) and `HookTriggerArguments`, plus the required `StepEvidenceEnvelope.Trigger` field — see the non-obvious decision below for the full shape and the real corpus verification |
+| `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does. FR-23 (S-10, issue #19) added `StepEvidenceLookup.ReasoningReadabilityByModel`, scanning the whole session's own main-thread `assistant.message` events (not just the current turn) to build the per-model readable share. A tool call's own result added `StepEvidenceLookup.FindResult`, joining `tool.execution_complete` by the same `toolCallId` field the call itself is already joined by. What triggered a hook (sibling task) added `StepEvidenceLookup.FindTrigger`, reading `hook.start.data.input` off the identical anchor envelope `Find`'s own `Raw` field already resolved for a `Hook` step — never a second raw-event scan |
 | `PromptTextLookup.cs` | A real gap in a stale doc comment, closed: `Findings.SessionTapeStep.Label` for a `Prompt` step is the turn's own `Outcome`, because `Findings.SessionRecording.cs`'s own comment claimed Copilot's event log "carries no separate prompt entity" — verified wrong against the live corpus, `user.message.data.content` is the literal prompt text, joined by `interactionId` to the same `assistant.turn_start` event a `Prompt` step's `StepId` (`Turn.EventId`, that event's own envelope id) already resolves from. `FindForPromptSteps` mirrors `StepEvidenceLookup.FindThinkingForPromptSteps`'s exact batch shape, including its keying: both are keyed by the `turn_start` envelope id, never by `data.turnId` — see the non-obvious decision below for the collision that once made this a real, measured defect |
 | `SessionLabelLookup.cs` | Digest session-naming, Slice 2: a session's own display label — the first five words of its earliest real prompt, so a Digest session link reads as something other than a bare GUID. Simpler than `PromptTextLookup` — a session's first prompt needs no `turn_start`/`interactionId` join at all, only the earliest `user.message` event by `RawEvent.Sequence`. Truncation happens here, server-side, not in the browser (`Truncate`) |
 | `SubagentOutputEnvelope.cs` | FR-22 (S-09, issue #18): the inspector's lane-output contract — `Present`/`NotRecorded`/`Failed`, a closed three-shape union so "a real report", "nothing recorded" and "the subagent failed" are each a stated value, never inferred |
@@ -871,6 +872,131 @@ recorded `tool.execution_complete` now serves its real result payload on the Raw
 block, and a call the session ended mid-execution correctly serves the stated absence rather than a
 blank panel.
 
+### What triggered a hook: an eager tiny fact on the tape plus a fuller, on-demand evidence field — never a tape-row label change
+
+A hook row said a hook ran, but not what it ran in response to. Real `hook.start` payloads confirmed
+against the live 35-session reference corpus before writing any code (this project's own cautionary
+`EventEnvelopeParserV1` incident, `Ingestion/CLAUDE.md`): `data.input` carries `toolName`/`toolArgs`/
+`toolResult` for a `postToolUse` hook (2,992 of 3,027 real `hook.start` events), and `initialPrompt`/
+`source`/`cwd` — never `toolName` — for a `sessionStart` hook (35 of 3,027, none with a `toolName`).
+No third `hookType` exists in this corpus.
+
+**Where it surfaces, and why not the tape row itself.** Three surfaces were weighed: the tape row's
+own label, the Detail tab, and the Raw/evidence tab. The tape row was rejected — `session/Tape.tsx`'s
+virtualisation math is deliberately fixed-height and simple (`web/CLAUDE.md`'s own "driven by fixed
+constants, never by measuring the real DOM" entry), and this task's own brief says not to destabilise
+it; a trigger's own tool name is also not the kind of fact that reads well packed into one row's
+existing `label` text without a second visual element the row doesn't have room for. Two surfaces
+were built instead, splitting the eager/small half from the richer/on-demand half the same way
+`PromptText` (eager, tiny) and `Thinking` (fuller, fetched) already split for a Prompt step:
+
+- **Detail tab, eager, no fetch** — `SessionTapeStepEnvelope.TriggeredBy` (`string?`), a `Hook`
+  step's own trigger tool name, resolved once per session (`HookTriggerNameLookup.FindForHookSteps`)
+  the identical "additive, eager, no-fetch" shape `PromptTextLookup` established. Small and
+  scannable, costs nothing extra to load since the tape is already in hand the moment a step is
+  selected (`web/CLAUDE.md`'s "the inspector fetches only Thinking/Raw; Detail needs no request of
+  its own" entry stays true).
+- **Raw tab, on demand, fetched** — `StepEvidenceEnvelope.Trigger` (`HookTriggerEnvelope`), the full
+  tool name, arguments and result, resolved by `StepEvidenceLookup.FindTrigger` from the identical
+  `hook.start` anchor envelope `Find` already resolved for that step's own `Raw` field — never a
+  second raw-event scan. This is where the potentially-large payload lives, bounded the same way
+  `Result` already is (below).
+
+**"No trigger" is a distinct, stated value at both layers, never an empty string.** `TriggeredBy` is
+`null` for every non-`Hook` step, for a `sessionStart` hook (structurally no tool trigger), and for a
+hook whose own `hook.start` cannot be found — but the *reason* lives only on the richer `Trigger`
+field, a closed two-shape union behind a private constructor (the same `RawStepEventEnvelope`/
+`ThinkingEnvelope`/`SuggestionEnvelope` mechanism): `ToolInvocation` for a real `postToolUse` trigger,
+`Absent { Reason }` for every other case, naming which — "Only a hook step has a trigger; this step
+kind does not," "The sessionStart hook carries no tool trigger; it did not fire in response to a tool
+call," or the pre-existing `NoRawEventFoundReason` `Result`/`Raw` already use. `web/src/routes/
+SessionPage.tsx`'s Detail-tab fallback text ("No tool trigger resolved — see Raw tab for detail.")
+points the operator at the fuller, reasoned answer rather than trying to compress three distinct
+causes into one eager field's own short text.
+
+**`toolArgs` is parsed the identical polymorphic way `Ingestion.ToolArguments` parses
+`tool.execution_start.data.arguments` (FR-4), reused rather than re-implemented.** `HookTriggerArguments.Kind`
+is `Ingestion.ToolArgumentKind` itself, not a second, parallel enum — the same "camelCase enum on the
+wire, no per-property override needed" convention `Data.Execution.OwnerKind` already gets from the
+global `JsonStringEnumConverter`. Verified against the live reference corpus rather than assumed: 840
+of 2,992 real `postToolUse` `hook.start` events carry a string-shaped `toolArgs` (`apply_patch`'s own
+whole patch body), never an object — `FindTrigger` calls `ToolArguments.Parse` directly (passing
+`"null"` through the identical code path for a genuinely missing `toolArgs` key, rather than a special
+case of its own), so this shape is recorded, never coerced, the same discipline `ToolInvocationShapeLookup`
+already established for the sibling `tool.execution_start.data.arguments` field.
+
+**`toolResult` is served whole, never truncated — measured, not guessed, from a number an order of
+magnitude larger than the precedent this task was told to measure against.** `Present.Payload`
+(a tool call's own result) measured a 42,976-character max; this field's own max, measured across
+the same corpus, is 199,831 characters (~200 KB, a `github-mcp-server-get_file_contents` call) —
+p50 1,311 characters, p99 39,602, only 22 of 2,992 real triggers exceed the 43 KB bound the prior
+precedent already served whole. Given the precedent already accepted serving payloads an order of
+magnitude smaller whole, and only a measured 22 real triggers exceed even that older bound, this field
+follows the identical choice: served whole, verbatim, bounded only on the client
+(`web/CLAUDE.md`'s matching `.inspector__raw-payload` `max-height`/`overflow-y` entry — reused
+directly, no new CSS, since `TriggerBlock` renders through the identical class). Modelled as nullable
+(`string?`) rather than assumed present, even though a measured 100% (2,992 of 2,992) of real
+`postToolUse` triggers carry one — a trigger genuinely carrying none states that fact as
+`null`/"No result was recorded for this hook's trigger," never an empty string.
+
+**`HookTriggerNameLookup` and `StepEvidenceLookup.FindTrigger` stay two separate readers, not one
+shared pass.** This mirrors `PromptTextLookup`/`StepEvidenceLookup.FindThinkingForPromptSteps`'s own
+established split (`Api/CLAUDE.md`'s "References" section) rather than the `RawToolArguments.ByCall`
+shared-dictionary precedent piece 3's fifth slice built: those two questions are asked at genuinely
+different times over different-shaped answers — eagerly, for the whole tape, a short tool name; once,
+for a selected step, the full arguments and result — so there is no single caller that would
+otherwise parse the same payload twice the way `ToolInvocationShapeLookup`/`ParamCarryingCallLookup`
+did. `HookTriggerNameLookup.FindForHookSteps` reads only `hook.start`'s own `data.input.toolName`;
+`FindTrigger` reads `data.input` in full, from the identical anchor `Find` already resolved — so even
+`FindTrigger` itself does not re-scan `sessionEvents`.
+
+Verified against the live 35-session reference corpus via a real `GET /api/sessions/{sessionId}`
+request and a real `GET /api/sessions/{sessionId}/steps/{stepId}?kind=hook` request, and a real
+browser: see this project's own `Status` section for the exact session, step and counts inspected.
+
+### A real, pre-existing defect this task's own real-data check found: a Hook step's Raw tab never resolved anything, because `StepEvidenceLookup.Find` matched the wrong field
+
+Building this feature's real-corpus verification surfaced a genuine bug that predates this task,
+unrelated to the trigger work itself but blocking every part of it from working against real data:
+the very first real `GET /api/sessions/{sessionId}/steps/{stepId}?kind=hook` request this task made
+(before this fix) answered `Raw: Skipped { NoRawEventFoundReason }` for a step id the tape itself had
+just served — the Raw tab for *any* Hook step had never actually resolved on real data, only on this
+project's own hand-written unit fixtures.
+
+The cause: `Findings.SessionTapeStep.StepId` for a `Hook` step is `Data.Execution.Hook.EventId`, and
+`Ingestion.HookBuilder.Build` deliberately sets `EventId = invocationId` — `data.hookInvocationId`,
+the pair's own natural correlation key (`HookBuilder`'s own doc comment: "unlike Skill, neither
+event's own envelope id ties the two together"), verified by `HookBuilderTests` asserting exactly
+that. `StepEvidenceLookup.Find`'s Hook branch, however, called `FindByEnvelopeId(ordered, "hook.start",
+stepId)` — matching the requested id against the **envelope's own `id`**, not `hookInvocationId`. A
+real `hook.start` payload's envelope id and its own `hookInvocationId` are two different values
+(confirmed against the live corpus, e.g. `id: "9bf37c76-…"` vs. `data.hookInvocationId:
+"10a44d08-…"` on the very first `sessionStart` hook this task inspected), so the two never matched:
+requesting a real Hook step's evidence by its real, served `StepId` resolved nothing, always. The
+existing regression test for this (`A_hook_steps_raw_event_is_matched_by_the_envelopes_own_id`) never
+caught it because its own fixture set the envelope id and the requested step id to the same literal
+string with no `hookInvocationId` field at all — a synthetic shape no real `hook.start` payload has.
+
+Confirmed with a direct measurement before writing the fix: a live query against the store scoped to
+`SessionTapeStepKind.Hook` resolved **0 of 97** real hook steps in the session this task's own
+end-to-end check used. The fix is narrow and structural, not a new mechanism: `StepEvidenceLookup.Find`'s
+Hook branch now calls `FindByDataField(ordered, "hook.start", "hookInvocationId", stepId)` — the same
+helper `ToolCall`/`McpCall` already use for their own `toolCallId` field, reused rather than a new
+lookup shape — and `HookTriggerNameLookup.FindForHookSteps` (this task's own new file) keys its
+dictionary by the identical `hookInvocationId` field rather than the envelope id it was first written
+against. `StepEvidenceLookupTests`/`HookTriggerNameLookupTests` were both rewritten to key their own
+fixtures by `hookInvocationId`, with two dedicated regression cases proving the fix holds in both
+directions: a real hookInvocationId resolves, and the envelope id alone — the wrong field — resolves
+nothing (`A_hook_step_requested_by_its_envelope_id_instead_of_its_hookInvocationId_resolves_nothing`).
+
+This is the same lesson `Ingestion/CLAUDE.md`'s own `EventEnvelopeParserV1` cautionary tale states —
+hand-picked fixtures had all independently guessed a field that does not describe the real payload,
+and every one of them agreed with itself, so nothing caught it before a real request against a real
+store did. Re-verified after the fix, corpus-wide: 2,992 of 3,027 real hook steps (every `postToolUse`
+hook) now resolve a real trigger tool name, and the remaining 35 (every `sessionStart` hook) honestly
+resolve the stated `Absent` case — see this file's own `Status` section for the exact numbers and the
+real session/step this was confirmed against in a live browser, both before and after the fix.
+
 ### Mockup parity item #17 is deliberately narrow: two finding shapes covered, eight left as "not attempted"
 
 The mockup shows a flag on the exact tape row a finding is *about* — but `Finding` (`Findings/CLAUDE.md`'s
@@ -1386,3 +1512,37 @@ machines_local_time`) can assert `DateTimeOffset.Offset == TimeSpan.Zero` direct
 every machine, unlike a differential HTTP-level test built on a real timestamp, whose own pass/fail
 would otherwise depend on the CI machine's ambient local offset (the same non-determinism PRD §3.8
 exists to rule out, one layer up from the bug itself).
+
+What triggered a hook (this task) closed a real gap: a hook row said a hook ran, never what it ran in
+response to. `HookTriggerEnvelope` (`ToolInvocation`/`Absent`) and `HookTriggerArguments` are the new
+wire contract, served two ways — eagerly, on the tape itself (`SessionTapeStepEnvelope.TriggeredBy`,
+a `Hook` step's own trigger tool name, resolved by the new `HookTriggerNameLookup`) and fully, on
+demand, once a step is selected (`StepEvidenceEnvelope.Trigger`, resolved by
+`StepEvidenceLookup.FindTrigger` from the same `hook.start` anchor `Find` already resolved for the
+Raw tab). Building this task's own mandatory real-corpus check surfaced and fixed a real, pre-existing
+defect unrelated to the trigger work itself — a `Hook` step's Raw tab had never actually resolved
+against real data at all, because `StepEvidenceLookup.Find`'s Hook branch matched the wrong field
+(the envelope's own `id` instead of `data.hookInvocationId`, the field `Data.Execution.Hook.EventId`
+— a Hook step's own `StepId` — is actually keyed by). See the non-obvious decision above for the full
+story and the fix (`FindByDataField(ordered, "hook.start", "hookInvocationId", stepId)`).
+
+Verified against the live 35-session reference corpus, corpus-wide, via the live API (not only at the
+unit level): of 3,027 real hook steps, 2,992 (every real `postToolUse` hook) now resolve a real
+trigger tool name and 35 (every real `sessionStart` hook) honestly resolve the stated `Absent` case —
+before the Hook-identity fix, a direct measurement showed 0 of 97 real hook steps in one real session
+resolved anything at all. `toolArgs` is parsed by reusing `Ingestion.ToolArguments.Parse` directly
+(FR-4): a real `postToolUse` trigger with an object-shaped `toolArgs` (e.g. `skill` →
+`{"skill":"using-superpowers"}`) and a real `apply_patch` trigger with a string-shaped `toolArgs` (its
+whole patch body, never coerced into an object) were both confirmed via a real `GET /api/sessions/
+{sessionId}/steps/{stepId}?kind=hook` request. `toolResult` is served whole — measured max 199,831
+characters (~200 KB) across the corpus, an order of magnitude past the ~43 KB max the prior "a tool
+call's own result" precedent measured, still served the identical way, bounded only on the client.
+
+Verified in a real browser against the live store (session `03655527-e563-4df7-a73f-eea0903a1752`,
+`supahfly27/UpFront`): the `sessionStart` hook step at 43.3s (step id `10a44d08-…`) renders "TRIGGERED
+BY — No tool trigger resolved — see Raw tab for detail." on the Detail tab and "TRIGGER — The
+sessionStart hook carries no tool trigger; it did not fire in response to a tool call." on the Raw
+tab; the `postToolUse` hook step at 53.6s (step id `814db88c-…`, the `skill` tool) renders "TRIGGERED
+BY — skill" on the Detail tab and the full "TRIGGER — skill — `{"skill":"using-superpowers"}` — ⟨the
+real 18,574-character `toolResult`⟩" on the Raw tab, scrolling inside its own bounded block rather
+than pushing the page down. `web/CLAUDE.md`'s matching Status entry names the same real check.

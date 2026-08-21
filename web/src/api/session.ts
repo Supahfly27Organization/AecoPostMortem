@@ -24,6 +24,13 @@ export interface SessionTapeStep {
   // this is a second, additive fact. Null for every other step kind, and for a prompt step whose own
   // text could not be resolved (no matching user.message) — never a placeholder string.
   promptText?: string | null
+  // What triggered this hook — a 'hook' step's own tool name, resolved eagerly the same way
+  // `promptText` is, so the Detail tab needs no per-step fetch to show it. Null for every other
+  // step kind, for a sessionStart hook (structurally no tool trigger), and for a hook whose own
+  // trigger could not be resolved — never an empty string standing in for "blank" or "unknown".
+  // Optional (rather than `| null` required), the same "existing test literals still type-check"
+  // convention `promptText`/`findings`/`thinking` already establish.
+  triggeredBy?: string | null
   timestamp: string
   offsetMs: number
   ownerKind: OwnerKind
@@ -178,10 +185,31 @@ export type RawStepEventEnvelope =
  * covers both a step kind that never produces a result (`Prompt`/`Skill`/`Hook`) and a
  * `toolCall`/`mcpCall` step whose own `tool.execution_complete` was never recorded — still running,
  * or the session ended mid-call — never an empty string read as "the result was empty". */
+
+/** A hook trigger's own `toolArgs`, mirroring `AecoPostMortem.Api.HookTriggerArguments`. `kind`
+ * mirrors `AecoPostMortem.Ingestion.ToolArgumentKind` (FR-4: object for most tools, a bare JSON
+ * string for `apply_patch`'s whole patch body, never coerced) and `raw` is the value's own JSON
+ * text, exactly as read. */
+export interface HookTriggerArguments {
+  kind: 'object' | 'string' | 'unparsed'
+  raw: string
+}
+
+/** What triggered a hook, mirroring `AecoPostMortem.Api.HookTriggerEnvelope` — a hook row said a
+ * hook ran, never what it ran in response to. A closed two-shape union: `toolInvocation` is a real
+ * `postToolUse` trigger (`toolName`, its `arguments`, and its `result` — `null` when genuinely not
+ * recorded, distinct from an empty string), and `absent` states plainly why there is none — a
+ * `sessionStart` hook (structurally no tool trigger), a non-hook step kind, or a hook step whose own
+ * raw event could not be found. */
+export type HookTriggerEnvelope =
+  | { kind: 'toolInvocation'; toolName: string; arguments: HookTriggerArguments; result: string | null }
+  | { kind: 'absent'; reason: string }
+
 export interface StepEvidenceEnvelope {
   thinking: ThinkingEnvelope
   raw: RawStepEventEnvelope
   result: RawStepEventEnvelope
+  trigger: HookTriggerEnvelope
 }
 
 export function stepEvidenceRoute(sessionId: string, stepId: string, kind: SessionTapeStepKind): string {

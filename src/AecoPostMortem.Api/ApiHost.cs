@@ -425,7 +425,10 @@ public static class ApiHost
         var agents = context.Agents.ToList();
 
         var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
-        var invocations = ToolInvocationShapeLookup.BuildAll(toolCalls, agents, rawEvents);
+        // Shared once, the same reuse GetDigest already established for these two lookups, so this
+        // method's own violation-count checks (below) parse no tool.execution_start payload twice.
+        var argumentsByCall = RawToolArguments.ByCall(rawEvents);
+        var invocations = ToolInvocationShapeLookup.BuildAll(toolCalls, agents, argumentsByCall);
         var repositoryScope = BuildRepositoryScope(sessions);
 
         var selectedVersion = versionHash is null
@@ -442,17 +445,106 @@ public static class ApiHost
             .SelectMany(block => block.Statements)
             .Distinct()
             .ToList();
-        var classify = RulesInventoryClassifier.BuildClassifier(
-            RuleShapeCatalogue.MatchAll(statements), invocations);
+        var matching = RuleShapeCatalogue.MatchAll(statements);
+        var classify = RulesInventoryClassifier.BuildClassifier(matching, invocations);
+
+        // Mockup parity item #7: a Watched row's own violation count. Run the same four piece-3
+        // checks GetDigest runs, but over this method's own corpus-wide matches/invocations/toolCalls
+        // — the exact inputs RulesInventoryClassifier just resolved Watched status against, never a
+        // second, differently (repository-)scoped read (ApiHost/CLAUDE.md's own remarks on why
+        // GetRulesInventory stays corpus-wide where GetDigest does not).
+        var paramCarryingCalls = ParamCarryingCallLookup.BuildAll(toolCalls, agents, argumentsByCall);
+        var violationCounts = BuildViolationCounts(
+            matching.Matches,
+            BannedToolFinding.Run(matching.Matches, invocations, toolCalls),
+            NeverReadPathFinding.Run(matching.Matches, toolCalls),
+            UseAAfterBFinding.Run(matching.Matches, invocations, toolCalls),
+            AlwaysPassParamFinding.Run(matching.Matches, paramCarryingCalls));
 
         try
         {
-            return RulesInventoryEnvelope.From(RulesInventory.Build(ruleSets, selectedVersion, classify));
+            return RulesInventoryEnvelope.From(
+                RulesInventory.Build(ruleSets, selectedVersion, classify), violationCounts);
         }
         catch (UnknownRuleSetVersionException)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Mockup parity item #7's join: one entry per matched statement whose shape has a real
+    /// Finding-producing orchestrator (<see cref="RuleShapeKind.ToolIsBanned"/>,
+    /// <see cref="RuleShapeKind.NeverReadPath"/>, <see cref="RuleShapeKind.UseAAfterB"/>,
+    /// <see cref="RuleShapeKind.AlwaysPassParam"/>) — a matched <see cref="RuleShapeKind.PreferAOverB"/>
+    /// statement (today's one Watchable shape with no orchestrator) gets no entry at all, so a lookup
+    /// against this dictionary falls through to the caller's own <see cref="RuleViolationCountEnvelope.NotAvailable"/>
+    /// default rather than a fabricated number. Every one of the four Finding classes keys its own
+    /// <c>Recurrence.Key</c> to the matched statement's own text (<c>Findings/CLAUDE.md</c>'s remarks on
+    /// each), the same identity <paramref name="matches"/> itself carries per <see cref="RuleShapeMatch.Statement"/>
+    /// — a match with no corresponding finding still gets a real <c>Counted(0)</c> entry: the check
+    /// ran over every matched statement of its own shape and genuinely found nothing, which is a
+    /// different fact from the shape having no check at all.
+    /// </summary>
+    static Dictionary<RuleStatement, RuleViolationCountEnvelope> BuildViolationCounts(
+        IReadOnlyList<RuleShapeMatch> matches,
+        BannedToolFinding.Result bannedTool,
+        NeverReadPathFinding.Result neverReadPath,
+        UseAAfterBFinding.Result useAAfterB,
+        AlwaysPassParamFinding.Result alwaysPassParam)
+    {
+        var bannedToolCounts = CountsByRecurrenceKey(bannedTool.Findings, "call_count");
+        var neverReadPathCounts = CountsByRecurrenceKey(neverReadPath.Findings, "access_count");
+        var useAAfterBCounts = CountsByRecurrenceKey(useAAfterB.Findings, "violation_count");
+        var alwaysPassParamCounts = CountsByRecurrenceKey(alwaysPassParam.Findings, "violation_count");
+
+        var counts = new Dictionary<RuleStatement, RuleViolationCountEnvelope>();
+
+        foreach (var match in matches)
+        {
+            var lookup = match.Kind switch
+            {
+                RuleShapeKind.ToolIsBanned => bannedToolCounts,
+                RuleShapeKind.NeverReadPath => neverReadPathCounts,
+                RuleShapeKind.UseAAfterB => useAAfterBCounts,
+                RuleShapeKind.AlwaysPassParam => alwaysPassParamCounts,
+                _ => null,
+            };
+
+            if (lookup is null)
+            {
+                // RuleShapeKind.PreferAOverB (or any future shape with no orchestrator here yet): no
+                // entry at all — the caller's own lookup falls through to NotAvailable.
+                continue;
+            }
+
+            counts[match.Statement] = RuleViolationCountEnvelope.Counted(
+                lookup.GetValueOrDefault(match.Statement.Text, 0));
+        }
+
+        return counts;
+    }
+
+    /// <summary>One count per <see cref="Finding.Recurrence"/> key, read from the one evidence field
+    /// each of the four piece-3 <c>RuleAdherenceToolChoice</c> checks carries its own count in
+    /// (<c>Findings/CLAUDE.md</c>'s "carries its count in Evidence, never in Resolution" remarks) — a
+    /// last-write-wins overwrite rather than <c>ToDictionary</c>, defensively: two distinct rule
+    /// statements (different source files) that happen to share identical text and the same matched
+    /// shape would otherwise throw on a duplicate key here, a pre-existing ambiguity in how these four
+    /// Finding classes key their own <c>Recurrence</c> (by text alone, not the statement's full
+    /// identity) that this method does not attempt to resolve.</summary>
+    static Dictionary<string, int> CountsByRecurrenceKey(
+        IReadOnlyList<Finding> findings, string evidenceField)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var finding in findings)
+        {
+            var evidence = finding.Evidence.First(item => item.Field == evidenceField);
+            counts[finding.Recurrence.Key] = int.Parse(evidence.Value, CultureInfo.InvariantCulture);
+        }
+
+        return counts;
     }
 
     /// <summary>

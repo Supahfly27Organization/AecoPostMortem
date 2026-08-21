@@ -180,6 +180,120 @@ public sealed class RulesInventoryRouteTests
         }
     }
 
+    const string BannedToolPrompt = """
+        <custom_instruction>
+        CLAUDE.md
+        - Never use curl.
+        </custom_instruction>
+        """;
+
+    /// <summary>Mockup parity item #7: a Watched <see cref="RuleShapeKind.ToolIsBanned"/> row serves
+    /// the real count <see cref="BannedToolFinding"/> produces over this method's own corpus-wide
+    /// scope — the exact tool calls <see cref="RulesInventoryClassifier"/> already resolved this
+    /// row's Watched status against.</summary>
+    [Fact]
+    public async Task A_watched_tool_is_banned_row_serves_its_real_violation_count()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1", "org/repo", "2026-08-16T10:00:00Z"));
+            context.RawEvents.Add(SystemMessage("s1", BannedToolPrompt));
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc1",
+                ToolName = "curl",
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc2",
+                ToolName = "curl",
+                StartedAt = "2026-08-16T10:00:02Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<RulesInventoryEnvelope>(
+                ApiHost.RulesInventoryRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var row = envelope!.Rows.Single(r => r.Text == "Never use curl.");
+            Assert.IsType<RuleStatementStatusEnvelope.WatchedStatus>(row.Status);
+            var counted = Assert.IsType<RuleViolationCountEnvelope.CountedViolations>(row.ViolationCount);
+            Assert.Equal(2, counted.Count);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    const string PreferAOverBPrompt = """
+        <custom_instruction>
+        CLAUDE.md
+        - Prefer rg over grep.
+        </custom_instruction>
+        """;
+
+    /// <summary>Mockup parity item #7's honest-absence path: a Watched
+    /// <see cref="RuleShapeKind.PreferAOverB"/> row — today's one Watchable shape with no
+    /// Finding-producing orchestrator — never renders a fabricated or zero-by-default count.</summary>
+    [Fact]
+    public async Task A_watched_row_whose_shape_has_no_built_check_renders_an_honest_absence()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1", "org/repo", "2026-08-16T10:00:00Z"));
+            context.RawEvents.Add(SystemMessage("s1", PreferAOverBPrompt));
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc1",
+                ToolName = "rg",
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc2",
+                ToolName = "grep",
+                StartedAt = "2026-08-16T10:00:02Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<RulesInventoryEnvelope>(
+                ApiHost.RulesInventoryRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var row = envelope!.Rows.Single(r => r.Text == "Prefer rg over grep.");
+            Assert.IsType<RuleStatementStatusEnvelope.WatchedStatus>(row.Status);
+            Assert.IsType<RuleViolationCountEnvelope.NoBuiltCheck>(row.ViolationCount);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     static string MissingCopilotRoot(TemporaryStore temporary) =>
         System.IO.Path.Combine(temporary.Folder, "no-such-copilot-root");
 

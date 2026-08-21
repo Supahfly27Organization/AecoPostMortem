@@ -215,4 +215,87 @@ public sealed class RulesInventoryEnvelopeTests
             RulesInventoryState.BlocksCarriedNoStatements,
             RulesInventoryEnvelope.From(inventory).State);
     }
+
+    // Mockup parity item #7 (docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md, Part 3
+    // "Violations" column): a Watched row's own violation count.
+
+    [Fact]
+    public void A_watched_row_with_no_matching_check_entry_renders_an_honest_absence()
+    {
+        var sessions = TwoVersions();
+        var inventory = RulesInventory.Build(sessions, VersionOf(sessions[0]), _ => RuleStatementStatus.Watched);
+
+        // No violationCounts dictionary supplied at all — the same shape a PreferAOverB match (the
+        // one Watchable shape with no Finding-producing orchestrator) leaves behind: nothing for
+        // ApiHost.BuildViolationCounts to have entered a row for.
+        var envelope = RulesInventoryEnvelope.From(inventory);
+
+        var kept = envelope.Rows.Single(row => row.Text == "Kept.");
+        Assert.IsType<RuleViolationCountEnvelope.NoBuiltCheck>(kept.ViolationCount);
+    }
+
+    [Fact]
+    public void A_watched_row_with_a_counted_entry_serves_its_real_number_including_a_real_zero()
+    {
+        var sessions = TwoVersions();
+        var inventory = RulesInventory.Build(sessions, VersionOf(sessions[0]), _ => RuleStatementStatus.Watched);
+
+        var kept = sessions[0].Blocks[0].Statements.Single(statement => statement.Text == "Kept.");
+        var counts = new Dictionary<RuleStatement, RuleViolationCountEnvelope>
+        {
+            [kept] = RuleViolationCountEnvelope.Counted(0),
+        };
+
+        var envelope = RulesInventoryEnvelope.From(inventory, counts);
+
+        var keptRow = envelope.Rows.Single(row => row.Text == "Kept.");
+        var counted = Assert.IsType<RuleViolationCountEnvelope.CountedViolations>(keptRow.ViolationCount);
+        // A real zero — a check that ran and genuinely found nothing — must render distinctly from
+        // NoBuiltCheck, never collapsed into the same absence.
+        Assert.Equal(0, counted.Count);
+    }
+
+    [Fact]
+    public void A_row_that_is_not_watched_carries_no_violation_count_at_all()
+    {
+        var sessions = TwoVersions();
+        var inventory = RulesInventory.Build(
+            sessions, VersionOf(sessions[0]), _ => RuleStatementStatus.CheckableNotYetBuilt);
+
+        var kept = sessions[0].Blocks[0].Statements.Single(statement => statement.Text == "Kept.");
+        var counts = new Dictionary<RuleStatement, RuleViolationCountEnvelope>
+        {
+            // Present in the dictionary on purpose: a row that is not Watched must still ignore it —
+            // no check ran against this row at all, a different fact from a Watched row with no check.
+            [kept] = RuleViolationCountEnvelope.Counted(7),
+        };
+
+        var envelope = RulesInventoryEnvelope.From(inventory, counts);
+
+        var keptRow = envelope.Rows.Single(row => row.Text == "Kept.");
+        Assert.Null(keptRow.ViolationCount);
+    }
+
+    [Fact]
+    public void The_counted_and_not_available_shapes_serialise_with_distinct_discriminators()
+    {
+        var sessions = new[]
+        {
+            Session("s1", "2026-05-20T09:00:00Z", Block("CLAUDE.md", "Has a check.", "No check yet.")),
+        };
+
+        var inventory = RulesInventory.Build(
+            sessions, VersionOf(sessions[0]), _ => RuleStatementStatus.Watched);
+
+        var hasCheck = sessions[0].Blocks[0].Statements.Single(statement => statement.Text == "Has a check.");
+        var counts = new Dictionary<RuleStatement, RuleViolationCountEnvelope>
+        {
+            [hasCheck] = RuleViolationCountEnvelope.Counted(5),
+        };
+
+        var json = JsonSerializer.Serialize(RulesInventoryEnvelope.From(inventory, counts));
+
+        Assert.Contains("\"kind\":\"counted\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"kind\":\"notAvailable\"", json, StringComparison.Ordinal);
+    }
 }

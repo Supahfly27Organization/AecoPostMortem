@@ -30,6 +30,14 @@ export type RuleStatementStatusEnvelope =
  * not look the same on the wire. */
 export type RuleRetirementEnvelope = { state: 'inForce' } | { state: 'retired'; retiredAt: string }
 
+/** Mockup parity item #7 (Part 3's "Violations" column): a Watched row's own violation count,
+ * sourced from whichever of the four piece-3 checks that actually produce one matches this row's
+ * shape. `counted` carries a real number — including a real zero, a check that ran and genuinely
+ * found nothing — and `notAvailable` states plainly that the matched shape (e.g. `PreferAOverB`, the
+ * one Watchable shape with no Finding-producing orchestrator today) has no check to draw a count
+ * from. Never a fabricated or zero-by-default number for that second case. */
+export type RuleViolationCountEnvelope = { kind: 'counted'; count: number } | { kind: 'notAvailable' }
+
 export interface RuleSetVersionEnvelope {
   repository: string | null
   hash: string
@@ -47,6 +55,9 @@ export interface RulesInventoryRowEnvelope {
   inForceUntil: string
   retirement: RuleRetirementEnvelope
   adherenceFrozenAt: string | null
+  /** `null` for every status but `watched` — a row that is not Watched has no check running against
+   * it at all, a different fact from a Watched row whose shape has no built check. */
+  violationCount: RuleViolationCountEnvelope | null
 }
 
 export interface RulesInventoryStatusCountsEnvelope {

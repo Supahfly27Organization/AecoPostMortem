@@ -19,7 +19,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `RawToolArguments.cs` | Piece 3's fifth slice: `ByCall` — the RAW-parsing pass factored out of `ToolInvocationShapeLookup` so `ParamCarryingCallLookup` (below) can reuse the identical `tool.execution_start` → `ToolArguments` read rather than walking `rawEvents` a second time for the same question |
 | `ParamCarryingCallLookup.cs` | Piece 3's fifth and final slice: the real `Rules.ParamCarryingCall` corpus `Rules.AlwaysPassParamCheck` resolves its mentions against. `SpawnsAgent` reuses `Agent.SpawningToolCallId` the same structural way `ToolInvocationShapeLookup` does; `ArgumentKeys` reads every field name a call's own RAW arguments carried (`Ingestion.ToolArguments.PropertyNames`, new this slice) rather than one fixed set, since the parameter a rule names is arbitrary — unlike `ToolInvocationShapeLookup`'s four closed booleans. `ArgumentsRecorded` (code review) is `true` only when a call's own arguments were object-shaped, so "no record at all" never collapses into "recorded with no keys". The public `BuildAll(rawEvents)` and an `internal BuildAll(argumentsByCall)` overload mirror `ToolInvocationShapeLookup`'s own split (below) |
 | `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` or `AlwaysPassParam` match is `Watched` unconditionally, no resolution involved (piece 3's third and fifth slices — neither operand is a tool name); every other matched shape stays `CheckableNotYetBuilt`, and the caller-supplied `NotCheckable(reason)` stays unreachable |
-| `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions |
+| `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions. Mockup parity item #7 added `RuleViolationCountEnvelope` (`"counted"`/`"notAvailable"`) and `RulesInventoryRowEnvelope.ViolationCount` — a Watched row's own violation count, `null` for every other status |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles) |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does. FR-23 (S-10, issue #19) added `StepEvidenceLookup.ReasoningReadabilityByModel`, scanning the whole session's own main-thread `assistant.message` events (not just the current turn) to build the per-model readable share |
@@ -311,6 +311,46 @@ the served counts cannot disagree with the served rows.
 `RuleStatementStatusEnvelope.Of` and `RuleRetirementEnvelope.Of` switch over the domain's own closed
 unions with no catch-all arm that could serialise an unrecognised shape as something plausible — a
 fifth domain status would fail to compile here rather than reach a client mislabelled.
+
+### `RuleViolationCountEnvelope` is a closed two-shape union, and a Watched row's own count is joined by matched-shape, not by re-running the classifier
+
+Mockup parity item #7 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, Part 3
+"Violations" column): before this change, a Watched row's violation count lived only on the Digest's
+`RuleAdherenceToolChoice` findings, one hop away — an operator had to leave the Rules Inventory to
+find it. `RulesInventoryRowEnvelope.ViolationCount` closes that gap, but only four of FR-34's five
+`RuleShapeKind`s have a real Finding-producing orchestrator (`BannedToolFinding`,
+`NeverReadPathFinding`, `UseAAfterBFinding`, `AlwaysPassParamFinding`) — `PreferAOverB` has none. A
+count therefore cannot be a bare `int?` on the row: a `null` from "no orchestrator exists for this
+shape" would be indistinguishable from "the check ran and found nothing," exactly the silence-reads-
+as-compliance failure PRD §3.9 names. `RuleViolationCountEnvelope` is a closed two-shape union behind
+a private constructor instead, the same `[JsonPolymorphic]`/`[JsonDerivedType]` mechanism
+`SuggestionEnvelope` uses — `CountedViolations` states a real number (including a real zero: a check
+that ran over this statement and genuinely found nothing), and `NoBuiltCheck` states plainly that the
+matched shape has no check to draw a count from. `RulesInventoryRowEnvelope.ViolationCount` itself is
+`null` for every status but `WatchedStatus` — a row that isn't Watched has no check running against
+it at all, a different fact from a Watched row whose shape has no built check.
+
+`ApiHost.GetRulesInventory`'s own `BuildViolationCounts` runs the same four check orchestrators
+`GetDigest` runs, but over this method's own corpus-wide `matches`/`invocations`/`toolCalls` — the
+exact inputs `RulesInventoryClassifier` already resolved Watched status against (see "`GetRulesInventory`
+classifies every statement in the corpus," above) — never a second, differently (repository-)scoped
+read the way `GetDigest`'s own seventh check is scoped to `repositoryScope.SelectedRepository`. The
+join back to a row is by `RuleShapeMatch.Statement` (the same `RuleStatement` value — `SourceFile` +
+`Text` — the classifier's own `byStatement` dictionary already keys on): each of the four Finding
+classes keys its own `Recurrence.Key` to the matched statement's own text (`Findings/CLAUDE.md`'s
+remarks on each), so `BuildViolationCounts` reads each check's own evidence field for its count
+(`call_count` for `BannedToolFinding`, `access_count` for `NeverReadPathFinding`, `violation_count`
+for `UseAAfterBFinding`/`AlwaysPassParamFinding` — `Findings/CLAUDE.md`'s "carries its count in
+Evidence, never in Resolution" remarks for each) keyed by that same text, and builds one dictionary
+entry per matched statement of a built shape — present with `Counted(0)` even when the check produced
+no `Finding` for it (a real, checked zero), absent entirely for a `PreferAOverB` match (so the row
+envelope's own `GetValueOrDefault(..., NotAvailable)` lookup falls through honestly).
+
+Verified against the live 35-session reference corpus: the dominant repository's own real
+`NeverReadPath` violation (`Api/CLAUDE.md`'s own status notes, a measured 99 real accesses at the
+time that note was written) now serves as a real `Counted` violation count directly on this row — a
+live re-check against the current store measured 103 (the corpus has grown since) — confirmed via a
+real `GET /api/rules-inventory` request against the live store, not only at the unit level.
 
 ### `ToolInvocationShapeLookup` needed almost no new RAW parsing — real payloads confirmed most fields were already derived columns
 
@@ -885,3 +925,16 @@ by all three factories (`From`/`FromAdherence`/`FromBaseRate`) from `Finding.Hea
 computes nothing new, the same passthrough its own `Evidence`/`Recurrence`/`SessionsAffected` fields
 already are. See `AecoPostMortem.Findings/CLAUDE.md`'s "`Headline` is `required`..." note for where
 the sentence itself is built (all eleven `Finding`-producing files) and the real-corpus verification.
+
+Mockup parity item #7 added `RuleViolationCountEnvelope` and `RulesInventoryRowEnvelope.ViolationCount`
+— see the non-obvious decision above for the closed two-shape union, the join by `RuleShapeMatch.
+Statement`, and why the count is computed corpus-wide rather than scoped to the selected version's own
+carrying sessions. This landed as scoped: all four built check orchestrators (`BannedToolFinding`,
+`NeverReadPathFinding`, `UseAAfterBFinding`, `AlwaysPassParamFinding`) are wired, and the fifth shape
+(`PreferAOverB`, which has no orchestrator anywhere in this codebase yet) renders the honest
+`NoBuiltCheck` absence rather than a fabricated number — nothing was deliberately left half-wired to
+fit an effort estimate. Verified against the live 35-session reference corpus: a real
+`GET /api/rules-inventory` request renders the dominant repository's one Watched row
+(`NeverReadPath`) with a real `Counted` violation count (103, at the corpus' current size).
+`web/src/routes/RulesInventoryPage.tsx` (`web/CLAUDE.md`) renders it as a new "Violations" column,
+landed in the same change as this wire field.

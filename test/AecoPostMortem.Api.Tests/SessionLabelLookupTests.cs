@@ -75,6 +75,20 @@ public sealed class SessionLabelLookupTests
         Assert.Null(SessionLabelLookup.Find("s1", events));
     }
 
+    /// <summary>Code review: a whitespace-only content string passes the "not genuinely empty"
+    /// filter but truncates to zero words — this must resolve as no label (never a served empty
+    /// string, which would render as a blank, invisible clickable link).</summary>
+    [Fact]
+    public void A_user_message_with_whitespace_only_content_resolves_no_label()
+    {
+        var events = new[]
+        {
+            Ev(1, "user.message", """{"id":"e1","data":{"content":"   "}}"""),
+        };
+
+        Assert.Null(SessionLabelLookup.Find("s1", events));
+    }
+
     [Fact]
     public void Non_user_message_events_are_ignored()
     {

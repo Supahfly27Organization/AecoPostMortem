@@ -32,7 +32,12 @@ public static class SessionLabelLookup
             .Select(TryReadContent)
             .FirstOrDefault(content => content is { Length: > 0 });
 
-        return earliest is null ? null : Truncate(earliest);
+        // Truncate can still return an empty string for whitespace-only content (e.g. " ") — the
+        // Length > 0 filter above only rules out a genuinely empty string, not one that trims to
+        // nothing. An empty label is "no label", the same as no user.message at all — never served
+        // as a blank, invisible link text.
+        var label = earliest is null ? null : Truncate(earliest);
+        return string.IsNullOrEmpty(label) ? null : label;
     }
 
     static string? TryReadContent(RawEvent raw)

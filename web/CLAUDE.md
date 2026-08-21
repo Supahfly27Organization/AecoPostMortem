@@ -32,7 +32,7 @@ passing `--prefix`, for the same reason.
 | `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed. FR-48 (issue #52, S-42) added `variant?: 'ranked' \| 'unranked'` (default `'ranked'`) — `'unranked'` omits that leading count for a `DigestEnvelope.inferredFindings` entry, since a hypothesis is deliberately never ranked by it. Mockup parity item #5 replaced the collapsed row's label — `finding.headline` (a full written sentence) instead of the bare `finding.recurrence.key` — in the renamed `finding-row__headline` span (`FindingRow.css`, sans font instead of the mono font a bare key used) |
 | `src/digest/SessionStrip.tsx` | Mockup parity item #2 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`): one cell per session in `masthead.repositoryScope.sessionIds`, lit where a finding's own `recurrence.occurrences` touched that session — the mockup's `.strip`, ported. Hidden under 820px, mirroring the mockup's own breakpoint |
 | `src/digest/AdherenceFigureBlock.tsx` | FR-33 (S-24, issue #38): the only place in the app that renders an adherence percentage — and it renders the per-operand resolution table and rule-set version with it, so no surface can show the number alone. FR-39 (S-35, issue #43) added `data-emphasis="prominent"` on the percentage span, the marker `MonitorComparisonBlock.tsx`'s own session count shares |
-| `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count |
+| `src/digest/RecurrenceStrip.tsx` | Scenario 2: names every session a finding touched (`Recurrence.occurrences`), not only the count. Mockup parity item #21 (issue TBD): each session id is a `react-router-dom` `<Link to={`/sessions/${sessionId}`}>` rather than plain text — an operator previously had to copy a session id and hand-edit the URL bar to reach `/sessions/:sessionId`, the route that already renders it |
 | `src/digest/ProvenanceBadge.tsx` | PRD §3.8's three provenance levels, rendered distinguishably — a `data-provenance` attribute drives a distinct colour per level, alongside the badge's own text label |
 | `src/digest/SuggestionBlock.tsx` | Scenario 4: renders `SuggestionEnvelope`'s `present`/`absent` states — an explicit "No suggestion is offered." for `absent`, never a blank area. Mockup parity item #3 added a small uppercase `Suggested change` label (`.suggestion-block__label`, styled like `ProvenanceBadge`/`FindingRow`'s own mono-font labels) above the `present` sentence only — the `absent` state stays label-free, since a "Suggested change" heading over "No suggestion is offered." would read as self-contradictory, and the mockup itself never depicts an absent-suggestion box |
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
@@ -507,6 +507,19 @@ Verified against the live 35-session reference corpus in a real browser: three o
 ten checks render as clean cards (`Banned Tool Used`, `Use A After B`, `Always Pass Param`, each
 `0 found · 24 checked`, `DERIVED`) and `never-read-path-used` — the one piece-3 adherence check with
 a real violation on this corpus — correctly does not appear among them.
+
+Mockup parity item #21 ("Digest has no way to click through to a session") made `RecurrenceStrip.tsx`'s
+session ids real `<Link to={`/sessions/${sessionId}`}>`s instead of plain text — the smallest of the
+mockup-parity items, scoped to one component on purpose since two other engineers were mid-flight on
+`SessionStrip.tsx`/`Masthead.tsx`/`Tape.tsx`/`SessionPage.tsx`/`RulesInventoryPage.tsx`/`DigestPage.tsx`
+in parallel worktrees. `SessionStrip.tsx`'s cells were deliberately left as plain decorative markers
+(one `role="img"` with a single aria-label for the whole strip, not per-cell links) — turning those
+into links is a materially different redesign this item did not ask for. The one real ripple: once
+`RecurrenceStrip` renders a `<Link>`, every test that mounts it (directly, or indirectly through
+`FindingRow`/`DigestPage`, once a row is expanded) needs a `MemoryRouter` ancestor or `react-router`
+throws `Cannot destructure property 'basename' of 'React.useContext(...)' as it is null` — so
+`FindingRow.test.tsx` and `DigestPage.test.tsx` also picked up a `MemoryRouter` wrapper around every
+`render(...)` call in this change, with no change to either component's own source.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
 `session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,

@@ -7,11 +7,18 @@
   list-style: none;
 }
 
-.recurrence-strip__session {
+.recurrence-strip__session a {
+  display: inline-block;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: var(--sunk);
   color: var(--ink-2);
   font-size: 0.8rem;
   font-family: var(--mono);
+  text-decoration: none;
+}
+
+.recurrence-strip__session a:hover,
+.recurrence-strip__session a:focus-visible {
+  color: var(--accent);
 }

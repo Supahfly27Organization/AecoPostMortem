@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DigestPage } from './DigestPage'
 import { DigestRoute, type DigestEnvelope } from '../api/digest'
@@ -67,7 +68,11 @@ afterEach(() => {
 describe('DigestPage', () => {
   it('renders the masthead and the ranked findings once the digest loads', async () => {
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText('src/hot.cs was read repeatedly')).toBeInTheDocument()
   })
@@ -75,7 +80,11 @@ describe('DigestPage', () => {
   // Scenario 2 (issue #44): the digest states the scope it is ranking within, not only the ranking.
   it('states the corpus scope, so the ranking below it is read against a stated denominator', async () => {
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     const scope = await screen.findByRole('group', { name: /corpus scope/i })
 
@@ -87,7 +96,11 @@ describe('DigestPage', () => {
   // Scenario 4: mid-ingest is a designed state, distinct from both empty states above.
   it('states that analysis is incomplete mid-ingest, rather than showing partial counts as final', async () => {
     respondWith(digestWith({ state: 'Incomplete' }))
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText(/analysis is incomplete/i)).toBeInTheDocument()
     expect(screen.getByRole('group', { name: /corpus scope/i })).toHaveAttribute(
@@ -99,7 +112,11 @@ describe('DigestPage', () => {
   // Scenario 3: defaults to one repository, selectable.
   it('shows one repository at a time, offering the others as a selectable seam', async () => {
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     const select = await screen.findByRole('combobox', { name: 'Repository' })
     expect(select).toHaveValue('aeco/AecoPostMortem')
@@ -111,7 +128,11 @@ describe('DigestPage', () => {
   // FindingRow's own unit coverage of the prop in isolation.
   it('threads the corpus scope down to each row as the session strip', async () => {
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     const summary = await screen.findByRole('button', { expanded: false })
     const strip = summary.querySelector('[role="img"]')
@@ -123,7 +144,11 @@ describe('DigestPage', () => {
   it('expands a row to show its evidence, provenance badge and suggestion', async () => {
     const user = userEvent.setup()
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     await user.click(await screen.findByRole('button', { expanded: false }))
 
@@ -139,7 +164,11 @@ describe('DigestPage', () => {
         rankedFindings: [],
       }),
     )
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText(/no check has run/i)).toBeInTheDocument()
   })
@@ -171,7 +200,11 @@ describe('DigestPage', () => {
         ],
       }),
     )
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText(/judgment calls/i)).toBeInTheDocument()
     expect(screen.queryByText(/found nothing/i)).not.toBeInTheDocument()
@@ -184,7 +217,11 @@ describe('DigestPage', () => {
         throw new TypeError('Failed to fetch')
       }),
     )
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByRole('alert')).toHaveTextContent('aecopostmortem serve')
   })
@@ -214,7 +251,11 @@ describe('DigestPage', () => {
         ],
       }),
     )
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText(/judgment calls/i)).toBeInTheDocument()
     expect(
@@ -224,7 +265,11 @@ describe('DigestPage', () => {
 
   it('renders no "Judgment calls" section at all when there are no inferred findings', async () => {
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     await screen.findByText('src/hot.cs was read repeatedly')
 
@@ -248,7 +293,11 @@ describe('DigestPage', () => {
         ],
       }),
     )
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     expect(await screen.findByText(/checks that found nothing/i)).toBeInTheDocument()
     expect(screen.getByText('Hook Failure')).toBeInTheDocument()
@@ -258,7 +307,11 @@ describe('DigestPage', () => {
 
   it('renders no "Checks that found nothing" section at all when no check ran clean', async () => {
     respondWith(digestWith())
-    render(<DigestPage />)
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
 
     await screen.findByText('src/hot.cs was read repeatedly')
 

@@ -253,7 +253,40 @@ public sealed class DigestEnvelopeTests
         Assert.Equal(56_138, envelope.Masthead.EventCount);
         Assert.Equal(12_345, envelope.Masthead.ToolCallCount);
         Assert.Equal(470, envelope.Masthead.SubagentCount);
-        Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, envelope.Masthead.RuleCoverage);
+        Assert.Equal(RuleCoverageStatusEnvelope.NotYetAnalyzed, envelope.Masthead.RuleCoverage);
+    }
+
+    // Mockup parity item #15: a caller-resolved four-way breakdown reaches the wire as the closed
+    // "analyzed" shape, reusing RulesInventoryStatusCountsEnvelope verbatim rather than a second,
+    // parallel four-int shape — the same figure /api/rules-inventory serves for the same version.
+    [Fact]
+    public void An_analyzed_coverage_figure_serialises_its_four_way_breakdown()
+    {
+        var counts = new RulesInventoryStatusCounts
+        {
+            Watched = 4,
+            CheckableNotYetBuilt = 9,
+            NotCheckable = 9,
+            NotARule = 21,
+        };
+
+        var digest = ProcessDigest.Build(
+            Counters(), RanCleanRegistry(), [], SingleRepoScope(), RuleCoverageStatus.Analyzed(counts));
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        var analyzed = Assert.IsType<RuleCoverageStatusEnvelope.AnalyzedCoverage>(envelope.Masthead.RuleCoverage);
+        Assert.Equal(4, analyzed.Counts.Watched);
+        Assert.Equal(9, analyzed.Counts.CheckableNotYetBuilt);
+        Assert.Equal(9, analyzed.Counts.NotCheckable);
+        Assert.Equal(21, analyzed.Counts.NotARule);
+        Assert.Equal(43, analyzed.Counts.Total);
+
+        var json = JsonSerializer.Serialize(envelope);
+        using var document = JsonDocument.Parse(json);
+        var coverage = document.RootElement.GetProperty("Masthead").GetProperty("RuleCoverage");
+        Assert.Equal("analyzed", coverage.GetProperty("state").GetString());
+        Assert.Equal(4, coverage.GetProperty("Counts").GetProperty("Watched").GetInt32());
     }
 
     [Fact]
@@ -313,7 +346,7 @@ public sealed class DigestEnvelopeTests
 
         var masthead = document.RootElement.GetProperty("Masthead");
         Assert.True(masthead.TryGetProperty("SessionCount", out _));
-        Assert.Equal("NotYetAnalyzed", masthead.GetProperty("RuleCoverage").GetString());
+        Assert.Equal("notYetAnalyzed", masthead.GetProperty("RuleCoverage").GetProperty("state").GetString());
         Assert.Equal(
             "aeco/AecoPostMortem",
             masthead.GetProperty("RepositoryScope").GetProperty("SelectedRepository").GetString());

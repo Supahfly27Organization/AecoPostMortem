@@ -17,7 +17,7 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
 | `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired. Mockup parity item #6 added `CheckRegistryEntry.Provenance`, required — a fixed, caller-stated fact (every check orchestrator has exactly one provenance for the findings it would produce), not derived here, so `AecoPostMortem.Api.SilentCheckEnvelope` can serve the same provenance badge a finding gets |
-| `Digest.cs` | FR-41 part 1 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking; FR-41 part 2 (issue #45, S-54): `RepositoryScope`, carried on `Masthead`. FR-48 (issue #52, S-42) split `ProcessDigest.RankedFindings` into that (Observed/Derived only) plus `InferredFindings`, its own unranked section. Mockup parity item #6 added `ProcessDigest.CheckRegistry` — the exact registry `Build` already received, carried through unchanged rather than dropped once `DigestState` is computed, so `AecoPostMortem.Api.DigestEnvelope.From` can project it into FR-42's "checks that found nothing" surface |
+| `Digest.cs` | FR-41 part 1 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking; FR-41 part 2 (issue #45, S-54): `RepositoryScope`, carried on `Masthead`. FR-48 (issue #52, S-42) split `ProcessDigest.RankedFindings` into that (Observed/Derived only) plus `InferredFindings`, its own unranked section. Mockup parity item #6 added `ProcessDigest.CheckRegistry` — the exact registry `Build` already received, carried through unchanged rather than dropped once `DigestState` is computed, so `AecoPostMortem.Api.DigestEnvelope.From` can project it into FR-42's "checks that found nothing" surface. Mockup parity item #15 turned `RuleCoverageStatus` from a one-member enum into a closed `NotYetAnalyzed`/`Analyzed(Rules.RulesInventoryStatusCounts)` union, and gave `ProcessDigest.Build` a fifth, optional `ruleCoverage` parameter — see this file's own remarks below |
 | `ProvenanceLabel.cs` | FR-48 (issue #52, S-42): `ProvenanceLabel.For(Provenance)` — the fixed, textually distinct sentence per provenance level, served on every `FindingEnvelope` so the distinguishing signal is in the finding's own words, not only its styling |
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
@@ -546,14 +546,29 @@ with the finding on the wire. Only the Inferred sentence contains the word "hypo
 two do not — which is what makes `Only_the_inferred_label_reads_as_a_hypothesis` a meaningful
 assertion rather than a coincidence of wording.
 
-### `RuleCoverageStatus` has exactly one member today, on purpose
+### `RuleCoverageStatus` is a closed two-shape union, not a bare enum (mockup parity item #15)
 
-FR-26 and FR-40 (rule extraction, the coverage bar's population) are Release 2. Rather than a
-nullable or boolean stand-in for "not yet analysed" that a Release-2 figure would later have to
-un-collide from a real zero, the enum simply has no other case yet — the same reasoning
-`FindingEnvelope`'s closed shapes give for making an unrepresentable state a compile-time fact
-instead of a runtime one. A Release-2 value is added here when FR-26/FR-40 land; nothing about
-`Masthead` needs to change to admit it.
+FR-26 and FR-40 (rule extraction, the coverage bar's population) were Release 2 when this type
+shipped as a one-member enum (`NotYetAnalyzed`) — the "not yet" state Release 1 could populate.
+Both FRs have since landed (S-19/S-20/S-22/S-25), and `RulesInventoryClassifier`
+(`AecoPostMortem.Api`) already computes the real four-way breakdown FR-40 defines
+(`Rules.RulesInventoryStatusCounts`). Adding a bare second enum member could not carry that —
+four numbers don't fit an enum case — so `RuleCoverageStatus` is now a closed record hierarchy
+behind a private constructor, the same "a designed 'not yet' state vs. a real value with data"
+shape `SessionTokenFigures`'s own `Observed`/`SessionTotalsNotRecorded` split establishes (see
+that entry above): `NotYetAnalyzed` (still a singleton, unchanged meaning) and
+`Analyzed(RulesInventoryStatusCounts counts)`, whose `counts` is the identical
+`Rules.RulesInventoryStatusCounts` value `RulesInventory.StatusCounts` computes — never a second,
+parallel four-int shape this project would have to keep in sync with the one `Rules` already
+serves.
+
+`ProcessDigest.Build` takes the resolved status as an optional fifth parameter
+(`RuleCoverageStatus? ruleCoverage = null`, coalesced to `NotYetAnalyzed`) rather than a required
+one — the same "every existing call site that supplies fewer arguments still compiles" precedent
+`SessionEnvelope.From`'s own optional `lanes` parameter and `RulesInventoryEnvelope.From`'s own
+optional `violationCounts` parameter both set (`Api/CLAUDE.md`), so the dozens of pre-existing
+`ProcessDigest.Build` call sites elsewhere in this project's own test suite needed no change.
+`ApiHost.GetDigest` is the one real caller that supplies a resolved `Analyzed` value.
 
 ### `AbortedTurnFinding`'s recurrence key is the turn itself, not the abort reason
 
@@ -949,6 +964,20 @@ is a caller-stated fact" above for the full Observed/Derived mapping. Verified a
 (`banned-tool-used`, `use-a-after-b`, `always-pass-param`, all `Derived`, 24 sessions each) and
 `never-read-path-used` — the one piece-3 check with a real violation on this corpus — correctly does
 not appear.
+
+Mockup parity item #15 ("Rule coverage bar", `docs/product-superpowers/prioritization/2026-08-21-
+mockup-parity-gaps.md`, row #15) turned `RuleCoverageStatus` from Release 1's one-member enum into a
+closed `NotYetAnalyzed`/`Analyzed(Rules.RulesInventoryStatusCounts)` union — see "`RuleCoverageStatus`
+is a closed two-shape union, not a bare enum" above — and gave `ProcessDigest.Build` a fifth,
+optional `ruleCoverage` parameter defaulting to `NotYetAnalyzed`. `AecoPostMortem.Api.ApiHost.
+GetDigest` is the real caller: it resolves the selected repository's own most recent rule-set
+version's real four-way breakdown (reusing `GetRulesInventory`'s own classification pipeline, factored
+into a shared `BuildRulesInventoryInputs` helper — `Api/CLAUDE.md`'s own remarks) and passes it
+through. Verified against the live 35-session reference corpus: `/api/digest`'s masthead served
+`{watched:1, checkableNotYetBuilt:6, notCheckable:0, notARule:10, total:17}` for the dominant
+repository's default rule-set version, identical to `/api/rules-inventory`'s own `statusCounts` for
+that same version — the "one served figure, never recounted differently on a second surface"
+guarantee, confirmed end to end rather than only at the unit level.
 
 `AdherenceFigure` (issue #38, S-24, FR-33) publishes the shape every adherence percentage is served
 through: the percentage computed from its per-operand call counts, each operand's S-23 resolution

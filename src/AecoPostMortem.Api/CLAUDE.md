@@ -9,7 +9,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-41 (issue #44, S-36) added `SessionsAffected`, the served ranking key; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure`. Mockup parity item #5 added `Headline`, required on every shape — `Findings.Finding.Headline` passed straight through, unchanged, the same passthrough `Evidence`/`Recurrence` already are |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean. Mockup parity item #6 added `Provenance`/`ProvenanceLabel`, projected straight from `CheckRegistryEntry.Provenance` (below) so a clean-check card can carry the same badge a finding does |
-| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs. Mockup parity item #6 added `SilentChecks` (`SilentCheckEnvelope.From(digest.CheckRegistry)`), threading FR-42's surface through the same fetch |
+| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs. Mockup parity item #6 added `SilentChecks` (`SilentCheckEnvelope.From(digest.CheckRegistry)`), threading FR-42's surface through the same fetch. Mockup parity item #15 added `RuleCoverageStatusEnvelope` (`notYetAnalyzed`/`analyzed`, the closed wire shape for `Findings.RuleCoverageStatus`) and changed `MastheadEnvelope.RuleCoverage` from a bare enum to that type — `AnalyzedCoverage.Counts` reuses `RulesInventoryStatusCountsEnvelope` (`RulesInventoryEnvelope.cs`) verbatim rather than a second four-int shape |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
@@ -128,6 +128,13 @@ for what it does and does not classify. It now also reads `ToolCall`/`Agent` cor
 resolves matched operands against — corpus-wide, not scoped to the selected repository, the same
 scope `RuleShapeCatalogue.MatchAll`'s own statement matching already uses (see "`GetRulesInventory`
 classifies every statement in the corpus" below).
+
+Mockup parity item #15 widens `GetDigest` an eighth way: it also calls the new `BuildRuleCoverageStatus`
+(and the `BuildRulesInventoryInputs` helper factored out of `GetRulesInventory`'s own former inline
+sequence) for the Digest masthead's own rule-coverage figure — corpus-wide, at the selected
+repository's own most recent rule-set version, the identical pipeline `GetRulesInventory` uses. See
+"`GetDigest`'s rule-coverage figure reuses `GetRulesInventory`'s own pipeline..." below for the scope
+decision and why the two endpoints can never disagree.
 
 ## Non-obvious decisions
 
@@ -508,6 +515,40 @@ empty state the way `RulesInventoryState.NoInstructionBlocks` is — that state 
 version has actually been selected; "there is no version to select" is a different, earlier failure
 this surface reports the same way `GetSession` reports "there is no session."
 
+### `GetDigest`'s rule-coverage figure reuses `GetRulesInventory`'s own pipeline through a shared helper, and picks the selected repository's most recent version
+
+Mockup parity item #15: the Digest masthead is corpus-wide, but a rule-set version is scoped to one
+repository (`Rules.RuleSetVersionId`), so "the coverage bar" needed a version-scope decision. Two
+readings existed — (a) the selected repository's own most recent version
+(`RulesInventory.MostRecentVersion`, the exact default `GetRulesInventory` already opens on), or (b)
+something scoped differently. (a) was chosen: every ranked finding on the Digest is already scoped to
+one repository (`Findings.RepositoryScope`'s own remarks), so mirroring the Rules Inventory's own
+default keeps the coverage bar a corpus-wide, deterministic figure with no new selection UI to build
+— the same repository `BuildRepositoryScope` already resolves for `GetDigest`'s own findings, at that
+repository's own newest rule set (so nothing here is retired or stale by construction).
+
+`BuildRuleCoverageStatus` (new) computes it via `BuildRulesInventoryInputs` (new), a private helper
+factored out of what used to be `GetRulesInventory`'s own inline sequence —
+`SessionRuleSetLookup.BuildAll` → `RawToolArguments.ByCall` → `ToolInvocationShapeLookup.BuildAll` →
+`RuleShapeCatalogue.MatchAll` → `RulesInventoryClassifier.BuildClassifier` — corpus-wide, the same
+scope `GetRulesInventory` already uses (not the repository-scoped corpus `BuildFindingsForScope`'s own
+piece-3 checks use). `GetRulesInventory` now calls the same helper rather than repeating the sequence
+inline, so the two endpoints' four-way breakdowns, for the same version, can never be computed two
+different ways — the "one served figure, never recounted differently on a second surface" discipline
+`RulesInventoryEnvelope.cs`'s own remarks state for `RulesInventoryStatusCountsEnvelope`, now enforced
+structurally across both routes rather than by two independent implementations happening to agree.
+Verified against the live 35-session reference corpus: `/api/digest`'s masthead served
+`{watched:1, checkableNotYetBuilt:6, notCheckable:0, notARule:10, total:17}` for the dominant
+repository's default version, byte-for-byte the same four numbers `/api/rules-inventory`'s own
+`statusCounts` served for that version.
+
+This landed as real, non-trivial backend work rather than the item's own "3 (M)" prioritisation-doc
+estimate: the estimate's own feasibility note ("`MastheadCounters` currently only stubs 'Rules not yet
+analysed' corpus-wide") undersold both the domain-type change (`RuleCoverageStatus` had to become a
+closed union, not a bare enum — `Findings/CLAUDE.md`'s own remarks) and the real question of which
+rule-set version a corpus-wide masthead should reflect, which needed its own reasoned answer rather
+than being a pure wiring task.
+
 ### `ApiHost.Build` returns an unstarted `WebApplication`
 
 The caller (`AecoPostMortem.Cli`'s `serve` command) decides when to start it and how long to run
@@ -584,14 +625,20 @@ budget (`docs/product-superpowers/research/2026-08-16-sqlite-vs-postgres-query-l
 corpus' actual scale (a measured 56,138 RAW rows). Revisit with a real ingest-time counter if the
 corpus ever approaches the 500-session/1M-event design target this measurement was taken against.
 
-### `DigestState` and `RuleCoverageStatus` serialise as their names, not ordinals
+### `DigestState` serialises as its name, not an ordinal — `RuleCoverageStatus` no longer needs the same trick
 
-Both enums are declared in `Findings` with no serialisation attributes of their own — domain types
+`DigestState` is declared in `Findings` with no serialisation attributes of its own — domain types
 stay serialisation-agnostic, the same separation `FindingEnvelope`/`SuggestionEnvelope` already draw.
-`MastheadEnvelope.RuleCoverage` and `DigestEnvelope.State` each carry their own
-`[JsonConverter(typeof(JsonStringEnumConverter))]` here instead, so a client reads `"NotYetAnalyzed"`
-rather than an opaque integer for a state whose entire point (S-36's Gherkin) is to be stated in
-words.
+`DigestEnvelope.State` carries its own `[JsonConverter(typeof(JsonStringEnumConverter))]` here
+instead, so a client reads `"NotYetAnalyzed"` rather than an opaque integer for a state whose entire
+point (S-36's Gherkin) is to be stated in words.
+
+`Findings.RuleCoverageStatus` used to be a second bare enum sharing this same trick, but mockup
+parity item #15 turned it into a closed `NotYetAnalyzed`/`Analyzed(RulesInventoryStatusCounts)`
+union (`Findings/CLAUDE.md`'s own remarks) — a shape `JsonStringEnumConverter` cannot serialise at
+all. `RuleCoverageStatusEnvelope` (`DigestEnvelope.cs`) is the wire projection instead, the same
+`[JsonPolymorphic]`/`[JsonDerivedType]` mechanism `SuggestionEnvelope` uses for its own two states,
+with a `"state"` discriminator (`"notYetAnalyzed"`/`"analyzed"`) rather than an enum member name.
 
 ### `GetSession` reads the derived tables directly, rather than re-deriving from RAW here
 

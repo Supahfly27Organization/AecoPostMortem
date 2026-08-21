@@ -1,4 +1,6 @@
-import type { DigestState, MastheadEnvelope, RuleCoverageStatus } from '../api/digest'
+import type { ReactNode } from 'react'
+import type { DigestState, MastheadEnvelope } from '../api/digest'
+import { RuleCoverageBar } from './RuleCoverageBar'
 import './Masthead.css'
 
 /**
@@ -6,7 +8,9 @@ import './Masthead.css'
  * *within* — sessions, span, repositories, events, tool calls and rule coverage. Mockup parity
  * item #8 added a sixth mockup cell, subagents (`masthead.subagentCount`), positioned last to match
  * the mockup's own cell order (Sessions/Span/Repositories/Events/Tool calls/Subagents) — rendered
- * after this app's own rule-coverage cell, which the mockup itself does not carry.
+ * after this app's own rule-coverage cell, which the mockup itself does not carry. Mockup parity item
+ * #15 replaced the rule-coverage cell's plain text with a real proportional bar (`RuleCoverageBar`)
+ * once `masthead.ruleCoverage` carries a real breakdown — see that component's own remarks.
  *
  * Every figure here is read straight off `MastheadEnvelope`, which
  * `AecoPostMortem.Findings.MastheadCounters` documents as counters maintained at ingest time. This
@@ -40,32 +44,38 @@ export function Masthead({ masthead, state }: { masthead: MastheadEnvelope; stat
         <Figure label="Repositories" value={count.format(masthead.repositoryCount)} />
         <Figure label="Events" value={count.format(masthead.eventCount)} />
         <Figure label="Tool calls" value={count.format(masthead.toolCallCount)} />
-        <Figure label="Rule coverage" value={ruleCoverageText[masthead.ruleCoverage]} />
+        <Figure
+          label="Rule coverage"
+          className="masthead__figure--coverage"
+          value={
+            masthead.ruleCoverage.state === 'notYetAnalyzed' ? (
+              'Rules not yet analysed'
+            ) : (
+              <RuleCoverageBar counts={masthead.ruleCoverage.counts} />
+            )
+          }
+        />
         <Figure label="Subagents" value={count.format(masthead.subagentCount)} />
       </dl>
     </section>
   )
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+function Figure({
+  label,
+  value,
+  className,
+}: {
+  label: string
+  value: ReactNode
+  className?: string
+}) {
   return (
-    <div className="masthead__figure">
+    <div className={className ? `masthead__figure ${className}` : 'masthead__figure'}>
       <dt className="masthead__label">{label}</dt>
       <dd className="masthead__value">{value}</dd>
     </div>
   )
-}
-
-/**
- * Scenario 5: rule coverage is honest before rules are analysed. `RuleCoverageStatus` has exactly
- * one member in Release 1 (`AecoPostMortem.Findings/Digest.cs`), so this map has exactly one entry —
- * there is no branch here that could render a bare zero, because there is no state to render it for.
- * Rule extraction (FR-26, S-19) and the Rules Inventory (FR-40, S-22) are a later release; when they
- * add a `RuleCoverageStatus` member, `Record<RuleCoverageStatus, string>` makes this map fail to
- * type-check until its wording is supplied deliberately, rather than falling through to `undefined`.
- */
-const ruleCoverageText: Record<RuleCoverageStatus, string> = {
-  NotYetAnalyzed: 'Rules not yet analysed',
 }
 
 const count = new Intl.NumberFormat('en-GB')

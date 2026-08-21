@@ -1,3 +1,5 @@
+using AecoPostMortem.Rules;
+
 namespace AecoPostMortem.Findings;
 
 /// <summary>
@@ -38,14 +40,40 @@ public sealed record MastheadCounters
 }
 
 /// <summary>
-/// FR-41's rule-coverage bar. Release 1 ships exactly one value: rule extraction (FR-26) and
-/// rule-set versioning (FR-27) are Release 2, so the bar cannot be populated yet — that is a stated
-/// requirement here, not an omission (S-36's edge case). A future Release-2 value is added to this
-/// enum when FR-26/FR-40 land; nothing about this shape needs to change to admit it.
+/// FR-41's rule-coverage bar (mockup parity item #15). Release 1 shipped exactly one value: rule
+/// extraction (FR-26) and rule-set versioning (FR-27) were Release 2, so the bar could not be
+/// populated yet. Both have since landed (S-19/S-20/S-22/S-25), and
+/// <see cref="Rules.RulesInventoryClassifier"/> (<c>AecoPostMortem.Api</c>) already computes the
+/// exact four-way breakdown FR-40 defines (<see cref="Rules.RulesInventoryStatusCounts"/>). Rather
+/// than add a bare second enum member — which cannot carry four numbers — this is a closed record
+/// hierarchy behind a private constructor, the same "a designed 'not yet' state vs. a real value
+/// with data" shape <c>SessionTokenFigures</c>'s own <c>Observed</c>/<c>SessionTotalsNotRecorded</c>
+/// split establishes (this file's "`SessionTokenFigures` is not a `Finding`, deliberately" remarks).
 /// </summary>
-public enum RuleCoverageStatus
+public abstract record RuleCoverageStatus
 {
-    NotYetAnalyzed,
+    private RuleCoverageStatus()
+    {
+    }
+
+    /// <summary>No rule-set-version coverage figure was resolved for this masthead — an empty store,
+    /// or no session in the selected repository carrying a rule set at all. The same "not yet" state
+    /// Release 1 shipped alone.</summary>
+    public static RuleCoverageStatus NotYetAnalyzed { get; } = new NotYetAnalyzedStatus();
+
+    /// <summary>The real four-way breakdown for the rule-set version the caller resolved —
+    /// <paramref name="counts"/> is the identical <see cref="Rules.RulesInventoryStatusCounts"/> the
+    /// Rules Inventory itself serves for that version (<c>Rules.RulesInventory.StatusCounts</c>), never
+    /// a second computation of the same figure.</summary>
+    public static RuleCoverageStatus Analyzed(RulesInventoryStatusCounts counts) =>
+        new AnalyzedStatus { Counts = counts };
+
+    public sealed record NotYetAnalyzedStatus : RuleCoverageStatus;
+
+    public sealed record AnalyzedStatus : RuleCoverageStatus
+    {
+        public required RulesInventoryStatusCounts Counts { get; init; }
+    }
 }
 
 /// <summary>
@@ -155,12 +183,19 @@ public sealed record ProcessDigest
 
     /// <summary>Builds the digest from plain, already-resolved inputs. FR-41 needs no individual
     /// finding story to be complete (S-36's own dependency note): it renders whatever findings
-    /// already exist in the store, ranked by <see cref="SessionsAffected"/>.</summary>
+    /// already exist in the store, ranked by <see cref="SessionsAffected"/>.
+    /// <paramref name="ruleCoverage"/> (mockup parity item #15) defaults to
+    /// <see langword="null"/>, coalesced to <see cref="RuleCoverageStatus.NotYetAnalyzed"/> — the same
+    /// "every existing call site that supplies fewer arguments still compiles" precedent
+    /// <c>SessionEnvelope.From</c>'s own optional <c>lanes</c> parameter and
+    /// <c>RulesInventoryEnvelope.From</c>'s own optional <c>violationCounts</c> parameter both set
+    /// (<c>Api/CLAUDE.md</c>).</summary>
     public static ProcessDigest Build(
         MastheadCounters counters,
         CheckRegistry checkRegistry,
         IReadOnlyList<Finding> findings,
-        RepositoryScope repositoryScope)
+        RepositoryScope repositoryScope,
+        RuleCoverageStatus? ruleCoverage = null)
     {
         ArgumentNullException.ThrowIfNull(counters);
         ArgumentNullException.ThrowIfNull(checkRegistry);
@@ -187,7 +222,7 @@ public sealed record ProcessDigest
             Masthead = new Masthead
             {
                 Counters = counters,
-                RuleCoverage = RuleCoverageStatus.NotYetAnalyzed,
+                RuleCoverage = ruleCoverage ?? RuleCoverageStatus.NotYetAnalyzed,
                 RepositoryScope = repositoryScope,
             },
             State = state,

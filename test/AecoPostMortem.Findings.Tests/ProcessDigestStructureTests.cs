@@ -20,6 +20,7 @@ public sealed class ProcessDigestStructureTests
         typeof(IReadOnlyList<Finding>),
         typeof(RepositoryScope),
         typeof(ProcessDigest),
+        typeof(RuleCoverageStatus),
         typeof(int),
         typeof(void),
     ];

@@ -1,3 +1,5 @@
+using AecoPostMortem.Rules;
+
 namespace AecoPostMortem.Findings.Tests;
 
 /// <summary>
@@ -228,6 +230,39 @@ public sealed class ProcessDigestTests
     {
         // Release 1 ships exactly one RuleCoverageStatus value — there is no case here that could
         // be mistaken for "zero violations found" (FR-26/FR-40 are Release 2).
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
+
+        Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
+    }
+
+    // Mockup parity item #15: a caller that has resolved a real rule-set version's four-way
+    // breakdown carries it straight through, unchanged — Build composes no coverage figure of its
+    // own, the same already-resolved-plain-input discipline every other Masthead field follows.
+    [Fact]
+    public void A_supplied_analyzed_coverage_figure_is_carried_through_onto_the_masthead_unchanged()
+    {
+        var counts = new RulesInventoryStatusCounts
+        {
+            Watched = 4,
+            CheckableNotYetBuilt = 9,
+            NotCheckable = 9,
+            NotARule = 21,
+        };
+
+        var digest = ProcessDigest.Build(
+            Counters(), RanCleanRegistry(), [], SingleRepoScope(), RuleCoverageStatus.Analyzed(counts));
+
+        var analyzed = Assert.IsType<RuleCoverageStatus.AnalyzedStatus>(digest.Masthead.RuleCoverage);
+        Assert.Same(counts, analyzed.Counts);
+        Assert.Equal(43, analyzed.Counts.Total);
+    }
+
+    // The default (no fifth argument) stays NotYetAnalyzed — every one of this file's other calls to
+    // Build, all written before mockup parity item #15, still compile and still read the Release-1
+    // "not yet" state unchanged.
+    [Fact]
+    public void Omitting_the_coverage_argument_still_reads_not_yet_analyzed()
+    {
         var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
 
         Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);

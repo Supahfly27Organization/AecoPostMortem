@@ -9,6 +9,8 @@
 // wiring, the same seam `fetchAppState`/`useAppState` established for `/api/app-state` before S-48
 // served it for real — and the prediction held: this file needed no change once the route went live.
 
+import type { RulesInventoryStatusCountsEnvelope } from './rulesInventory'
+
 export const DigestRoute = '/api/digest'
 
 /** Wire values for `AecoPostMortem.Findings.FindingClass` — camelCase because they carry no
@@ -30,8 +32,17 @@ export type OperatorResponse = 'ignored' | 'accepted' | 'rejected'
  * policy (`DigestEnvelope.cs`), so it serialises as its exact member name, not camelCase. */
 export type DigestState = 'NotYetAnalyzed' | 'Incomplete' | 'Analyzed'
 
-/** Same reasoning as `DigestState` — `RuleCoverageStatus` keeps its exact member name. */
-export type RuleCoverageStatus = 'NotYetAnalyzed'
+/**
+ * Mockup parity item #15: `RuleCoverageStatusEnvelope`'s closed two-shape union
+ * (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — "not yet analysed" and "analysed, with a real
+ * four-way breakdown" can never collide into the same shape, the same reasoning `SuggestionEnvelope`
+ * gives for its own `present`/`absent` split. `counts` reuses `RulesInventoryStatusCountsEnvelope`
+ * verbatim (`./rulesInventory`) — the identical shape `/api/rules-inventory` already serves for the
+ * same rule-set version — rather than a second, parallel four-int shape.
+ */
+export type RuleCoverageStatus =
+  | { state: 'notYetAnalyzed' }
+  | { state: 'analyzed'; counts: RulesInventoryStatusCountsEnvelope }
 
 export interface EvidenceItem {
   field: string

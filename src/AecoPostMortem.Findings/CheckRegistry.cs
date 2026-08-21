@@ -30,6 +30,14 @@ public sealed record CheckRegistryEntry
     public int? FindingCount { get; init; }
 
     public string? RefusalReason { get; init; }
+
+    /// <summary>FR-42's provenance badge (issue #46): the provenance every finding this check would
+    /// have produced carries — a check has exactly one, fixed at the orchestrator (never mixed), so
+    /// this is a plain, caller-stated fact rather than something derived from a finding that, on a
+    /// clean run, was never built. Required for the same reason <see cref="Finding.Provenance"/> is:
+    /// the compiler refuses to build an entry that omits it, rather than a runtime check catching a
+    /// silently-defaulted value.</summary>
+    public required Provenance Provenance { get; init; }
 }
 
 /// <summary>Scenario 4 of the finding contract (issue #23): every check appears here, whether or not

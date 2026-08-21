@@ -1,0 +1,43 @@
+/* Ported from docs/product-superpowers/discovery/mockups/digest.html's `.clean`/`.ck` block
+   (mockup parity item #6, FR-42, issue #46) — the same values-only port `web/CLAUDE.md`'s "Design
+   tokens are ported verbatim from the mockups" note documents for the rest of this app. */
+
+.clean-checks {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.clean-checks h3 {
+  margin: 0 0 0.25rem;
+}
+
+.clean-checks__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 9px;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clean-checks__card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ok);
+  padding: 11px 13px;
+}
+
+.clean-checks__title {
+  font-weight: 550;
+  font-size: 14px;
+}
+
+.clean-checks__stats {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  margin: 4px 0 7px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}

@@ -43,6 +43,7 @@ public static class AbortedTurnFinding
             Status = CheckRunStatus.Ran,
             Population = population,
             FindingCount = findings.Length,
+            Provenance = Provenance.Derived,
         };
 
         return (findings, registryEntry);

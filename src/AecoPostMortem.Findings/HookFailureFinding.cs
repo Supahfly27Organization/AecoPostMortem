@@ -69,6 +69,7 @@ public static class HookFailureFinding
             Status = CheckRunStatus.Ran,
             Population = allSessionIds.Count,
             FindingCount = findings.Count,
+            Provenance = Provenance.Observed,
         };
 
         return (findings, registry);

@@ -22,6 +22,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 35,
                     FindingCount = 0,
+                    Provenance = Provenance.Inferred,
                 },
             ],
         };
@@ -47,6 +48,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 470,
                     FindingCount = 0,
+                    Provenance = Provenance.Observed,
                 },
                 new CheckRegistryEntry
                 {
@@ -54,6 +56,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 56138,
                     FindingCount = 0,
+                    Provenance = Provenance.Observed,
                 },
             ],
         };
@@ -80,6 +83,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 56138,
                     FindingCount = 0,
+                    Provenance = Provenance.Observed,
                 },
             ],
         };
@@ -102,6 +106,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Refused,
                     Population = 3,
                     RefusalReason = "scope mechanism ambiguous",
+                    Provenance = Provenance.Derived,
                 },
             ],
         };
@@ -126,6 +131,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 40,
                     FindingCount = 3,
+                    Provenance = Provenance.Derived,
                 },
             ],
         };
@@ -150,6 +156,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 470,
                     FindingCount = 0,
+                    Provenance = Provenance.Observed,
                 },
                 new CheckRegistryEntry
                 {
@@ -157,6 +164,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 56138,
                     FindingCount = 0,
+                    Provenance = Provenance.Observed,
                 },
                 new CheckRegistryEntry
                 {
@@ -164,6 +172,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Refused,
                     Population = 3,
                     RefusalReason = "scope mechanism ambiguous",
+                    Provenance = Provenance.Derived,
                 },
                 new CheckRegistryEntry
                 {
@@ -171,6 +180,7 @@ public sealed class SilentCheckEnvelopeTests
                     Status = CheckRunStatus.Ran,
                     Population = 40,
                     FindingCount = 3,
+                    Provenance = Provenance.Derived,
                 },
             ],
         };
@@ -183,5 +193,63 @@ public sealed class SilentCheckEnvelopeTests
         Assert.DoesNotContain(silent, entry => entry.CheckId == "written-content-forbidden-symbol");
         Assert.DoesNotContain(silent, entry => entry.CheckId == "tool-choice-adherence");
         Assert.DoesNotContain(silent, entry => entry.CheckId == "contradiction-check");
+    }
+
+    /// <summary>Mockup parity item #6 (`docs/product-superpowers/discovery/mockups/digest.html`'s
+    /// `.ck` card carries a provenance badge): a silent check's own provenance travels onto the
+    /// wire alongside its population and zero count — projected straight from the registry entry's
+    /// own <see cref="CheckRegistryEntry.Provenance"/>, the same fixed-per-check fact
+    /// <c>CheckRegistryTests</c> documents, never derived or guessed here.</summary>
+    [Fact]
+    public void A_clean_entry_carries_the_provenance_the_check_would_have_produced()
+    {
+        var registry = new CheckRegistry
+        {
+            Entries =
+            [
+                new CheckRegistryEntry
+                {
+                    CheckId = "hook-failure",
+                    Status = CheckRunStatus.Ran,
+                    Population = 35,
+                    FindingCount = 0,
+                    Provenance = Provenance.Observed,
+                },
+            ],
+        };
+
+        var silent = SilentCheckEnvelope.From(registry);
+
+        var entry = Assert.Single(silent);
+        Assert.Equal(Provenance.Observed, entry.Provenance);
+    }
+
+    /// <summary>The badge's text label rides alongside the raw enum, the same
+    /// "words are the distinguishing signal, not only styling" discipline FR-48 established for
+    /// <c>FindingEnvelope.ProvenanceLabel</c> — reused verbatim here via
+    /// <see cref="Findings.ProvenanceLabel.For"/> rather than a second wording table.</summary>
+    [Fact]
+    public void A_clean_entrys_provenance_label_matches_findings_own_fixed_wording()
+    {
+        var registry = new CheckRegistry
+        {
+            Entries =
+            [
+                new CheckRegistryEntry
+                {
+                    CheckId = "contradiction-check",
+                    Status = CheckRunStatus.Ran,
+                    Population = 35,
+                    FindingCount = 0,
+                    Provenance = Provenance.Inferred,
+                },
+            ],
+        };
+
+        var silent = SilentCheckEnvelope.From(registry);
+
+        var entry = Assert.Single(silent);
+        Assert.Equal(ProvenanceLabel.For(Provenance.Inferred), entry.ProvenanceLabel);
+        Assert.Contains("hypothesis", entry.ProvenanceLabel, StringComparison.OrdinalIgnoreCase);
     }
 }

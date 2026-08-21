@@ -55,6 +55,7 @@ public sealed class AbortedTurnFindingTests
         Assert.Equal(CheckRunStatus.Ran, registry.Status);
         Assert.Equal(0, registry.FindingCount);
         Assert.Equal(1, registry.Population);
+        Assert.Equal(Provenance.Derived, registry.Provenance);
     }
 
     /// <summary>The edge case named in issue #28: two aborts sharing the same reason text in

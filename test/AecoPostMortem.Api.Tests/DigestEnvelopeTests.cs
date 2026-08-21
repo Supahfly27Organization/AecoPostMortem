@@ -105,6 +105,7 @@ public sealed class DigestEnvelopeTests
                 Status = CheckRunStatus.Ran,
                 Population = 35,
                 FindingCount = 1,
+                Provenance = Provenance.Derived,
             },
         ],
     };
@@ -173,6 +174,46 @@ public sealed class DigestEnvelopeTests
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 
         Assert.Equal([2, 1], envelope.RankedFindings.Select(finding => finding.SessionsAffected));
+    }
+
+    /// <summary>FR-42 (issue #46)'s "checks that found nothing" surface, threaded through the digest:
+    /// <c>DigestEnvelope.SilentChecks</c> is <c>SilentCheckEnvelope.From</c> applied to the exact
+    /// <c>CheckRegistry</c> <c>ProcessDigest.Build</c> carried through — a check the caller resolved
+    /// but that found nothing appears here, distinct from the ranked and inferred lists above.</summary>
+    [Fact]
+    public void SilentChecks_reflects_the_check_registry_the_digest_was_built_with()
+    {
+        var registry = new CheckRegistry
+        {
+            Entries =
+            [
+                new CheckRegistryEntry
+                {
+                    CheckId = "hook-failure",
+                    Status = CheckRunStatus.Ran,
+                    Population = 35,
+                    FindingCount = 0,
+                    Provenance = Provenance.Observed,
+                },
+                new CheckRegistryEntry
+                {
+                    CheckId = "repeated-file-read",
+                    Status = CheckRunStatus.Ran,
+                    Population = 35,
+                    FindingCount = 1,
+                    Provenance = Provenance.Derived,
+                },
+            ],
+        };
+
+        var digest = ProcessDigest.Build(Counters(), registry, [], SingleRepoScope());
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        var silentCheck = Assert.Single(envelope.SilentChecks);
+        Assert.Equal("hook-failure", silentCheck.CheckId);
+        Assert.Equal(35, silentCheck.Population);
+        Assert.DoesNotContain(envelope.SilentChecks, entry => entry.CheckId == "repeated-file-read");
     }
 
     [Fact]

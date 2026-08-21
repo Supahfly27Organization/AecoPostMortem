@@ -8,8 +8,8 @@ Endpoints for the three surfaces, and the host that serves them.
 |---|---|
 | `FindingEnvelope.cs` | FR-59's response contract for one served finding — `FindingEnvelope.General`, `FindingEnvelope.Adherence` and `FindingEnvelope.BaseRate` (FR-44, issue #41), and the `From`/`FromAdherence`/`FromBaseRate` factories that assemble them from a `Finding`. FR-48 (issue #52, S-42) added `ProvenanceLabel`, required on every shape; FR-41 (issue #44, S-36) added `SessionsAffected`, the served ranking key; FR-33 (issue #38, S-24) replaced the adherence shape's `Resolution`/`RuleVersion` pair with one `required AdherenceFigure Figure` |
 | `SuggestionEnvelope.cs` | FR-56 in the response contract — `SuggestionEnvelope.Present` and `.AbsentSuggestion`, so "no suggestion template" is an explicit serialised state, never a missing field |
-| `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean |
-| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs |
+| `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean. Mockup parity item #6 added `Provenance`/`ProvenanceLabel`, projected straight from `CheckRegistryEntry.Provenance` (below) so a clean-check card can carry the same badge a finding does |
+| `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs. Mockup parity item #6 added `SilentChecks` (`SilentCheckEnvelope.From(digest.CheckRegistry)`), threading FR-42's surface through the same fetch |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
 | `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
@@ -255,6 +255,28 @@ serve `FindingEnvelope`, `SilentCheckEnvelope` or `DigestEnvelope` yet either; t
 is the first real endpoint this project ships, and it does not need the finding contract at all.
 `SilentCheckEnvelope.From` follows the same plain-input pattern — a `CheckRegistry` in, a projected
 list out — nothing here reads through `Data` or calls into `Rules` for it either.
+
+### `DigestEnvelope.SilentChecks` reuses the exact `CheckRegistry` `ProcessDigest.Build` already carries, never a second read
+
+Mockup parity item #6 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, "Checks
+that found nothing"): `ProcessDigest` (`AecoPostMortem.Findings/CLAUDE.md`) now carries the
+`CheckRegistry` its own `Build` already received, so `DigestEnvelope.From` calls
+`SilentCheckEnvelope.From(digest.CheckRegistry)` directly — the identical registry
+`GetDigest` already assembled from all ten check orchestrators for `ProcessDigest.Build`'s own
+`DigestState` computation, not a second registry built or filtered here. `SilentCheckEnvelope.From`
+itself needed no change (`Api/CLAUDE.md`'s own remarks on it predate this story) — the only real gap
+was that nothing carried its input past `ProcessDigest.Build` to a caller that could apply it.
+
+`CheckRegistryEntry.Provenance` (`AecoPostMortem.Findings/CLAUDE.md`) is what makes the mockup's own
+provenance badge per clean-check card possible: every check orchestrator wired into `GetDigest`
+has exactly one fixed provenance for the findings it would produce (`hook-failure`/
+`interruption-load` are `Observed`; the other eight are `Derived`), so the field is a caller-stated
+fact set once per orchestrator, never derived or guessed here. Verified against the live 35-session
+reference corpus (dominant repository, `supahfly27/UpFront`): three of `GetDigest`'s ten checks ran
+clean — `banned-tool-used`, `use-a-after-b` and `always-pass-param`, all `Derived`, each over a
+population of 24 sessions — a real browser renders all three as cards with a `DERIVED` badge.
+`never-read-path-used` correctly does not appear: it is the one piece-3 adherence check with a real
+violation on this corpus (`Findings/CLAUDE.md`'s own remarks, 99 real accesses).
 
 ### `RepositoryScopeEnvelope` mirrors `RepositoryScope` exactly — a plain projection, not a filter
 

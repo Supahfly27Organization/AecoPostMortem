@@ -140,6 +140,18 @@ export interface MastheadEnvelope {
   repositoryScope: RepositoryScopeEnvelope
 }
 
+/** `AecoPostMortem.Api.SilentCheckEnvelope` (FR-42, issue #46): one check that ran clean — its
+ * identity, the population it ran over, its (always-zero) finding count, and the provenance the
+ * check would have produced had it found something, so a caller can render the same badge
+ * `ProvenanceBadge` already renders for a finding. */
+export interface SilentCheckEnvelope {
+  checkId: string
+  population: number
+  findingCount: number
+  provenance: Provenance
+  provenanceLabel: string
+}
+
 export interface DigestEnvelope {
   masthead: MastheadEnvelope
   state: DigestState
@@ -151,6 +163,10 @@ export interface DigestEnvelope {
    * `DigestEnvelope.InferredFindings` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) exactly — same
    * `FindingEnvelope` shape as `rankedFindings`, just a different, unranked list. */
   inferredFindings: FindingEnvelope[]
+  /** FR-42 (issue #46): "checks that found nothing" — mockup parity item #6
+   * (`docs/product-superpowers/discovery/mockups/digest.html`'s `.clean`/`.ck` grid). Mirrors
+   * `DigestEnvelope.SilentChecks` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) exactly. */
+  silentChecks: SilentCheckEnvelope[]
 }
 
 /** Throws on a non-2xx response or a network failure; callers (see `useDigest`) turn that into a

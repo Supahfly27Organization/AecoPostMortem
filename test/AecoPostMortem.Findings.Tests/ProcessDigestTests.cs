@@ -37,6 +37,7 @@ public sealed class ProcessDigestTests
                 Status = CheckRunStatus.Ran,
                 Population = 35,
                 FindingCount = 0,
+                Provenance = Provenance.Derived,
             },
         ],
     };
@@ -226,6 +227,21 @@ public sealed class ProcessDigestTests
         var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
 
         Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
+    }
+
+    /// <summary>FR-42's "checks that found nothing" surface (issue #46) needs the registry a caller
+    /// already resolved for <see cref="DigestState"/> — <see cref="Build"/> must carry it through onto
+    /// the built digest rather than using it only to compute state and dropping it, the same
+    /// already-resolved-plain-input pattern this file's own <see cref="MastheadCounters"/> and
+    /// <see cref="RepositoryScope"/> tests already establish.</summary>
+    [Fact]
+    public void The_check_registry_the_caller_supplied_is_carried_through_onto_the_built_digest()
+    {
+        var registry = RanCleanRegistry();
+
+        var digest = ProcessDigest.Build(Counters(), registry, [], SingleRepoScope());
+
+        Assert.Same(registry, digest.CheckRegistry);
     }
 
     [Fact]

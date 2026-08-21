@@ -38,10 +38,10 @@ passing `--prefix`, for the same reason.
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
 | `src/api/monitor.ts` | FR-39's `MonitorComparisonEnvelope` shape and `fetchMonitorComparison`, hand-kept in sync with `AecoPostMortem.Api.MonitorComparisonEnvelope` (`src/AecoPostMortem.Api/MonitorComparisonEnvelope.cs`) — reuses `AdherenceFigure` from `digest.ts` and `RuleSetVersionEnvelope` from `rulesInventory.ts` rather than redeclaring either |
 | `src/digest/MonitorComparisonBlock.tsx` | FR-39 (S-35, issue #43): renders a `MonitorComparisonEnvelope` as two sides, Before and After, each an `AdherenceFigureBlock` preceded by its own session count at the identical visual weight (`adherence-figure__percentage`'s own class plus `data-emphasis="prominent"`) — Scenario 2's "as visible as the percentage" |
-| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field; FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.readabilityByModel` (optional, unlike the server's `required`-but-nullable field, so pre-existing test literals still type-check) |
+| `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field; FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.readabilityByModel` (optional, unlike the server's `required`-but-nullable field, so pre-existing test literals still type-check). Mockup parity item #14 added `SessionMasthead.startedAt`/`.endedAt`, mirroring `AecoPostMortem.Api.SessionMastheadEnvelope`'s own two new fields |
 | `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
 | `src/api/useStepEvidence.ts` | FR-21 part 2 of 3 (S-52, issue #16): the fetch-per-`(sessionId, stepId, kind)` hook the inspector reads once a step is selected, mirroring `useSession`'s loading/error/loaded shape |
-| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built. FR-22 (S-09, issue #18) added `AgentLanes`/`SubagentOutputPanel`: one entry per subagent, rendered between the finding chip row and the tape, each carrying the report it actually produced (or a stated "no output"/"failed" state) — renders nothing when `envelope.lanes` is empty, the same "no section at all" discipline `ComingSoon`'s sibling surfaces avoid reinventing |
+| `src/routes/SessionPage.tsx` | FR-21, part 1 of 3 (S-08, issue #15): the Flight Recorder — masthead and time-ordered tape. FR-21, part 2 of 3 (S-52, issue #16) added the finding chip row, step selection (delegated to `session/Tape.tsx`), and the inspector's Detail/Thinking/Raw tabs, with an explicit "pick a step" state when none is selected. FR-21, part 3 of 3 (S-53, issue #17): renders the chip row, tape and inspector only when `envelope.status.kind === 'complete'`; otherwise renders `NonFinalState`, one distinct message per non-happy `SessionRecordingStatus` kind. Reads `sessionId` from the route; no `sessionId` (bare `/sessions`) states "no session selected" rather than reusing `ComingSoon`, since the surface itself is built. FR-22 (S-09, issue #18) added `AgentLanes`/`SubagentOutputPanel`: one entry per subagent, rendered between the finding chip row and the tape, each carrying the report it actually produced (or a stated "no output"/"failed" state) — renders nothing when `envelope.lanes` is empty, the same "no section at all" discipline `ComingSoon`'s sibling surfaces avoid reinventing. Mockup parity item #14 added the masthead's own "Wall clock" field (`formatWallClockRange`) — the real start→end range, alongside (not instead of) `Elapsed` |
 | `src/session/Tape.tsx` | FR-21, part 3 of 3 (S-53, issue #17): the tape itself, moved out of `SessionPage.tsx` — fixed-row-height virtualisation (only the scrolled-to window plus overscan is mounted, proven at the largest measured session scale, 84 turns + 764 tool calls) and full keyboard reachability (a single roving tab stop on the list itself; Arrow/Home/End/PageUp/PageDown move a `selectedIndex` that pulls its row into the mounted window before selecting it, `aria-activedescendant` names it for assistive technology). Reconciled with FR-21 part 2 of 3 (S-52, issue #16)'s step-selection contract: each row's content sits inside a `tabIndex={-1}` button — a click target, never a second tab stop — so `SessionPage`'s inspector gets the same `onSelectStep` callback from a mouse click that it already got from keyboard Enter/Space. FR-22 (S-09, issue #18) added per-row lane markers: `data-owner-kind`/`data-agent-id`/`data-agent-lane`, the last a deterministic hash of `agentId` into one of 8 colours (`laneIndex`), rendered as a coloured left border via the `--session-tape-lane` CSS custom property |
 | `src/session/Tape.css` | `Tape.tsx`'s absolute-positioning layout (each mounted row placed by `top: index * rowHeight` inside a spacer-sized scroll container), the `aria-selected` highlight, and the `tabIndex={-1}` row button's own layout |
 | `src/index.css` | global reset plus this app's design tokens — see "Design tokens are ported verbatim from the mockups" below |
@@ -79,7 +79,25 @@ tape.
 `session.ts`'s `SessionMasthead.elapsedMs`/`SessionTapeStep.offsetMs` are milliseconds
 (`number`/`number | null`), matching `AecoPostMortem.Api.SessionEnvelope`'s own choice to serialise
 `TimeSpan` as milliseconds rather than a duration string — one fewer format both sides would
-otherwise have to agree on by hand.
+otherwise have to agree on by hand. `startedAt`/`endedAt` (mockup parity item #14) stay plain
+ISO-8601 strings instead — there is no duration to convert here, only a timestamp, matching
+`AecoPostMortem.Api.SessionMastheadEnvelope`'s own choice to leave `DateTimeOffset` as-is.
+
+### The masthead's wall-clock range needs real time-of-day, unlike the Digest's own date-only span
+
+`SessionPage.tsx`'s `formatWallClockRange` is a local formatter, not an import from
+`digest/Masthead.tsx`'s `formatSpan` — deliberately: a corpus spans months, so `formatSpan` only
+ever needs a date; one session is typically minutes to hours, so a date-only range here would read
+as identical start and end for the common case (or worse, silently misleading). `formatWallClockRange`
+therefore always shows the start as a full date and time, and shows the end as a bare time-of-day
+only when it falls on the same UTC day as the start — a session that happens to cross midnight still
+gets a full date on the end too, so the range never reads ambiguously. Both formatters fix
+`timeZone: 'UTC'` explicitly, the same determinism `Masthead.tsx`'s own `day` formatter already
+established, so a test's assertion does not depend on the host machine's local timezone.
+`endedAt === null` (a session still ingesting, per `SessionRecordingStatusEnvelope` — the masthead
+renders even for a non-`complete` status) renders as "… – still running", never a blank or a
+misleading dash: this state is real, not hypothetical, and `SessionPage.test.tsx` covers it with a
+dedicated fixture rather than assuming the happy path is the only one worth testing.
 
 ### The two Gherkin empty states are still hand-kept in sync between server and client
 
@@ -626,6 +644,16 @@ calling `fetchMonitorComparison`, the same "built ahead of the page that will pl
 `AdherenceFigureBlock` followed before `FindingRow` existed to call it, now on the server side of
 that same gap instead of both sides. `MonitorComparisonBlock.test.tsx` exercises it directly against
 the reference corpus's own measured 41.8% → 71.7% edit (3 sessions, then 4).
+
+Mockup parity item #14 added the session masthead's own real wall-clock start→end range: `Masthead`
+gained a new "Wall clock" field (`formatWallClockRange`, above `Elapsed`), reading `startedAt`/
+`endedAt` off `SessionMasthead` — both now real fields the server was already computing but never
+serving (`AecoPostMortem.Api/CLAUDE.md`'s matching note). No client-side computation beyond
+formatting: this app derives nothing, the same discipline `Masthead`/`AdherenceFigureBlock` already
+follow elsewhere. Verified against the live 35-session reference corpus via a real
+`GET /api/sessions/{sessionId}` request: a completed session serves a real start/end pair matching
+its own `elapsedMs`, and a still-recording session serves a real start with `endedAt` honestly
+`null`.
 
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there

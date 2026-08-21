@@ -122,6 +122,56 @@ describe('The tape is navigable without a mouse', () => {
   })
 })
 
+/** Mockup parity item #10: a small decorative glyph per step kind, alongside — never instead of —
+ * `KIND_LABEL`'s existing text, the same "colour/icon is a second signal on top of the word, never
+ * the only one" discipline `ProvenanceBadge.tsx` established for provenance. */
+describe('Each step kind renders its own glyph before the text label', () => {
+  it('renders a distinct, aria-hidden glyph per kind, without changing the accessible text label', () => {
+    const kinds: SessionTapeStep['kind'][] = ['prompt', 'hook', 'skill', 'toolCall', 'mcpCall']
+    const steps: SessionTapeStep[] = kinds.map((kind, index) => ({
+      kind,
+      stepId: `step-${index}`,
+      label: `Step ${index}`,
+      pluginName: null,
+      pluginVersion: null,
+      timestamp: '2026-08-16T10:00:00Z',
+      offsetMs: index * 1_000,
+      ownerKind: 'main',
+      agentId: null,
+    }))
+    render(<Tape steps={steps} />)
+
+    const expectedLabels: Record<SessionTapeStep['kind'], string> = {
+      prompt: 'Prompt',
+      hook: 'Hook',
+      skill: 'Skill',
+      toolCall: 'Tool call',
+      mcpCall: 'MCP call',
+    }
+
+    const glyphMarkup = new Set<string>()
+
+    kinds.forEach((kind, index) => {
+      const row = screen.getByText(`Step ${index}`).closest('li')
+      expect(row).not.toBeNull()
+
+      const kindSpan = row!.querySelector('.session-tape__kind')
+      expect(kindSpan).not.toBeNull()
+      // The existing accessible text label is unchanged and still present.
+      expect(kindSpan!.textContent).toContain(expectedLabels[kind])
+
+      const glyph = row!.querySelector(`svg[data-glyph="${kind}"]`)
+      expect(glyph).not.toBeNull()
+      expect(glyph).toHaveAttribute('aria-hidden', 'true')
+
+      glyphMarkup.add(glyph!.innerHTML)
+    })
+
+    // Each of the 5 kinds gets a visually distinct glyph, not one shape reused for all.
+    expect(glyphMarkup.size).toBe(kinds.length)
+  })
+})
+
 describe('An empty tape', () => {
   it('states that no steps were recorded rather than rendering an empty virtualised list', () => {
     render(<Tape steps={[]} />)

@@ -980,6 +980,19 @@ step by wall-clock time with its offset from session start, and states plainly w
 Consumed by `AecoPostMortem.Api.SessionEnvelope` (`GET /api/sessions/{sessionId}`) and rendered by
 `web/src/routes/SessionPage.tsx`.
 
+Mockup parity item #14 added `SessionMasthead.StartedAt` (`required DateTimeOffset`) and `.EndedAt`
+(`DateTimeOffset?`) alongside the existing `Elapsed`: the real wall-clock start→end range the
+mockup's own masthead shows, next to (not instead of) `Elapsed`'s duration figure. `Build` needed no
+new `Data` read — `Session.StartedAt`/`.EndedAt` were already in hand, the exact source `Elapsed`
+itself is computed from — only two more fields carried through: `StartedAt` is `ParseTimestamp
+(session.StartedAt)` (the same parsed `start` value `Elapsed`'s own subtraction already used), and
+`EndedAt` is `null` under the identical condition `Elapsed` is (`session.EndedAt is null`, a session
+that never wrote `session.shutdown`) — never zero-filled or defaulted to "now" for a session still
+ingesting. Verified against the live 35-session reference corpus: a real completed session serves a
+real start/end pair (`2026-04-29T12:31:12.413+00:00` → `2026-04-29T14:24:29.106+00:00`, matching its
+own `6796693`ms `Elapsed`), and a real still-recording session serves a real `StartedAt` with
+`EndedAt` honestly `null`.
+
 `SessionFindings` (issue #16, S-52, FR-21 part 2 of 3) — the chip row's own data path — has landed:
 `SessionFindings.For(sessionId, findings)` filters to findings whose `Recurrence.Occurrences` names
 that session and pairs each with `ProcessDigest.SessionsAffected` for the chip's own "with its

@@ -36,6 +36,8 @@ public sealed class SessionRecordingTests
         Assert.Equal("Supahfly27Organization/AecoPostMortem", masthead.Repository);
         Assert.Equal("main", masthead.Branch);
         Assert.Equal("0.0.339", masthead.CopilotVersion);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-16T10:00:00Z"), masthead.StartedAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-16T10:30:00Z"), masthead.EndedAt);
         Assert.Equal(TimeSpan.FromMinutes(30), masthead.Elapsed);
         Assert.Equal(1, masthead.TurnCount);
         Assert.Equal(1, masthead.ToolCallCount);
@@ -58,6 +60,20 @@ public sealed class SessionRecordingTests
         var recording = SessionRecording.Build(session, [], [], [], [], []);
 
         Assert.Null(recording.Masthead.Elapsed);
+    }
+
+    /// <summary>Mockup parity item #14: <c>StartedAt</c> is always stated, but <c>EndedAt</c> is
+    /// <see langword="null"/> under the identical condition <c>Elapsed</c> is — never defaulted to
+    /// "now" for a session still ingesting.</summary>
+    [Fact]
+    public void EndedAt_is_null_when_the_session_never_ended()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: null);
+
+        var recording = SessionRecording.Build(session, [], [], [], [], []);
+
+        Assert.Equal(DateTimeOffset.Parse("2026-08-16T10:00:00Z"), recording.Masthead.StartedAt);
+        Assert.Null(recording.Masthead.EndedAt);
     }
 
     /// <summary>Scenario 2: hooks, prompts (turns), skills, tool calls and MCP calls all appear in

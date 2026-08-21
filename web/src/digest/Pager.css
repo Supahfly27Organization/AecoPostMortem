@@ -1,0 +1,34 @@
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.pager button {
+  font: inherit;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--rule-2);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.pager button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pager__status {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pager__status:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}

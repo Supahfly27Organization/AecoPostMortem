@@ -5,6 +5,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Code review Minor (both reviews): AecoPostMortem.Api.Tests needs a deterministic, host-
+         timezone-independent way to test ApiHost.ParseTimestampAsUtc's own UTC-assumption fix —
+         asserting through the full GetDigest/HTTP path would make the test's own pass/fail depend
+         on the CI machine's ambient local offset, exactly the non-determinism PRD §3.8 exists to
+         rule out. -->
+    <InternalsVisibleTo Include="AecoPostMortem.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\AecoPostMortem.Data\AecoPostMortem.Data.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Findings\AecoPostMortem.Findings.csproj" />
     <ProjectReference Include="..\AecoPostMortem.Ingestion\AecoPostMortem.Ingestion.csproj" />

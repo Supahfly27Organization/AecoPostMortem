@@ -23,11 +23,13 @@ passing `--prefix`, for the same reason.
 | `src/routes/RulesInventoryPage.tsx` | FR-40's real content (S-22, issue #35): one rule-set version's statements, each with exactly one status, its source file, its carrying sessions, its in-force window and its retirement — plus the version scope, the status breakdown and the two designed "no rules found" states. Fetches `/api/rules-inventory` via `useRulesInventory`. Mockup parity item #7 added a "Violations" column (`ViolationCountCell`): a Watched row's real count, a stated "No check built" for a Watched row whose matched shape has no orchestrator, or a plain dash for every non-Watched row — three visually distinct states, never one collapsed into another |
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render. Mockup parity item #7 added `RuleViolationCountEnvelope` (`counted`/`notAvailable`) and `RulesInventoryRowEnvelope.violationCount` |
 | `src/api/useRulesInventory.ts` | the fetch-per-`versionHash` hook `RulesInventoryPage` reads, mirroring `useSession`'s re-fetch-on-change shape rather than `useDigest`'s fetch-once |
-| `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established. FR-48 (issue #52, S-42) added the "Judgment calls" section for `digest.inferredFindings` — renders nothing when that list is empty, the same "no section at all" discipline `SessionPage.tsx`'s `AgentLanes` already established for an empty `envelope.lanes`. Mockup parity item #6 (FR-42, issue #46) added `<CleanChecks checks={digest.silentChecks} />` below it, the same "no section at all when empty" discipline. Mockup parity item #9 added `<MethodologyFooter masthead={digest.masthead} />` at the very bottom. Digest session-naming Slice 2 threads `digest.masthead.repositoryScope.sessionLabels` down to each `FindingRow` alongside its existing `sessionIds` prop |
-| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure`/`SilentCheckEnvelope` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below. FR-48 (issue #52, S-42) added `DigestEnvelope.inferredFindings` — real, served data that had silently gone undeclared (and therefore dropped on arrival) since `InferredFindings` shipped server-side; see "A missing wire field can hide even after its server-side story ships" below. Mockup parity item #5 added `FindingEnvelopeBase.headline` — a full written sentence naming the problem, mirroring `AecoPostMortem.Api.FindingEnvelope.Headline`. Mockup parity item #6 (FR-42, issue #46) added `SilentCheckEnvelope` and `DigestEnvelope.silentChecks`, added to the server contract in the same change. Mockup parity item #15 changed `RuleCoverageStatus` from `'NotYetAnalyzed'` (a bare string literal type) to a closed `{state:'notYetAnalyzed'}` / `{state:'analyzed'; counts: RulesInventoryStatusCountsEnvelope}` union, importing `RulesInventoryStatusCountsEnvelope` from `./rulesInventory` rather than redeclaring it — mirroring `AecoPostMortem.Api.RuleCoverageStatusEnvelope` exactly. Digest session-naming Slice 2 added `RepositoryScopeEnvelope.sessionLabels: Record<string, string>` — a session's own display label keyed by session id, mirroring `AecoPostMortem.Api.RepositoryScopeEnvelope.SessionLabels` |
+| `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established. FR-48 (issue #52, S-42) added the "Judgment calls" section for `digest.inferredFindings` — renders nothing when that list is empty, the same "no section at all" discipline `SessionPage.tsx`'s `AgentLanes` already established for an empty `envelope.lanes`. Mockup parity item #6 (FR-42, issue #46) added `<CleanChecks checks={digest.silentChecks} />` below it, the same "no section at all when empty" discipline. Mockup parity item #9 added `<MethodologyFooter masthead={digest.masthead} />` at the very bottom. Digest session-naming Slice 2 threads `digest.masthead.repositoryScope.sessionLabels` down to each `FindingRow` alongside its existing `sessionIds` prop. The pager & date-range filter task added `<DateRangeFilter>` (below the repository selector) driving a `range` state passed to `useDigest`, and `<Pager>` beneath the ranked-findings list slicing `digest.rankedFindings` client-side at `PAGE_SIZE = 25`; `applyRange` resets `page` to 1 whenever the range changes, since a new range re-scopes the whole list server-side (see the non-obvious decision in `AecoPostMortem.Api/CLAUDE.md`, "A date-range filter re-scopes the whole analysis"). Code review round: a `<p role="status">Updating…</p>` renders while `query.isRefetching` is true rather than blanking the page; `rangeActive`/`noSessionsInRange` (derived from `range` and `scope.sessionIds.length`) gate a fourth designed-state sentence and suppress the ranked list, pager, judgment calls and clean-checks sections together — see the non-obvious decision below |
+| `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure`/`SilentCheckEnvelope` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below. FR-48 (issue #52, S-42) added `DigestEnvelope.inferredFindings` — real, served data that had silently gone undeclared (and therefore dropped on arrival) since `InferredFindings` shipped server-side; see "A missing wire field can hide even after its server-side story ships" below. Mockup parity item #5 added `FindingEnvelopeBase.headline` — a full written sentence naming the problem, mirroring `AecoPostMortem.Api.FindingEnvelope.Headline`. Mockup parity item #6 (FR-42, issue #46) added `SilentCheckEnvelope` and `DigestEnvelope.silentChecks`, added to the server contract in the same change. Mockup parity item #15 changed `RuleCoverageStatus` from `'NotYetAnalyzed'` (a bare string literal type) to a closed `{state:'notYetAnalyzed'}` / `{state:'analyzed'; counts: RulesInventoryStatusCountsEnvelope}` union, importing `RulesInventoryStatusCountsEnvelope` from `./rulesInventory` rather than redeclaring it — mirroring `AecoPostMortem.Api.RuleCoverageStatusEnvelope` exactly. Digest session-naming Slice 2 added `RepositoryScopeEnvelope.sessionLabels: Record<string, string>` — a session's own display label keyed by session id, mirroring `AecoPostMortem.Api.RepositoryScopeEnvelope.SessionLabels`. The pager & date-range filter task added `FromParameter`/`ToParameter` and the `DateRange` type (`{from, to}`, both `string \| null`, `yyyy-MM-dd`) — `fetchDigest`'s new optional first parameter, appended to the query string only when non-null, mirroring `AecoPostMortem.Api.ApiHost.FromParameter`/`ToParameter` exactly |
 | `src/digest/CleanChecks.tsx` | Mockup parity item #6 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, FR-42, issue #46): "Checks that found nothing" — a card per `SilentCheckEnvelope`, each naming the check (its abstract `CheckId` humanised, e.g. `hook-failure` → `Hook Failure` — a pure display transform, not a served display name), its population, its zero count, and a `ProvenanceBadge` reused verbatim from `FindingRow`'s own. Renders no section at all when `checks` is empty |
-| `src/digest/MethodologyFooter.tsx` | Mockup parity item #9 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, "Methodology footer"): states what was measured and how the per-finding session strip's positions are sourced. Unlike the mockup's own footer — one fixed set of numbers hand-typed for one frozen date (`~/.copilot/` on 2026-08-16) — every figure here is read straight off the `MastheadEnvelope` this page already fetched, the same "nothing on this page counts anything" discipline `Masthead.tsx` documents for its own figures; no separate fetch, no recomputation. Carries no "not measured, shown only to demonstrate the layout" caveat paragraph — that is the mockup admitting its own placeholder data, and this app's findings are all real. `formatSpan`/number formatting are reimplemented locally (not imported) rather than exported from `Masthead.tsx`, since this story's own scope kept that file untouched |
-| `src/api/useDigest.ts` | the fetch-once-on-mount hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape |
+| `src/digest/MethodologyFooter.tsx` | Mockup parity item #9 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, "Methodology footer"): states what was measured and how the per-finding session strip's positions are sourced. Unlike the mockup's own footer — one fixed set of numbers hand-typed for one frozen date (`~/.copilot/` on 2026-08-16) — every figure here is read straight off the `MastheadEnvelope` this page already fetched, the same "nothing on this page counts anything" discipline `Masthead.tsx` documents for its own figures; no separate fetch, no recomputation. Carries no "not measured, shown only to demonstrate the layout" caveat paragraph — that is the mockup admitting its own placeholder data, and this app's findings are all real. `formatSpan`/number formatting are reimplemented locally (not imported) rather than exported from `Masthead.tsx`, since this story's own scope kept that file untouched. Code review Important (both reviews): an optional `range` prop (`{from, to} | null`, default `null`) adds a second paragraph — "Ranked over N of M sessions, …" — and a clause on the session-strip sentence ("within the applied date range") whenever a filter is active, so this footer's own stated job ("what was measured") stays true instead of contradicting the corpus-wide first paragraph; `null` (no filter) renders neither, byte-for-byte the same as before the prop existed |
+| `src/digest/DateRangeFilter.tsx` | The pager & date-range filter task: two `<input type="date">` fields (`From`/`To`, explicit `htmlFor`/`id` pairing rather than implicit label wrapping — a real accessibility gap a live-browser check caught, see the non-obvious decision below), an `Apply` button that reports the pending values on submit (never on keystroke, so typing does not itself trigger a re-fetch of a corpus this large), and a `Clear` button, shown only while a filter is active, that resets both fields and reports `(null, null)`. `role="search"`/`aria-label="Date range"` names the whole control as one reachable group, the same "one named group" pattern `Masthead`'s own `role="group"` establishes. A `Filters by session start date (UTC).` hint states what the two dates filter on and that the boundary is UTC (code review Minor, both reviews). Code review Critical (both reviews — see the non-obvious decision below): `submit` refuses an inverted range (`From` after `To`, compared as plain ISO strings) and renders an inline `role="alert"` instead of calling `onApply`, so the request that would 400 is never sent; `min`/`max` on the two inputs are a second, earlier line of defence via the native picker, and `noValidate` on the `<form>` keeps this component's own check as the sole gate rather than a browser constraint-validation failure silently blocking the submit event before it runs |
+| `src/digest/Pager.tsx` | The pager & date-range filter task: `Previous`/`Next` buttons plus a `Page X of Y` status, `role="group"`/`aria-label="Findings pages"`. Renders nothing at all when `pageCount <= 1` — the same "no control unless there is a real reason for one" discipline `RuleCoverageBar`/`StepFlag` already follow. Client-side only — see the non-obvious decision below for why a server-side offset/limit contract was not built. Code review Important (both reviews): the status text is `role="status"` (an implicit live region) and a focus target (`tabIndex={-1}`) — every page change after first mount moves focus onto it, so landing on the first/last page (which disables the very button just clicked) never drops focus to `<body>` with nothing announced |
+| `src/api/useDigest.ts` | the fetch hook `DigestPage` reads, mirroring `useAppState`'s loading/error/loaded shape. The pager & date-range filter task added two optional scalar parameters, `from`/`to` (not a `{from, to}` object — see the non-obvious decision below), and re-fetches whenever either changes — the same "a new request, not a filter over what is already loaded" shape `useRulesInventory` established for switching rule-set versions, including the identical `aborted` guard on the resolved path (not only the rejected one) so a stale response settling after the range changed can never overwrite the new request's state. Code review Important (both reviews): `DigestQuery`'s `'loaded'` shape now also carries `isRefetching: boolean` — a re-fetch after the first successful load keeps the previous `digest` attached with `isRefetching: true` instead of reverting to bare `'loading'`, so `DigestPage` never blanks the masthead, selector or filter control mid-interaction; only the true first fetch (no previous digest to keep showing) still reports `'loading'` |
 | `src/digest/Masthead.tsx` | FR-41's corpus masthead (S-36, issue #44): sessions, span, repositories, events, tool calls and rule coverage, every figure read straight off `MastheadEnvelope`'s ingest-time counters. Marks itself `data-provisional` mid-ingest and says an empty corpus has no span. Mockup parity item #15 replaced the rule-coverage cell's plain `ruleCoverageText` lookup with `<RuleCoverageBar>` once `masthead.ruleCoverage.state === 'analyzed'`, keeping the `notYetAnalyzed` text branch unchanged |
 | `src/digest/RuleCoverageBar.tsx` | Mockup parity item #15: the masthead's rule-coverage bar — a real proportional four-color bar (watched/checkable-not-built/normative-but-unobservable/not-a-rule) plus a legend, ported from the mockup's `.covbar`/`.covkey` with this app's own design tokens. Proportional over all four statuses (`RulesInventoryStatusCountsEnvelope.total`), a deliberate divergence from the mockup's own three-segment bar — see the component's own remarks for why. States an honest empty sentence for a rule-set version with zero extracted statements, never an invisible zero-width bar |
 | `src/digest/FindingRow.tsx` | one digest row (Scenario 1, issue #45): collapsed by default; expanding it reveals the quoted evidence, `ProvenanceBadge`, `RecurrenceStrip` and `SuggestionBlock`. The `sessionsAffected` count (S-36) leads the summary at display size and stays visible while collapsed. Mockup parity item #2 added `SessionStrip`, also visible while collapsed. FR-48 (issue #52, S-42) added `variant?: 'ranked' \| 'unranked'` (default `'ranked'`) — `'unranked'` omits that leading count for a `DigestEnvelope.inferredFindings` entry, since a hypothesis is deliberately never ranked by it. Mockup parity item #5 replaced the collapsed row's label — `finding.headline` (a full written sentence) instead of the bare `finding.recurrence.key` — in the renamed `finding-row__headline` span (`FindingRow.css`, sans font instead of the mono font a bare key used). Digest session-naming Slice 2 added the optional `sessionLabels` prop (default `{}`, the same "optional, no fixture edits forced" convention `findings`/`thinking` already established on `SessionTapeStep`), passed straight through to `RecurrenceStrip` |
@@ -461,6 +463,134 @@ confirmed both in the raw JSON response and in a real browser's own accessibilit
 `aria-label="Flagged: …"`) on the matching row, with every co-located, non-matching row correctly
 carrying no flag at all.
 
+### The pager is client-side; the real corpus size is what decided it, not an assumption
+
+The live 35-session reference corpus serves 297 ranked findings for its dominant repository, and the
+whole `DigestEnvelope` (already fetched in one shot by `useDigest`, unchanged by this task) is about
+1.3 MB — well within a single response. `Pager` slices the already-served `rankedFindings` array
+client-side at a fixed `PAGE_SIZE = 25` (`DigestPage.tsx`) rather than adding a server-side
+offset/limit wire contract: a server-side page would need a new `total` field and a new pagination
+parameter pair, and a second surface where the served count could disagree with what the page shows —
+not justified at this corpus' measured scale. Deliberately deferred, not forgotten: if a real corpus
+ever grows enough that shipping the whole ranked list in one response becomes materially slow, that is
+the point to revisit this decision, not before. `inferredFindings` (the separate "Judgment calls"
+section) is not paginated at all — it is typically small and, per FR-48, deliberately never ranked or
+otherwise treated the same way as `rankedFindings`.
+
+`page` resets to 1 whenever the date-range filter changes (`DigestPage.tsx`'s `applyRange`): a new
+range re-scopes the whole analysis server-side (`AecoPostMortem.Api/CLAUDE.md`'s "A date-range filter
+re-scopes the whole analysis"), so the previous range's page position has no meaning against the new
+list. `currentPage` is additionally clamped (`Math.min(page, pageCount)`) before rendering, a second,
+structural guarantee against ever indexing past the end of what is actually being served — the same
+"never serve a number the data doesn't support" discipline this app follows everywhere else
+(`Masthead`'s own "nothing on this page counts anything" rule, applied here to an index rather than a
+count).
+
+### `DateRangeFilter`'s two `<input type="date">` fields use explicit `htmlFor`/`id`, not implicit label wrapping — a real gap a live-browser check caught
+
+The first version wrapped each input in a bare `<label>From<input/></label>` / `<label>To<input/>
+</label>` — valid HTML, and `@testing-library/react`'s `getByLabelText` resolved both correctly under
+jsdom, so the component's own test suite passed. A real Chrome accessibility-tree read during this
+task's mandatory real-browser verification pass showed the second field losing its accessible name
+entirely (`label` with no computed text) while the first kept "From" — jsdom's implicit-label
+computation and Chrome's own did not agree for two sibling implicit labels in this exact structure.
+Rather than debug why the two engines diverge, `From`/`To` now carry `id="date-range-filter-from"`/
+`"date-range-filter-to"` and their `<label>`s an explicit `htmlFor` pointing at the same id — the
+unambiguous, universally-supported association every accessibility API agrees on, still nested inside
+the label the same way (so nothing about the visible layout changed). Re-verified in the same real
+browser after the fix: both fields now resolve a real accessible name. This is the kind of gap
+`superpowers:verification-before-completion`'s own "a green test suite is not sufficient evidence" rule
+exists to catch — a passing `npm test` run alone would have shipped the broken field.
+
+### A native `<input type="date">` cannot be filled by typing literal `yyyy-mm-dd` text via synthetic keystrokes
+
+Confirmed while exercising this task's own real-browser check: a browser automation tool's `type`
+action sending the literal characters `2026-04-28` (or the digit-only `04282026`) into a real Chrome
+date input leaves its `.value` empty — a native date input's keyboard-entry model is locale- and
+segment-based, not a plain text field, and neither of those two encodings happened to match what this
+particular Chrome build's date-entry parser accepted from synthetic key events. This is a real
+limitation of the *testing tool's* keystroke simulation, not of `DateRangeFilter` itself: setting the
+input's value through the same native property setter React's own controlled-input machinery uses
+(`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set`) followed by a real
+`input` event — functionally identical to what a real operator's mouse-driven date picker or correctly
+locale-formatted keyboard entry produces — then clicking the real `Apply` button end to end, confirmed
+the full path works: the served finding count, session count, and silent-check populations all moved
+to the exact figures a direct `curl` request for the identical range already established server-side.
+Worth knowing for whoever next automates a browser check against this component: don't spend time
+debugging `type` against a `date` input before trying this workaround, and don't read the earlier
+failure as evidence the component is broken.
+
+### Code review round: an inverted range must never reach the server, and a filter change must never blank the page
+
+Two independent code reviews of the pager & date-range filter task's own first pass (an opus
+subagent, and separately the coordinator's own pass) converged on the same real gaps, one of which
+was structurally identical to a failure this app had already ruled out once before (`AppStateBanner`'s
+own "the API is not running" state) resurfacing in a new place:
+
+**An inverted range was an unrecoverable dead end that blamed the wrong thing.** `From` after `To`,
+Apply → the server correctly answers 400 (`AecoPostMortem.Api/CLAUDE.md`'s "An inverted range... is a
+caller error" decision) — but nothing on the client stopped that request from being sent, and
+`fetchDigest` collapsed every non-2xx response into the same generic thrown `Error` `useAppState`'s
+own network-failure case throws. `useDigest`'s `'error'` state and `DigestPage`'s early-return error
+branch (`Could not reach the local API. Is aecopostmortem serve running?`) are correct for a genuinely
+unreachable API, but false for a 400 the server answered with a real, specific reason — and the early
+return unmounts `DateRangeFilter` itself, so the operator had no control left to correct the mistake
+except a full page reload. The fix is entirely client-side, at the point closest to the mistake:
+`DateRangeFilter.submit` (above) now refuses to call `onApply` at all for an inverted range, so the
+400-producing request is never sent — confirmed with `read_network_requests` during this round's own
+real-browser check: submitting an inverted range produces zero `/api/digest` requests. This is
+narrower than distinguishing a 4xx from a network failure in `useDigest` (a real, separate
+improvement `fetchDigest`/`useDigest` could still make for other 4xx cases this task did not create),
+but it closes the one path this task's own feature made newly, easily reachable.
+
+**A date range matching zero sessions rendered the wrong one of this app's own three designed
+states — a genuine fourth one, not a display bug.** See `AecoPostMortem.Api/CLAUDE.md`'s matching
+entry for why the server still honestly serves `DigestState.Analyzed` and non-empty `SilentChecks`
+(every check population `0`) for this case — a real, checked fact, not a bug to suppress server-side.
+`DigestPage.tsx` is where the fourth sentence belongs, the same place the other three
+(`NotYetAnalyzed`/`Incomplete`/"found nothing") already live: `rangeActive` (`range.from !== null ||
+range.to !== null`) and `noSessionsInRange` (`rangeActive && scope.sessionIds.length === 0`) gate a
+new sentence — "No sessions in the selected repository started in the applied date range — nothing
+was looked at, which is a different fact from every check running clean." — and suppress the ranked
+list, `Pager`, "Judgment calls" and `CleanChecks` sections together, rather than letting `CleanChecks`
+render ten "0 found · 0 checked" cards under a heading whose own copy warns against exactly that
+conflation. Reachable only through an *active* filter — an unfiltered digest with a truly empty
+repository scope is a different, pre-existing case (an empty store) this task does not touch.
+Verified in a real browser against the live corpus: `from=2026-01-01&to=2026-01-31` (zero of the
+dominant repository's 25 sessions fall in January) rendered exactly this sentence, no "found
+nothing", no clean-checks grid, `Sessions 35` still honest on the corpus-wide masthead, and the
+footer's own new sentence read "Ranked over 0 of 35 sessions, 1 Jan 2026 to 31 Jan 2026".
+
+**Applying a filter used to blank the whole page.** `useDigest` previously reported bare
+`{status: 'loading'}` for every fetch, including a re-fetch triggered by a changed range —
+`DigestPage`'s loading branch renders only a bare heading, so the masthead, the repository selector
+and `DateRangeFilter` itself all unmounted mid-interaction while the new range's own request was in
+flight. `useDigest`'s `'loaded'` state now carries `isRefetching: boolean`; a re-fetch after the first
+successful load keeps the previous `digest` attached with `isRefetching: true` rather than reverting
+to `'loading'`, so `DigestPage` renders a small `<p role="status">Updating…</p>` (an implicit
+`aria-live="polite"` region, so it announces without stealing focus the way `role="alert"` would)
+instead of unmounting anything. Verified in a real browser: applying a range while the previous
+digest is on screen keeps the masthead, `RepositorySelector` and `DateRangeFilter` all mounted and
+interactive throughout.
+
+**Pager focus/announcement was below the bar this app's own tape keyboard model already set.**
+Landing on the last page disables the exact "Next" button just clicked (the same for "Previous" into
+page 1), which drops keyboard focus to `<body>` with nothing announced — a real accessibility gap for
+a codebase that built `session/Tape.tsx`'s own roving tab stop and `aria-activedescendant` wiring.
+`Pager`'s own status text is now `role="status"` and a real focus target; every page change after
+first mount moves focus onto it (skipped on mount itself, via a `hasMounted` ref, since nothing has
+navigated yet). Verified in a real browser: clicking "Next" ten times in a row (with a real re-render
+between each, not a synchronous loop that would all read the same stale `page` closure) lands on the
+last page with `Next` genuinely disabled and focus confirmed on the status paragraph, never `<body>`.
+
+**Minor, also fixed in the same round**: `useDigest`'s dependency array now closes over two plain
+scalar parameters (`from`, `to`) rather than a `range` object — the object literal `DigestPage` used
+to construct fresh on every render made `react-hooks/exhaustive-deps` correctly flag a missing
+`range` dependency that could never be added without re-fetching every render; two scalars sidestep
+it structurally, the same shape `useRulesInventory` already uses for its own `versionHash` parameter.
+`npm run lint` (`oxlint`) reports exactly the same 2 pre-existing warnings (`session/TapeMinimap.tsx`,
+an unrelated file this task never touches) before and after this whole round.
+
 ## Playbook — adding a route
 
 1. Add the page component under `src/routes/`. A surface with no real content yet renders
@@ -619,6 +749,35 @@ own masthead served a real `{watched:1, checkableNotYetBuilt:6, notCheckable:0, 
 total:17}` breakdown, matching `GET /api/rules-inventory`'s own `statusCounts` for the same version
 exactly — no client-side computation, the same "this app derives nothing" discipline `Masthead`/
 `AdherenceFigureBlock` already follow.
+
+The pager & date-range filter task added `digest/DateRangeFilter.tsx` and `digest/Pager.tsx` to the
+ranked-findings list: `DateRangeFilter` submits an optional `from`/`to` (both plain `yyyy-MM-dd`
+dates) that `useDigest` re-fetches against — server-side, re-scoping the whole analysis, per the
+non-obvious decision above and `AecoPostMortem.Api/CLAUDE.md`'s own matching entry — and `Pager`
+slices the resulting `rankedFindings` client-side at 25 per page, rendering nothing at all when
+everything already fits on one page. Verified against the live 35-session reference corpus in a real
+browser: the dominant repository's default (unfiltered) digest renders "Page 1 of 12" over its real
+297 ranked findings; applying `from=2026-04-28&to=2026-05-10` (a real sub-range of that repository's
+own 25-session span) re-renders the top finding's own count from "25 of 25 sessions" to "16 of 16
+sessions" and the silent-checks section's own population from "24 checked" to "15 checked" — both
+matching a direct `GET /api/digest?from=…&to=…` request's own JSON exactly — and `Clear` restores the
+unfiltered digest. Server-side offset/limit pagination and a combined filter-plus-pager query-string
+round trip (deep-linkable filtered/paged URLs) are both explicitly deferred, not built here — see the
+non-obvious decision above and this task's own PR description for why.
+
+Two independent code reviews of that first pass (an opus subagent, and separately the coordinator's
+own pass) each caught real gaps in the same round — see "Code review round: an inverted range must
+never reach the server..." above for the fixes and their own real-browser verification: an inverted
+range now never reaches the server at all (confirmed via `read_network_requests` — zero `/api/digest`
+calls for a submitted inverted range), a date range matching zero sessions renders a genuine fourth
+designed state rather than a false "found nothing", applying a filter no longer blanks the page
+(`isRefetching`), and the pager moves focus to its own live-region status on every page change so a
+disabled "Next"/"Previous" never drops focus to `<body>`. Re-verified end to end in a real browser
+against the live corpus after these fixes: applying `from=2026-04-28&to=2026-05-10` again produced
+"16 of 16 sessions"/"15 checked" and the new footer sentence "Ranked over 16 of 35 sessions, 28 Apr
+2026 to 10 May 2026"; paging to the last page (12) with a real re-render between each click left focus
+on the status paragraph, not `<body>`; and `from=2026-01-01&to=2026-01-31` (zero matching sessions)
+rendered the new honest sentence with no ranked list, pager or clean-checks grid.
 
 The session view (`routes/SessionPage.tsx`, `api/session.ts`, `api/useSession.ts`,
 `session/Tape.tsx`) is real as of S-08 (FR-21, part 1 of 3, issue #15), S-52 (FR-21, part 2 of 3,

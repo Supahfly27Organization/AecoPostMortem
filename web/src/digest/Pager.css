@@ -24,5 +24,11 @@
 }
 
 .pager__status {
+  margin: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.pager__status:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }

@@ -1250,3 +1250,48 @@ answers 400 — confirmed both via direct `GET /api/digest` requests and in a re
 real `DateRangeFilter`/`Pager` controls end to end (the top-ranked finding's own count moved from "25
 of 25 sessions" to "16 of 16 sessions" under the filter, and the silent-checks section's own population
 moved from "24 checked" to "15 checked," both matching the served JSON exactly).
+
+**Two independent code reviews (an opus subagent and the coordinator's own separate pass) both
+caught the same real gap and one duplicate-validation smell, fixed in the same round as the initial
+implementation, not a later story:**
+
+A date range matching zero sessions in the selected repository is real, reachable behaviour (two
+clicks against a non-empty store), and every one of the ten check orchestrators
+(`BuildFindingsForScope`) sets `CheckRunStatus.Ran` unconditionally — including over a population of
+zero — so `ProcessDigest.Build` still derives `DigestState.Analyzed` for it. Served as-is, this is
+honest at the wire level (`SilentCheckEnvelope.From` is a pure filter, `Api/CLAUDE.md`'s own remarks
+above — it does not synthesise; a `population: 0` entry is a real fact about a check that genuinely
+ran over nothing), but the *client* rendering that fact without qualification would read as "clean",
+exactly the "clean vs. never looked" conflation PRD §3.9 names — this repo's own "Checks that found
+nothing" section states as much in its own copy. The fix landed at `DigestPage.tsx`, not by refusing
+to project the entry at the API layer: `SilentCheckEnvelope.From`'s contract stays a pure filter for
+every other caller (a `population: 0` entry is still meaningful data — "this check ran, over an empty
+set" — that a different client might legitimately want), and `GetDigest` still serves the honest,
+un-opinionated fact; `DigestPage` is where "was anything looked at" and "what to say about it" are
+this app's own decision, the same place the other three designed `DigestState` sentences already
+live. See `web/CLAUDE.md`'s matching entry for the render-side branch and its own real-corpus/real-
+browser verification (`from=2026-01-01&to=2026-01-31`, zero matching sessions in the dominant
+repository).
+
+The duplicate `from > to` pre-check the route handler originally carried alongside `GetDigest`'s own
+throw (both reviews caught this independently) is gone — `GetDigest` is now the one place this
+validates, and the route handler's `catch (ArgumentException ex) when (ex is not ArgumentNullException)`
+maps it to 400 instead. `ArgumentNullException` is explicitly excluded from that catch: a null
+`store` is a genuine caller bug, not a client-supplied 400 the route should paper over.
+
+`ParseTimestamp`'s own `DateTimeStyles.RoundtripKind` reads an offset-less timestamp as the parsing
+machine's local time — harmless for the masthead span (a display value the client re-formats
+`timeZone: 'UTC'` regardless) but a real determinism gap (PRD §3.8) for the date filter specifically,
+since `IsWithinDateRange` compares against fixed UTC boundaries (`StartOfDayUtc`/`EndOfDayUtc`): a
+local-time misread would shift which side of a boundary a session falls on depending on the server's
+own machine timezone. Every real timestamp in the live reference corpus carries an explicit `Z`, so
+this was latent, not observed — `ParseTimestampAsUtc` (`DateTimeStyles.AssumeUniversal |
+AdjustToUniversal`), a new, dedicated parse used only by the date filter, closes it without touching
+`ParseTimestamp` itself (still used, unchanged, by the masthead span — a display value with two other
+call sites this filter's own correctness does not need to revisit). `internal`, with
+`InternalsVisibleTo` added to `AecoPostMortem.Api.csproj` for `AecoPostMortem.Api.Tests` specifically
+so the regression test (`DigestRouteTests.An_offsetless_timestamp_is_read_as_UTC_not_the_parsing_
+machines_local_time`) can assert `DateTimeOffset.Offset == TimeSpan.Zero` directly — deterministic on
+every machine, unlike a differential HTTP-level test built on a real timestamp, whose own pass/fail
+would otherwise depend on the CI machine's ambient local offset (the same non-determinism PRD §3.8
+exists to rule out, one layer up from the bug itself).

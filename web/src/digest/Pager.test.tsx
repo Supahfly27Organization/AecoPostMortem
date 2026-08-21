@@ -55,4 +55,28 @@ describe('Pager', () => {
 
     expect(screen.getByRole('group', { name: 'Findings pages' })).toBeInTheDocument()
   })
+
+  // Code review Important #3 (both the internal and external review): landing on the last page
+  // disables the very "Next" button that was just clicked (the same for "Previous" into page 1),
+  // dropping focus to `<body>` with nothing announced — below the accessibility bar this app's own
+  // tape keyboard model already set. The status text is a live region and a focus target instead.
+  it('is a live region, so a page change is announced', () => {
+    render(<Pager page={2} pageCount={12} onChange={vi.fn()} />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Page 2 of 12')
+  })
+
+  it('moves focus to the page status once the page changes, so a disabled button never drops focus to <body>', () => {
+    const { rerender } = render(<Pager page={1} pageCount={2} onChange={vi.fn()} />)
+
+    rerender(<Pager page={2} pageCount={2} onChange={vi.fn()} />)
+
+    expect(screen.getByRole('status')).toHaveFocus()
+  })
+
+  it('does not steal focus on first mount', () => {
+    render(<Pager page={1} pageCount={12} onChange={vi.fn()} />)
+
+    expect(screen.getByRole('status')).not.toHaveFocus()
+  })
 })

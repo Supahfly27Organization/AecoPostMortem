@@ -36,7 +36,7 @@ const PAGE_SIZE = 25
  */
 export function DigestPage() {
   const [range, setRange] = useState<DateRange>({ from: null, to: null })
-  const query = useDigest(range)
+  const query = useDigest(range.from, range.to)
   const [pendingRepository, setPendingRepository] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
@@ -66,12 +66,23 @@ export function DigestPage() {
     )
   }
 
-  const { digest } = query
+  const { digest, isRefetching } = query
   const scope = digest.masthead.repositoryScope
   // The seam PRD Part 8 Q5 names: selecting another repository updates which one the selector
   // shows, but no caller here re-fetches a cross-repository digest yet (that view is later work) —
   // this story implements the default and keeps the control itself real and selectable.
   const displayedScope = { ...scope, selectedRepository: pendingRepository ?? scope.selectedRepository }
+
+  // Code review Important #3: every check reports `Ran` unconditionally, even over a population of
+  // zero (a pre-existing fact this task does not change — see `Api/CLAUDE.md`'s own remarks on the
+  // `A_range_matching_zero_sessions_serves_an_empty_but_honest_scope` test). A date range that
+  // matches no sessions in the selected repository would otherwise render "Every check ran and
+  // found nothing." and a clean-checks grid reading "0 found · 0 checked" — indistinguishable from
+  // a genuinely clean corpus, exactly the "clean" vs. "never looked" conflation PRD §3.9 names. This
+  // state is only reachable through an *active* filter: an unfiltered digest with a truly empty
+  // repository scope is a different, pre-existing case this task does not touch.
+  const rangeActive = range.from !== null || range.to !== null
+  const noSessionsInRange = rangeActive && scope.sessionIds.length === 0
 
   // Clamped rather than trusted outright: a stale `page` (e.g. a shrinking list under a new range,
   // even though `applyRange` already resets to 1) never indexes past the end of what is actually
@@ -92,6 +103,17 @@ export function DigestPage() {
 
       <DateRangeFilter from={range.from} to={range.to} onApply={applyRange} />
 
+      {/* Code review Important #4: a re-fetch (a new date range) used to blank the whole page —
+          `useDigest` now keeps the previous digest attached with `isRefetching: true` instead of
+          reporting bare `loading`, so nothing above or below unmounts; this is the one visible sign
+          a new request is under way. `role="status"` is an implicit `aria-live="polite"` region, so
+          assistive technology announces it without stealing focus the way `role="alert"` would. */}
+      {isRefetching && (
+        <p className="digest-page__state" role="status">
+          Updating…
+        </p>
+      )}
+
       {/* The three designed states, each said in its own words rather than all collapsing into an
           unexplained empty list. "Nothing analysed yet" and "found nothing" are different facts
           about the operator's setup and lead to different next actions — see
@@ -106,55 +128,66 @@ export function DigestPage() {
           Analysis is incomplete — ingestion is still under way, so this ranking is not final.
         </p>
       )}
+      {digest.state === 'Analyzed' && noSessionsInRange && (
+        <p className="digest-page__state">
+          No sessions in the selected repository started in the applied date range — nothing was
+          looked at, which is a different fact from every check running clean.
+        </p>
+      )}
       {digest.state === 'Analyzed' &&
+        !noSessionsInRange &&
         digest.rankedFindings.length === 0 &&
         digest.inferredFindings.length === 0 && (
           <p className="digest-page__state">Every check ran and found nothing.</p>
         )}
 
-      <ul className="digest-page__findings">
-        {pagedFindings.map((finding) => (
-          <FindingRow
-            key={`${finding.class}:${finding.recurrence.key}`}
-            finding={finding}
-            sessionIds={digest.masthead.repositoryScope.sessionIds}
-            sessionLabels={digest.masthead.repositoryScope.sessionLabels}
-          />
-        ))}
-      </ul>
-
-      <Pager page={currentPage} pageCount={pageCount} onChange={setPage} />
-
-      {/* FR-48 (issue #52, S-42): `inferredFindings` is real, served data
-          (`DigestEnvelope.InferredFindings`) — never interleaved by rank with the list above (see
-          `Findings/CLAUDE.md`'s own remarks on why a hypothesis is never ranked by sessions
-          affected). Renders no section at all when the list is empty, the same "no section at all"
-          discipline `AgentLanes` already established for an empty `envelope.lanes` (`web/CLAUDE.md`)
-          — there is nothing designed to say here beyond simply not showing the section. */}
-      {digest.inferredFindings.length > 0 && (
-        <section className="digest-page__inferred" aria-labelledby="digest-page__inferred-heading">
-          <h3 id="digest-page__inferred-heading">Judgment calls</h3>
-          <p className="digest-page__state">
-            Hypotheses inferred from the data, not measured claims — shown separately from the
-            ranked findings above and never ranked by sessions affected.
-          </p>
+      {!noSessionsInRange && (
+        <>
           <ul className="digest-page__findings">
-            {digest.inferredFindings.map((finding) => (
+            {pagedFindings.map((finding) => (
               <FindingRow
                 key={`${finding.class}:${finding.recurrence.key}`}
                 finding={finding}
                 sessionIds={digest.masthead.repositoryScope.sessionIds}
                 sessionLabels={digest.masthead.repositoryScope.sessionLabels}
-                variant="unranked"
               />
             ))}
           </ul>
-        </section>
+
+          <Pager page={currentPage} pageCount={pageCount} onChange={setPage} />
+
+          {/* FR-48 (issue #52, S-42): `inferredFindings` is real, served data
+              (`DigestEnvelope.InferredFindings`) — never interleaved by rank with the list above (see
+              `Findings/CLAUDE.md`'s own remarks on why a hypothesis is never ranked by sessions
+              affected). Renders no section at all when the list is empty, the same "no section at all"
+              discipline `AgentLanes` already established for an empty `envelope.lanes` (`web/CLAUDE.md`)
+              — there is nothing designed to say here beyond simply not showing the section. */}
+          {digest.inferredFindings.length > 0 && (
+            <section className="digest-page__inferred" aria-labelledby="digest-page__inferred-heading">
+              <h3 id="digest-page__inferred-heading">Judgment calls</h3>
+              <p className="digest-page__state">
+                Hypotheses inferred from the data, not measured claims — shown separately from the
+                ranked findings above and never ranked by sessions affected.
+              </p>
+              <ul className="digest-page__findings">
+                {digest.inferredFindings.map((finding) => (
+                  <FindingRow
+                    key={`${finding.class}:${finding.recurrence.key}`}
+                    finding={finding}
+                    sessionIds={digest.masthead.repositoryScope.sessionIds}
+                    sessionLabels={digest.masthead.repositoryScope.sessionLabels}
+                    variant="unranked"
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <CleanChecks checks={digest.silentChecks} />
+        </>
       )}
 
-      <CleanChecks checks={digest.silentChecks} />
-
-      <MethodologyFooter masthead={digest.masthead} />
+      <MethodologyFooter masthead={digest.masthead} range={rangeActive ? range : null} />
     </div>
   )
 }

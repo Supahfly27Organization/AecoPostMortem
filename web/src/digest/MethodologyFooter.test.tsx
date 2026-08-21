@@ -77,4 +77,49 @@ describe('MethodologyFooter', () => {
     expect(footer).toHaveTextContent('1 session ')
     expect(footer).not.toHaveTextContent('1 sessions')
   })
+
+  // Code review Important #2: under a date filter, the corpus-wide "measured from 35 sessions"
+  // sentence is still true as a corpus-wide fact, but it left the page with no statement anywhere
+  // of what the *ranking itself* actually covers — 16 of 35, not 35. `range` states that scope
+  // explicitly once a filter is active.
+  it('states the scope actually ranked when a date range is applied, distinct from the corpus-wide count', () => {
+    render(
+      <MethodologyFooter
+        masthead={mastheadWith({
+          repositoryScope: {
+            selectedRepository: 'aeco/AecoPostMortem',
+            availableRepositories: ['aeco/AecoPostMortem'],
+            sessionIds: ['session-1', 'session-2'],
+            sessionLabels: {},
+          },
+        })}
+        range={{ from: '2026-06-01', to: '2026-06-30' }}
+      />,
+    )
+
+    const footer = screen.getByRole('contentinfo')
+    expect(footer).toHaveTextContent('Ranked over 2 of 35 sessions')
+    expect(footer).toHaveTextContent('1 Jun 2026')
+    expect(footer).toHaveTextContent('30 Jun 2026')
+  })
+
+  it('renders no range-specific sentence at all when no date filter is applied', () => {
+    render(<MethodologyFooter masthead={mastheadWith()} />)
+
+    expect(screen.queryByText(/ranked over/i)).not.toBeInTheDocument()
+  })
+
+  it("the session strip's own sentence names the applied range, not only the repository", () => {
+    render(<MethodologyFooter masthead={mastheadWith()} range={{ from: '2026-06-01', to: null }} />)
+
+    expect(screen.getByText(/within the applied date range/i)).toBeInTheDocument()
+  })
+
+  it('a range with only one bound still states it, e.g. "from 1 Jun 2026 onward"', () => {
+    render(<MethodologyFooter masthead={mastheadWith()} range={{ from: '2026-06-01', to: null }} />)
+
+    const footer = screen.getByRole('contentinfo')
+    expect(footer).toHaveTextContent('Ranked over 3 of 35 sessions')
+    expect(footer).toHaveTextContent(/from 1 jun 2026 onward/i)
+  })
 })

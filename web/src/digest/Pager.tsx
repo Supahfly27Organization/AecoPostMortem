@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import './Pager.css'
 
 interface PagerProps {
@@ -17,8 +18,29 @@ interface PagerProps {
  * Renders nothing at all when everything already fits on one page — the same "no control unless
  * there is a real reason for one" discipline `StepFlag`/`RuleCoverageBar` already follow elsewhere in
  * this app.
+ *
+ * Code review Important #3 (both the internal and external review): landing on the last page
+ * disables the exact "Next" button the operator just clicked (the same for "Previous" into page 1),
+ * which drops keyboard focus to `<body>` with nothing announced — the tape's own roving-tab-stop
+ * keyboard model (`session/Tape.tsx`) already set a higher bar than that. The status text is
+ * `role="status"` (an implicit `aria-live="polite"` region, so a screen reader announces the new
+ * page without stealing focus the way `role="alert"` would) and also a real focus target
+ * (`tabIndex={-1}`): every page change after the first mount moves focus onto it, so focus never
+ * lands on `<body>` regardless of which button caused the change or whether it is now disabled.
+ * Skipped on first mount (`hasMounted` ref) — nothing has navigated yet, so there is nothing to
+ * announce and no reason to steal the page's own initial focus.
  */
 export function Pager({ page, pageCount, onChange }: PagerProps) {
+  const statusRef = useRef<HTMLParagraphElement>(null)
+  const hasMounted = useRef(false)
+
+  useEffect(() => {
+    if (hasMounted.current) {
+      statusRef.current?.focus()
+    }
+    hasMounted.current = true
+  }, [page])
+
   if (pageCount <= 1) {
     return null
   }
@@ -33,9 +55,9 @@ export function Pager({ page, pageCount, onChange }: PagerProps) {
       >
         Previous
       </button>
-      <span className="pager__status">
+      <p className="pager__status" role="status" tabIndex={-1} ref={statusRef}>
         Page {page} of {pageCount}
-      </span>
+      </p>
       <button
         type="button"
         onClick={() => onChange(page + 1)}

@@ -113,13 +113,17 @@ public static class ApiHost
 
         app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to) =>
         {
-            if (from is not null && to is not null && from > to)
+            // GetDigest is the one place this validates — no separate pre-check here that could
+            // silently drift from what the method itself enforces (or stop firing if GetDigest's own
+            // rule ever changes without this route being touched).
+            try
             {
-                return Results.BadRequest(
-                    $"'{FromParameter}' ({from}) must not be after '{ToParameter}' ({to}).");
+                return Results.Ok(GetDigest(store, from, to));
             }
-
-            return Results.Ok(GetDigest(store, from, to));
+            catch (ArgumentException ex) when (ex is not ArgumentNullException)
+            {
+                return Results.BadRequest(ex.Message);
+            }
         });
 
         app.MapGet(RulesInventoryRoute, (string? version) =>
@@ -222,7 +226,8 @@ public static class ApiHost
         ArgumentNullException.ThrowIfNull(store);
         if (from is not null && to is not null && from > to)
         {
-            throw new ArgumentException($"'{nameof(from)}' ({from}) must not be after '{nameof(to)}' ({to}).");
+            throw new ArgumentException(
+                $"'{nameof(from)}' ({from}) must not be after '{nameof(to)}' ({to}).", nameof(from));
         }
 
         using var context = store.Open();
@@ -248,7 +253,7 @@ public static class ApiHost
             ? repositorySessionIds
             : sessions
                 .Where(session => repositorySessionIds.Contains(session.SessionId))
-                .Where(session => IsWithinDateRange(ParseTimestamp(session.StartedAt), from, to))
+                .Where(session => IsWithinDateRange(ParseTimestampAsUtc(session.StartedAt), from, to))
                 .Select(session => session.SessionId)
                 .ToHashSet(StringComparer.Ordinal);
         var scopedSessions = sessions.Where(session => scopedSessionIds.Contains(session.SessionId)).ToList();
@@ -274,14 +279,7 @@ public static class ApiHost
         // must stay true whether or not a date filter narrowed that set further.
         var servedRepositoryScope = scopedSessionIds.SetEquals(repositorySessionIds)
             ? repositoryScope
-            : repositoryScope with
-            {
-                SessionIds = scopedSessions
-                    .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
-                    .ThenBy(session => session.SessionId, StringComparer.Ordinal)
-                    .Select(session => session.SessionId)
-                    .ToList(),
-            };
+            : repositoryScope with { SessionIds = OrderedSessionIds(scopedSessions) };
 
         var digest = ProcessDigest.Build(
             BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings,
@@ -495,6 +493,25 @@ public static class ApiHost
     static DateTimeOffset ParseTimestamp(string timestamp) =>
         DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
+    /// <summary>Code review Minor (both the internal and external review): <see cref="ParseTimestamp"/>'s
+    /// own <see cref="DateTimeStyles.RoundtripKind"/> reads an offset-less timestamp as the parsing
+    /// machine's own local time — harmless for the masthead span (a display value, formatted
+    /// <c>timeZone: 'UTC'</c> client-side regardless of the offset the server attached) but a real
+    /// determinism gap here specifically: <see cref="IsWithinDateRange"/> compares against
+    /// <see cref="StartOfDayUtc"/>/<see cref="EndOfDayUtc"/>, both fixed UTC instants, so a
+    /// local-time misread would shift which side of the boundary a session falls on depending on the
+    /// server's own machine timezone (PRD §3.8's determinism contract). Every real timestamp in the
+    /// live reference corpus carries an explicit offset (<c>Z</c>), so this is latent today, not
+    /// observed — fixed here rather than left for a machine in a non-UTC timezone to hit first. A
+    /// dedicated parse rather than changing <see cref="ParseTimestamp"/> itself: that shared method
+    /// mirrors <c>Findings.SessionRecording.ParseTimestamp</c>'s own established convention and has
+    /// two other call sites (the masthead span) this filter's own correctness does not need to
+    /// revisit.</summary>
+    internal static DateTimeOffset ParseTimestampAsUtc(string timestamp) =>
+        DateTimeOffset.Parse(
+            timestamp, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+
     /// <summary>The date-range filter's own inclusive-of-the-whole-day comparison — a session
     /// starting at any time on <paramref name="to"/>'s own calendar day is still in range, not
     /// excluded for carrying a time-of-day later than midnight. Both bounds are optional and
@@ -561,13 +578,22 @@ public static class ApiHost
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(repository => repository, StringComparer.Ordinal)
                 .ToList(),
-            SessionIds = scopedSessions
-                .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
-                .ThenBy(session => session.SessionId, StringComparer.Ordinal)
-                .Select(session => session.SessionId)
-                .ToList(),
+            SessionIds = OrderedSessionIds(scopedSessions),
         };
     }
+
+    /// <summary>The chronological session-id ordering both <see cref="BuildRepositoryScope"/> and
+    /// <see cref="GetDigest"/>'s own date-filtered <c>servedRepositoryScope</c> use — extracted so the
+    /// two call sites cannot silently drift onto two different orderings. By the session's own real
+    /// start time, never by session id text (a random UUID in the reference corpus has no
+    /// relationship to arrival order — the same defect PR #112 fixed for rule-set version ordering),
+    /// tie-broken by session id ordinally for a deterministic total order.</summary>
+    static List<string> OrderedSessionIds(IEnumerable<Session> sessions) =>
+        sessions
+            .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
+            .ThenBy(session => session.SessionId, StringComparer.Ordinal)
+            .Select(session => session.SessionId)
+            .ToList();
 
     /// <summary>
     /// FR-40's real orchestration (S-22, issue #35): resolves the whole store's <see cref="RawEvent"/>s

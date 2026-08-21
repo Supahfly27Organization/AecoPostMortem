@@ -38,3 +38,17 @@
   border-color: var(--accent);
   color: var(--accent);
 }
+
+.date-range-filter__hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.date-range-filter__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--flag);
+  font-weight: 600;
+}

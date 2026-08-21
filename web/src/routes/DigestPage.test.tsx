@@ -396,4 +396,140 @@ describe('DigestPage', () => {
 
     expect(screen.queryByRole('group', { name: 'Findings pages' })).not.toBeInTheDocument()
   })
+
+  // Code review Important #5 test gap: `applyRange` resets `page` to 1, but nothing asserted it —
+  // land on page 2, apply a range, and the page must read 1 again once the re-scoped digest loads.
+  it('resets to page 1 after applying a new date range', async () => {
+    const user = userEvent.setup()
+    const template = digestWith().rankedFindings[0]
+    const manyFindings = Array.from({ length: 30 }, (_, index) => ({
+      ...template,
+      headline: `Finding number ${index + 1}`,
+      recurrence: { key: `key-${index + 1}`, occurrences: [] },
+    }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(JSON.stringify(digestWith({ rankedFindings: manyFindings })), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Finding number 1')
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('Page 2 of 2')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('From'), '2026-06-01')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await screen.findByText('Page 1 of 2')).toBeInTheDocument()
+    expect(screen.getByText('Finding number 1')).toBeInTheDocument()
+  })
+
+  // Code review Important #4: applying a filter used to blank the entire page (masthead, selector
+  // and the filter control itself all unmounted) while the re-scoped digest loaded — a one-click
+  // dead end mid-interaction and a lost filter control. The previously loaded digest must stay on
+  // screen, with a distinct, non-alarming indicator that a re-fetch is under way.
+  it('keeps the previously loaded digest on screen with an "updating" status while a new range loads', async () => {
+    const user = userEvent.setup()
+    let resolveSecond: (response: Response) => void = () => {}
+    let callCount = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        callCount += 1
+        if (callCount === 1) {
+          return Promise.resolve(
+            new Response(JSON.stringify(digestWith()), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        }
+        return new Promise<Response>((resolve) => {
+          resolveSecond = resolve
+        })
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('src/hot.cs was read repeatedly')
+
+    await user.type(screen.getByLabelText('From'), '2026-06-01')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    // The previous digest, the masthead and the filter control itself are all still on screen —
+    // nothing unmounts while the new range's own request is in flight.
+    expect(screen.getByText('src/hot.cs was read repeatedly')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: /corpus scope/i })).toBeInTheDocument()
+    expect(screen.getByRole('search', { name: 'Date range' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/updating/i)
+
+    resolveSecond(
+      new Response(JSON.stringify(digestWith({ rankedFindings: [] })), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    await vi.waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+  })
+
+  // Code review Important #3: every check reports `Ran` unconditionally, even over a population of
+  // zero — a date range matching no sessions in the selected repository would otherwise render
+  // "Every check ran and found nothing." and a clean-checks grid reading "0 found · 0 checked",
+  // which is indistinguishable from "genuinely clean" even though nothing was actually looked at.
+  it('states honestly that no sessions fall in the applied range, rather than "found nothing"', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify(
+            digestWith({
+              rankedFindings: [],
+              silentChecks: [
+                {
+                  checkId: 'hook-failure',
+                  population: 0,
+                  findingCount: 0,
+                  provenance: 'observed',
+                  provenanceLabel: 'Observed — read directly from the session log.',
+                },
+              ],
+              masthead: {
+                ...digestWith().masthead,
+                repositoryScope: { ...digestWith().masthead.repositoryScope, sessionIds: [] },
+              },
+            }),
+          ),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await user.type(await screen.findByLabelText('From'), '2026-01-01')
+    await user.type(screen.getByLabelText('To'), '2026-01-31')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await screen.findByText(/no sessions.*range/i)).toBeInTheDocument()
+    expect(screen.queryByText(/every check ran and found nothing/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/checks that found nothing/i)).not.toBeInTheDocument()
+  })
 })

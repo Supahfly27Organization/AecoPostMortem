@@ -11,6 +11,7 @@ function mastheadWith(overrides: Partial<MastheadEnvelope> = {}): MastheadEnvelo
     repositoryCount: 3,
     eventCount: 56_138,
     toolCallCount: 12_345,
+    subagentCount: 470,
     ruleCoverage: 'NotYetAnalyzed',
     repositoryScope: {
       selectedRepository: 'aeco/AecoPostMortem',

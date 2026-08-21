@@ -140,6 +140,9 @@ export interface MastheadEnvelope {
   repositoryCount: number
   eventCount: number
   toolCallCount: number
+  /** Mockup parity item #8: the corpus-wide subagent count — the mockup's own masthead stat strip's
+   * sixth cell, mirroring `AecoPostMortem.Api.MastheadEnvelope.SubagentCount`. */
+  subagentCount: number
   ruleCoverage: RuleCoverageStatus
   repositoryScope: RepositoryScopeEnvelope
 }

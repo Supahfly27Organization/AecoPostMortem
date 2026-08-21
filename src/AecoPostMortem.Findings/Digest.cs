@@ -25,6 +25,12 @@ public sealed record MastheadCounters
 
     public required long ToolCallCount { get; init; }
 
+    /// <summary>Every <c>Agent</c> row in the corpus, regardless of repository — the same plain
+    /// row count <see cref="SessionRecording.SessionMasthead.SubagentCount"/> already reports at the
+    /// single-session scope (<c>agents.Count</c>), just corpus-wide here (mockup parity item #8).
+    /// </summary>
+    public required int SubagentCount { get; init; }
+
     /// <summary>True while ingestion of this corpus is still under way. A masthead built from
     /// counters with this set states that analysis is incomplete rather than presenting a partial
     /// count as final (edge case, Scenario 4).</summary>

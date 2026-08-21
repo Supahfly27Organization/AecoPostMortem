@@ -95,6 +95,7 @@ public sealed class DigestEnvelopeTests
         RepositoryCount = 3,
         EventCount = 56_138,
         ToolCallCount = 12_345,
+        SubagentCount = 470,
         IngestInProgress = false,
     };
 
@@ -251,6 +252,7 @@ public sealed class DigestEnvelopeTests
         Assert.Equal(3, envelope.Masthead.RepositoryCount);
         Assert.Equal(56_138, envelope.Masthead.EventCount);
         Assert.Equal(12_345, envelope.Masthead.ToolCallCount);
+        Assert.Equal(470, envelope.Masthead.SubagentCount);
         Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, envelope.Masthead.RuleCoverage);
     }
 
@@ -349,6 +351,7 @@ public sealed class DigestEnvelopeTests
                 RepositoryCount = 0,
                 EventCount = 0,
                 ToolCallCount = 0,
+                SubagentCount = 0,
                 IngestInProgress = false,
             },
             new CheckRegistry { Entries = [] },

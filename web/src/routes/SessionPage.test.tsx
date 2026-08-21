@@ -19,12 +19,10 @@ function respondWith(envelope: SessionEnvelope) {
   )
 }
 
-function renderAtSession(sessionId: string | null) {
-  const path = sessionId === null ? '/sessions' : `/sessions/${sessionId}`
+function renderAtSession(sessionId: string) {
   render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[`/sessions/${sessionId}`]}>
       <Routes>
-        <Route path="/sessions" element={<SessionPage />} />
         <Route path="/sessions/:sessionId" element={<SessionPage />} />
       </Routes>
     </MemoryRouter>,
@@ -264,14 +262,6 @@ describe('A skill invocation is its own step', () => {
     expect(rows[0]).toHaveTextContent('code-review')
     expect(rows[0]).toHaveTextContent('superpowers')
     expect(rows[0]).toHaveTextContent('6.3.0')
-  })
-})
-
-describe('No session is selected', () => {
-  it('states that plainly rather than showing a blank page', () => {
-    renderAtSession(null)
-
-    expect(screen.getByText(/no session selected/i)).toBeInTheDocument()
   })
 })
 

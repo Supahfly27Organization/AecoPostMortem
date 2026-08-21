@@ -77,11 +77,21 @@
 }
 
 .session-tape__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.03em;
   color: var(--ink-3);
   min-width: 4.5rem;
+}
+
+/* Mockup parity item #10: a second, faster-to-scan signal alongside the kind's own text label —
+   `currentColor` inherits `.session-tape__kind`'s `--ink-3`, so this needs no colour of its own and
+   tracks light/dark mode automatically. */
+.session-tape__glyph {
+  flex: none;
 }
 
 .session-tape__plugin {

@@ -63,6 +63,58 @@ public sealed class DigestRouteTests
         }
     }
 
+    /// <summary>Mockup parity item #8: the masthead's sixth mockup cell — every <c>Agent</c> row in
+    /// the corpus, regardless of repository, the same corpus-wide-then-filter shape every other
+    /// masthead counter already uses.</summary>
+    [Fact]
+    public async Task The_masthead_serves_the_corpus_wide_subagent_count()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1", "org/majority"));
+            context.Sessions.Add(ASession("s2", "org/minority"));
+            context.Agents.Add(new Agent
+            {
+                SessionId = "s1",
+                AgentId = "a1",
+                SpawningToolCallId = "tc1",
+                Name = "general-purpose",
+                DisplayName = "General purpose",
+                StartedAt = "2026-08-16T10:00:01Z",
+                Outcome = AgentOutcome.Completed,
+            });
+            context.Agents.Add(new Agent
+            {
+                SessionId = "s2",
+                AgentId = "a2",
+                SpawningToolCallId = "tc2",
+                Name = "general-purpose",
+                DisplayName = "General purpose",
+                StartedAt = "2026-08-16T10:00:01Z",
+                Outcome = AgentOutcome.Completed,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            // Corpus-wide, not scoped to the selected repository (org/majority): both agents count,
+            // even though "s2" belongs to org/minority, the repository not selected here.
+            Assert.Equal(2, envelope!.Masthead.SubagentCount);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     [Fact]
     public async Task Four_repeated_reads_of_one_path_serve_as_a_ranked_finding()
     {

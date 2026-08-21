@@ -3,7 +3,10 @@ import './Masthead.css'
 
 /**
  * FR-41's corpus masthead (S-36, issue #44): the scope every ranked finding below it is ranked
- * *within* — sessions, span, repositories, events, tool calls and rule coverage.
+ * *within* — sessions, span, repositories, events, tool calls and rule coverage. Mockup parity
+ * item #8 added a sixth mockup cell, subagents (`masthead.subagentCount`), positioned last to match
+ * the mockup's own cell order (Sessions/Span/Repositories/Events/Tool calls/Subagents) — rendered
+ * after this app's own rule-coverage cell, which the mockup itself does not carry.
  *
  * Every figure here is read straight off `MastheadEnvelope`, which
  * `AecoPostMortem.Findings.MastheadCounters` documents as counters maintained at ingest time. This
@@ -38,6 +41,7 @@ export function Masthead({ masthead, state }: { masthead: MastheadEnvelope; stat
         <Figure label="Events" value={count.format(masthead.eventCount)} />
         <Figure label="Tool calls" value={count.format(masthead.toolCallCount)} />
         <Figure label="Rule coverage" value={ruleCoverageText[masthead.ruleCoverage]} />
+        <Figure label="Subagents" value={count.format(masthead.subagentCount)} />
       </dl>
     </section>
   )

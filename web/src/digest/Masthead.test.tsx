@@ -11,6 +11,7 @@ function counters(overrides: Partial<MastheadEnvelope> = {}): MastheadEnvelope {
     repositoryCount: 3,
     eventCount: 56_138,
     toolCallCount: 12_345,
+    subagentCount: 470,
     ruleCoverage: 'NotYetAnalyzed',
     repositoryScope: {
       selectedRepository: 'aeco/AecoPostMortem',
@@ -41,6 +42,14 @@ describe('Masthead', () => {
     expect(figure('Events')).toHaveTextContent('56,138')
     expect(figure('Tool calls')).toHaveTextContent('12,345')
     expect(figure('Span')).toHaveTextContent('2026')
+  })
+
+  // Mockup parity item #8: the mockup's own masthead stat strip carries a sixth cell, Subagents,
+  // matching its own cell order (Sessions/Span/Repositories/Events/Tool calls/Subagents).
+  it('states the corpus-wide subagent count', () => {
+    renderMasthead(counters())
+
+    expect(figure('Subagents')).toHaveTextContent('470')
   })
 
   // Scenario 5: rule coverage is honest before rules are analysed.

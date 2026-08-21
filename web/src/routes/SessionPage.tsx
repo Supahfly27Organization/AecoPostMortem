@@ -453,5 +453,15 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
 export function SessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
 
+  // `/sessions/:sessionId` is now the only route that mounts this page, so the param is always
+  // present at runtime — but `useParams` still types every param optional, and there is no way to
+  // tell React Router otherwise. This guard is the type narrowing, not a designed UI state: it is
+  // unreachable through the router as registered, and says so rather than asserting non-null with
+  // `!`, so a future route registration that forgets the param fails visibly instead of rendering
+  // a session view against `undefined`.
+  if (!sessionId) {
+    return <p role="alert">This page needs a session id in its URL.</p>
+  }
+
   return <LoadedSession sessionId={sessionId} />
 }

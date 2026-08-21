@@ -299,6 +299,53 @@ public sealed class SessionEnvelopeTests
         Assert.Empty(envelope.Lanes);
     }
 
+    /// <summary>Mockup parity item #17: a step named in the caller-supplied <c>stepFindings</c> map
+    /// serves the matching finding(s) on its own <c>Findings</c> field; a step with no entry serves an
+    /// empty list — the same "empty is the designed state" discipline this file's own lane/chip tests
+    /// already establish.</summary>
+    [Fact]
+    public void A_step_named_in_the_supplied_step_findings_map_serves_the_matching_finding()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z"), ToolCall("tc2", "grep", "2026-08-16T10:00:02Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+
+        var finding = new Finding
+        {
+            Class = FindingClass.Waste,
+            Provenance = Provenance.Derived,
+            Headline = "view failed 1 of 2 calls (50%) across 1 session.",
+            Evidence = [new EvidenceItem { Field = "toolIdentity", Value = "view" }],
+            Recurrence = new Recurrence { Key = "view", Occurrences = [new RecurrenceOccurrence { SessionId = "s1" }] },
+        };
+        var stepFindings = new Dictionary<(SessionTapeStepKind, string), IReadOnlyList<Finding>>
+        {
+            [(SessionTapeStepKind.ToolCall, "tc1")] = [finding],
+        };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, stepFindings: stepFindings);
+
+        var flaggedStep = envelope.Steps.Single(step => step.StepId == "tc1");
+        var unflaggedStep = envelope.Steps.Single(step => step.StepId == "tc2");
+
+        var match = Assert.Single(flaggedStep.Findings);
+        Assert.Equal("view", match.Recurrence.Key);
+        Assert.Empty(unflaggedStep.Findings);
+    }
+
+    [Fact]
+    public void No_step_findings_argument_serves_an_empty_findings_list_on_every_step()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Empty(step.Findings);
+    }
+
     /// <summary>FR-22 (S-09, issue #18): supplied lanes travel onto the envelope unchanged — the
     /// caller (<c>ApiHost.GetSession</c>) is the one that resolves each subagent's own output, this
     /// factory only carries the result.</summary>

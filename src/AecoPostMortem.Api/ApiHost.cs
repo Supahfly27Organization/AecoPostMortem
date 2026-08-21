@@ -870,6 +870,13 @@ public static class ApiHost
 
         var findings = SessionFindings.For(sessionId, repositoryFindings);
 
+        // Mockup parity item #17: which of this session's own tape steps each session-scoped finding
+        // is unambiguously about (`Api/CLAUDE.md`'s own remarks on `SessionTapeStepFindingLookup`) —
+        // computed from the identical `toolCalls`/`hooks` rows already read above for the tape itself,
+        // never a second query.
+        var stepFindings = SessionTapeStepFindingLookup.Build(
+            findings.Chips.Select(chip => chip.Finding).ToList(), toolCalls, hooks);
+
         // FR-22 (S-09, issue #18): one lane per subagent, each carrying the report it actually
         // produced — resolved from the same `rawEvents` read above, ordered by `StartedAt` so the
         // served list is deterministic rather than whatever order the store happened to return rows
@@ -894,7 +901,7 @@ public static class ApiHost
             .ToList();
         var thinkingByPromptStepId = StepEvidenceLookup.FindThinkingForPromptSteps(rawEvents, promptStepIds);
 
-        return SessionEnvelope.From(recording, findings, FindingEnvelope.From, lanes, thinkingByPromptStepId);
+        return SessionEnvelope.From(recording, findings, FindingEnvelope.From, lanes, stepFindings, thinkingByPromptStepId);
     }
 
     /// <summary>

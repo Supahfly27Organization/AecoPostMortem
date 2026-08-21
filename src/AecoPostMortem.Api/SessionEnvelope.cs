@@ -154,6 +154,19 @@ public sealed record SessionTapeStepEnvelope
 
     public string? AgentId { get; init; }
 
+    /// <summary>Mockup parity item #17: the specific finding(s) this exact step is unambiguously
+    /// *about* — e.g. a failed tool-call row for a finding whose evidence names this exact tool
+    /// identity, or a failed hook row for a finding whose evidence is this exact hook's own
+    /// success/error fields (<see cref="SessionTapeStepFindingLookup"/>). Empty for the overwhelming
+    /// majority of steps: today this covers only the finding shapes named there, deliberately not
+    /// every finding class — this is a narrower, step-level fact than
+    /// <see cref="SessionEnvelope.Findings"/> (the chip row, "every finding affecting this session").
+    /// Defaults to an empty list — the same "empty list is the designed state, never an omission"
+    /// discipline <see cref="SessionEnvelope.Findings"/> and <see cref="SessionEnvelope.Lanes"/>
+    /// already establish — so every pre-existing call to <see cref="From(SessionTapeStep)"/> still
+    /// compiles and still serves an empty list.</summary>
+    public required IReadOnlyList<FindingEnvelope> Findings { get; init; }
+
     /// <summary>Mockup parity item #13 ("Prose in transcript"): the model's own readable reasoning
     /// for this step, resolved the identical way <see cref="StepEvidenceLookup.Find"/> resolves it
     /// for one step on click (<see cref="StepEvidenceLookup.FindThinkingForPromptSteps"/>) — but
@@ -164,7 +177,10 @@ public sealed record SessionTapeStepEnvelope
     /// convention <see cref="PluginName"/> already establishes for a skill step's own plugin.</summary>
     public ThinkingEnvelope? Thinking { get; init; }
 
-    public static SessionTapeStepEnvelope From(SessionTapeStep step, ThinkingEnvelope? thinking = null)
+    public static SessionTapeStepEnvelope From(
+        SessionTapeStep step,
+        IReadOnlyList<FindingEnvelope>? findings = null,
+        ThinkingEnvelope? thinking = null)
     {
         ArgumentNullException.ThrowIfNull(step);
 
@@ -179,6 +195,7 @@ public sealed record SessionTapeStepEnvelope
             OffsetMs = (long)step.Offset.TotalMilliseconds,
             OwnerKind = step.OwnerKind,
             AgentId = step.AgentId,
+            Findings = findings ?? [],
             Thinking = thinking,
         };
     }
@@ -333,8 +350,12 @@ public sealed record SessionEnvelope
     /// list) rather than being required, the same additive-parameter shape
     /// <see cref="SessionRecording.Build"/> already uses for its own <c>spawnResolution</c>
     /// parameter — every existing call site that supplies no lanes still compiles and still serves
-    /// an empty list. Mockup parity item #13 adds <paramref name="thinkingByPromptStepId"/> the same
-    /// way: <see langword="null"/> when the caller supplies none (every step then serves
+    /// an empty list. <paramref name="stepFindings"/> (mockup parity item #17) follows the identical
+    /// shape: <see langword="null"/> when the caller built no <see cref="SessionTapeStepFindingLookup"/>
+    /// map (or does not want this behaviour at all — e.g. every pre-existing test in this project),
+    /// in which case every step serves an empty <see cref="SessionTapeStepEnvelope.Findings"/> list.
+    /// Mockup parity item #13 adds <paramref name="thinkingByPromptStepId"/> the same way:
+    /// <see langword="null"/> when the caller supplies none (every step then serves
     /// <see cref="SessionTapeStepEnvelope.Thinking"/> as <see langword="null"/>, unchanged from
     /// before this item), keyed by <see cref="SessionTapeStep.StepId"/> so the lookup is a direct
     /// join rather than a second pass over <c>recording.Tape.Steps</c>.</summary>
@@ -343,6 +364,7 @@ public sealed record SessionEnvelope
         SessionFindings findings,
         Func<Finding, FindingEnvelope> mapFinding,
         IReadOnlyList<SessionAgentLaneEnvelope>? lanes = null,
+        IReadOnlyDictionary<(SessionTapeStepKind Kind, string StepId), IReadOnlyList<Finding>>? stepFindings = null,
         IReadOnlyDictionary<string, ThinkingEnvelope>? thinkingByPromptStepId = null)
     {
         ArgumentNullException.ThrowIfNull(recording);
@@ -355,6 +377,9 @@ public sealed record SessionEnvelope
             Steps = recording.Tape.Steps
                 .Select(step => SessionTapeStepEnvelope.From(
                     step,
+                    stepFindings is not null && stepFindings.TryGetValue((step.Kind, step.StepId), out var matches)
+                        ? matches.Select(mapFinding).ToList()
+                        : null,
                     step.Kind == SessionTapeStepKind.Prompt && thinkingByPromptStepId is not null
                         ? thinkingByPromptStepId.GetValueOrDefault(step.StepId)
                         : null))

@@ -29,6 +29,14 @@
   border-bottom: 1px solid var(--rule);
 }
 
+/* Mockup parity item #17: a small flag/callout on the specific row a finding is about — placed
+   before the `[aria-selected='true']` rule below so a selected-and-flagged row still reads as
+   selected first (the accent background wins the tie), matching this file's own existing precedent
+   of selection state taking visual priority. */
+.session-tape__step[data-flagged='true'] {
+  background: var(--flag-soft);
+}
+
 .session-tape__step[aria-selected='true'] {
   background: var(--accent-soft);
   outline: 1px solid var(--accent);
@@ -125,6 +133,16 @@
 .session-tape__plugin {
   color: var(--ink-3);
   font-size: 0.8rem;
+}
+
+/* Mockup parity item #17: the flag glyph itself, coloured with the same `--flag` token
+   `SessionPage.css`'s finding chips already use, so a flagged tape row and a flagged chip read as
+   the same kind of signal. */
+.session-tape__flag {
+  color: var(--flag);
+  font-size: 0.85rem;
+  line-height: 1;
+  flex: none;
 }
 
 .session-tape__empty {

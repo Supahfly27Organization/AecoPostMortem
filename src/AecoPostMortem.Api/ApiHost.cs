@@ -230,7 +230,7 @@ public static class ApiHost
             scopedSessionIds);
 
         var digest = ProcessDigest.Build(
-            BuildMastheadCounters(sessions, rawEvents, toolCalls), checkRegistry, findings, repositoryScope);
+            BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings, repositoryScope);
 
         return DigestEnvelope.From(digest, FindingEnvelope.From);
     }
@@ -347,7 +347,10 @@ public static class ApiHost
     /// remarks for why. <see cref="MastheadCounters.IngestInProgress"/> is always
     /// <see langword="false"/> for the same reason stated there.</summary>
     static MastheadCounters BuildMastheadCounters(
-        IReadOnlyList<Session> sessions, IReadOnlyList<RawEvent> rawEvents, IReadOnlyList<ToolCall> toolCalls) =>
+        IReadOnlyList<Session> sessions,
+        IReadOnlyList<RawEvent> rawEvents,
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents) =>
         new()
         {
             SessionCount = sessions.Count,
@@ -364,6 +367,12 @@ public static class ApiHost
                 .Count(),
             EventCount = rawEvents.Count,
             ToolCallCount = toolCalls.Count,
+            // Mockup parity item #8: every Agent row in the corpus, regardless of repository — the
+            // same corpus-wide-then-filter shape GetDigest already established for the other five
+            // counters, and this method already receives `agents` corpus-wide (GetDigest reads it
+            // once, before narrowing to `scopedAgents` for the check orchestrators below), so no new
+            // read was needed to answer this.
+            SubagentCount = agents.Count,
             IngestInProgress = false,
         };
 

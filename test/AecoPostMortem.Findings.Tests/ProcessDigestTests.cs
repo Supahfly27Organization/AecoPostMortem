@@ -15,6 +15,7 @@ public sealed class ProcessDigestTests
         RepositoryCount = sessionCount == 0 ? 0 : 3,
         EventCount = sessionCount == 0 ? 0 : 56_138,
         ToolCallCount = sessionCount == 0 ? 0 : 12_345,
+        SubagentCount = sessionCount == 0 ? 0 : 470,
         IngestInProgress = ingestInProgress,
     };
 
@@ -179,6 +180,7 @@ public sealed class ProcessDigestTests
         Assert.Equal(3, digest.Masthead.Counters.RepositoryCount);
         Assert.Equal(56_138, digest.Masthead.Counters.EventCount);
         Assert.Equal(12_345, digest.Masthead.Counters.ToolCallCount);
+        Assert.Equal(470, digest.Masthead.Counters.SubagentCount);
         Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
     }
 

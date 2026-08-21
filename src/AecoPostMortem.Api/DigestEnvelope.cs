@@ -54,6 +54,11 @@ public sealed record MastheadEnvelope
 
     public required long ToolCallCount { get; init; }
 
+    /// <summary>Mockup parity item #8: the corpus-wide subagent count, the sixth cell the mockup's
+    /// own masthead stat strip carries. Mirrors <see cref="MastheadCounters.SubagentCount"/>
+    /// verbatim.</summary>
+    public required int SubagentCount { get; init; }
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required RuleCoverageStatus RuleCoverage { get; init; }
 
@@ -71,6 +76,7 @@ public sealed record MastheadEnvelope
             RepositoryCount = masthead.Counters.RepositoryCount,
             EventCount = masthead.Counters.EventCount,
             ToolCallCount = masthead.Counters.ToolCallCount,
+            SubagentCount = masthead.Counters.SubagentCount,
             RuleCoverage = masthead.RuleCoverage,
             RepositoryScope = RepositoryScopeEnvelope.From(masthead.RepositoryScope),
         };

@@ -172,9 +172,16 @@ export type RawStepEventEnvelope =
   | { kind: 'present'; eventType: string; payload: string }
   | { kind: 'skipped'; reason: string }
 
+/** A tool call's own result — the literal `tool.execution_complete` payload, mirroring
+ * `AecoPostMortem.Api.StepEvidenceEnvelope.Result`. Reuses `RawStepEventEnvelope`, the same
+ * "literal payload, or a stated absence" shape `raw` already carries for the call itself: `skipped`
+ * covers both a step kind that never produces a result (`Prompt`/`Skill`/`Hook`) and a
+ * `toolCall`/`mcpCall` step whose own `tool.execution_complete` was never recorded — still running,
+ * or the session ended mid-call — never an empty string read as "the result was empty". */
 export interface StepEvidenceEnvelope {
   thinking: ThinkingEnvelope
   raw: RawStepEventEnvelope
+  result: RawStepEventEnvelope
 }
 
 export function stepEvidenceRoute(sessionId: string, stepId: string, kind: SessionTapeStepKind): string {

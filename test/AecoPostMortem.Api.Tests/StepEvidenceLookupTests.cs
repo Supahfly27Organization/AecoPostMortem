@@ -31,6 +31,77 @@ public sealed class StepEvidenceLookupTests
     }
 
     [Fact]
+    public void A_tool_calls_result_is_its_own_execution_complete()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_start", """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""),
+            Ev(2, "tool.execution_complete", """{"id":"e2","data":{"toolCallId":"tc1","success":true,"result":{"content":"ok","detailedContent":"details"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.ToolCall, "tc1");
+
+        var evidenceResult = Assert.IsType<RawStepEventEnvelope.Present>(result.Result);
+        Assert.Equal("tool.execution_complete", evidenceResult.EventType);
+        Assert.Contains("\"content\":\"ok\"", evidenceResult.Payload);
+    }
+
+    /// <summary>The real 373/16,076-event failure case measured in the live corpus: a failed call
+    /// carries no <c>result</c> key at all, only <c>error</c> — still a real, present
+    /// <c>tool.execution_complete</c> event, so this is <c>Present</c> with the error payload, not
+    /// <c>Absent</c>.</summary>
+    [Fact]
+    public void A_failed_tool_calls_result_still_serves_its_own_execution_complete_payload()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_start", """{"id":"e1","data":{"toolName":"grep","toolCallId":"tc1"}}"""),
+            Ev(2, "tool.execution_complete", """{"id":"e2","data":{"toolCallId":"tc1","success":false,"error":{"message":"boom","code":"failure"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.ToolCall, "tc1");
+
+        var evidenceResult = Assert.IsType<RawStepEventEnvelope.Present>(result.Result);
+        Assert.Contains("\"success\":false", evidenceResult.Payload);
+    }
+
+    /// <summary>A call that never recorded its own <c>tool.execution_complete</c> — still running, or
+    /// the session ended mid-call — is a distinct, stated state, never an empty string rendered as
+    /// "the result was empty."</summary>
+    [Fact]
+    public void A_tool_call_with_no_recorded_completion_reports_its_result_as_a_stated_absence()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_start", """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.ToolCall, "tc1");
+
+        var skipped = Assert.IsType<RawStepEventEnvelope.Skipped>(result.Result);
+        Assert.Contains("may still be running", skipped.Reason);
+    }
+
+    /// <summary>Only a tool or MCP call produces a <c>tool.execution_complete</c> at all — a prompt
+    /// step's own result is "not applicable", a reason distinguishable from "still running" — not
+    /// merely a second non-empty string (code review: a shared reason for both branches would leave
+    /// this requirement unprotected).</summary>
+    [Fact]
+    public void A_prompt_step_reports_its_result_as_not_applicable_to_this_step_kind()
+    {
+        var events = new[]
+        {
+            Ev(1, "assistant.turn_start", """{"id":"e1","data":{"turnId":"t1"}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
+
+        var skipped = Assert.IsType<RawStepEventEnvelope.Skipped>(result.Result);
+        Assert.Contains("this step kind does not", skipped.Reason);
+        Assert.DoesNotContain("may still be running", skipped.Reason);
+    }
+
+    [Fact]
     public void A_tool_call_carries_no_thinking_it_is_recorded_per_assistant_message()
     {
         var events = new[]
@@ -94,6 +165,68 @@ public sealed class StepEvidenceLookupTests
 
         var skipped = Assert.IsType<RawStepEventEnvelope.Skipped>(result.Raw);
         Assert.NotEmpty(skipped.Reason);
+        var resultSkipped = Assert.IsType<RawStepEventEnvelope.Skipped>(result.Result);
+        Assert.NotEmpty(resultSkipped.Reason);
+    }
+
+    /// <summary>An MCP call resolves its result the same way a plain tool call does — the join is on
+    /// <c>toolCallId</c>, and <c>tool.execution_complete</c> carries the full result for every tool
+    /// call, MCP or not (verified against the live 35-session reference corpus).</summary>
+    [Fact]
+    public void An_mcp_calls_result_is_its_own_execution_complete_too()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_start", """{"id":"e1","data":{"toolName":"codebase-memory-mcp-search_code","toolCallId":"tc1"}}"""),
+            Ev(2, "tool.execution_complete", """{"id":"e2","data":{"toolCallId":"tc1","success":true,"result":{"content":"{\"hits\":3}","detailedContent":"{\"hits\":3}"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.McpCall, "tc1");
+
+        var evidenceResult = Assert.IsType<RawStepEventEnvelope.Present>(result.Result);
+        Assert.Equal("tool.execution_complete", evidenceResult.EventType);
+    }
+
+    /// <summary>Two <c>tool.execution_complete</c> events sharing one <c>toolCallId</c> — essentially
+    /// theoretical on the live corpus (every measured id is unique per event type), but this lookup
+    /// resolves the <em>last</em> one, matching <c>Ingestion.ExecutionRecordBuilder.BuildToolCalls</c>'s
+    /// own overwrite-on-duplicate dictionary semantics (code review) — so the Raw tab's own Result and
+    /// the Detail tab's derived <c>ToolCall.Success</c>/<c>.CompletedAt</c> can never disagree about
+    /// which of two same-id events is authoritative.</summary>
+    [Fact]
+    public void Two_completions_sharing_one_toolCallId_resolve_to_the_last_one_not_the_first()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_start", """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""),
+            Ev(2, "tool.execution_complete", """{"id":"e2","data":{"toolCallId":"tc1","success":false,"error":{"message":"first, stale"}}}"""),
+            Ev(3, "tool.execution_complete", """{"id":"e3","data":{"toolCallId":"tc1","success":true,"result":{"content":"second, authoritative"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.ToolCall, "tc1");
+
+        var evidenceResult = Assert.IsType<RawStepEventEnvelope.Present>(result.Result);
+        Assert.Contains("second, authoritative", evidenceResult.Payload);
+        Assert.DoesNotContain("first, stale", evidenceResult.Payload);
+    }
+
+    /// <summary>A missing <c>tool.execution_start</c> (e.g. skipped at ingest) does not imply a
+    /// missing <c>tool.execution_complete</c> — the two are independent events. A real, present
+    /// result must still surface on the Result field even though the Raw (call) field reports
+    /// skipped, rather than inheriting the call's own absence (code review).</summary>
+    [Fact]
+    public void A_result_still_resolves_even_when_the_calls_own_start_event_is_missing()
+    {
+        var events = new[]
+        {
+            Ev(1, "tool.execution_complete", """{"id":"e1","data":{"toolCallId":"tc1","success":true,"result":{"content":"ok"}}}"""),
+        };
+
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.ToolCall, "tc1");
+
+        Assert.IsType<RawStepEventEnvelope.Skipped>(result.Raw);
+        var evidenceResult = Assert.IsType<RawStepEventEnvelope.Present>(result.Result);
+        Assert.Equal("tool.execution_complete", evidenceResult.EventType);
     }
 
     [Fact]

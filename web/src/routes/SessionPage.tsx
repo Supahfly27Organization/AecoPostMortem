@@ -320,19 +320,35 @@ function ThinkingPanel({ thinking }: { thinking: ThinkingEnvelope }) {
   return <p className="inspector__thinking-text">{thinking.text}</p>
 }
 
+/** One labeled raw-event block: the literal payload when present, or a stated reason when skipped
+ * — never a blank area. Shared by the call and its result, the identical two-state shape both
+ * carry. */
+function RawEventBlock({ label, event }: { label: string; event: RawStepEventEnvelope }) {
+  return (
+    <div className="inspector__raw-block">
+      <p className="inspector__raw-block-label">{label}</p>
+      {event.kind === 'skipped' ? (
+        <p className="inspector__unavailable">{event.reason}</p>
+      ) : (
+        <div className="inspector__raw">
+          <p className="inspector__raw-event-type">{event.eventType}</p>
+          <pre className="inspector__raw-payload">{event.payload}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** The Raw tab: "the provenance guarantee made clickable, not a debugging affordance" (the
  * story's own edge case) — it must never render blank, and a step whose raw event was skipped at
- * ingest states that fact instead. */
-function RawPanel({ raw }: { raw: RawStepEventEnvelope }) {
-  if (raw.kind === 'skipped') {
-    return <p className="inspector__unavailable">{raw.reason}</p>
-  }
-
+ * ingest states that fact instead. A tool call's own result is a second, separately labeled block
+ * below the call — an operator previously saw the call going out and never what came back. */
+function RawPanel({ raw, result }: { raw: RawStepEventEnvelope; result: RawStepEventEnvelope }) {
   return (
-    <div className="inspector__raw">
-      <p className="inspector__raw-event-type">{raw.eventType}</p>
-      <pre className="inspector__raw-payload">{raw.payload}</pre>
-    </div>
+    <>
+      <RawEventBlock label="Call" event={raw} />
+      <RawEventBlock label="Result" event={result} />
+    </>
   )
 }
 
@@ -376,7 +392,9 @@ function SelectedStepInspector({ sessionId, step }: { sessionId: string; step: S
         {evidenceQuery.status === 'error' && (
           <p className="inspector__unavailable">Could not load this step's evidence.</p>
         )}
-        {evidenceQuery.status === 'loaded' && <RawPanel raw={evidenceQuery.evidence.raw} />}
+        {evidenceQuery.status === 'loaded' && (
+          <RawPanel raw={evidenceQuery.evidence.raw} result={evidenceQuery.evidence.result} />
+        )}
       </div>
     </>
   )

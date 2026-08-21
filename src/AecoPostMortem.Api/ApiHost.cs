@@ -26,6 +26,16 @@ public static class ApiHost
     /// <summary>FR-41's digest route (S-36, issue #44), first served for real here.</summary>
     public const string DigestRoute = "/api/digest";
 
+    /// <summary>The optional date-range filter's two query parameters — both plain calendar dates
+    /// (<c>yyyy-MM-dd</c>), inclusive of the whole named day (<see cref="StartOfDayUtc"/>/
+    /// <see cref="EndOfDayUtc"/>). Omitted, <see cref="GetDigest"/> behaves exactly as it did before
+    /// this filter existed. See the "A date-range filter re-scopes the whole analysis" non-obvious
+    /// decision in <c>Api/CLAUDE.md</c> for why this narrows <em>which sessions every check runs
+    /// over</em> rather than merely which already-computed findings are displayed.</summary>
+    public const string FromParameter = "from";
+
+    public const string ToParameter = "to";
+
     /// <summary>FR-40's Rules Inventory route (S-22, issue #35), first served for real here.</summary>
     public const string RulesInventoryRoute = "/api/rules-inventory";
 
@@ -101,7 +111,20 @@ public static class ApiHost
 
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
 
-        app.MapGet(DigestRoute, () => Results.Ok(GetDigest(store)));
+        app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to) =>
+        {
+            // GetDigest is the one place this validates — no separate pre-check here that could
+            // silently drift from what the method itself enforces (or stop firing if GetDigest's own
+            // rule ever changes without this route being touched).
+            try
+            {
+                return Results.Ok(GetDigest(store, from, to));
+            }
+            catch (ArgumentException ex) when (ex is not ArgumentNullException)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
 
         app.MapGet(RulesInventoryRoute, (string? version) =>
         {
@@ -198,9 +221,14 @@ public static class ApiHost
     /// opens the store, so there is no live "still ingesting" signal for a separate <c>serve</c>
     /// process to read.
     /// </summary>
-    public static DigestEnvelope GetDigest(LocalStore store)
+    public static DigestEnvelope GetDigest(LocalStore store, DateOnly? from = null, DateOnly? to = null)
     {
         ArgumentNullException.ThrowIfNull(store);
+        if (from is not null && to is not null && from > to)
+        {
+            throw new ArgumentException(
+                $"'{nameof(from)}' ({from}) must not be after '{nameof(to)}' ({to}).", nameof(from));
+        }
 
         using var context = store.Open();
 
@@ -216,7 +244,18 @@ public static class ApiHost
         // computes both from the same selected-repository filter) — reusing it here, rather than
         // re-filtering sessions a second time, is what guarantees the served session-strip positions
         // and the sessions every check below runs over can never disagree.
-        var scopedSessionIds = repositoryScope.SessionIds.ToHashSet(StringComparer.Ordinal);
+        var repositorySessionIds = repositoryScope.SessionIds.ToHashSet(StringComparer.Ordinal);
+
+        // The date-range filter narrows the repository scope further — see the "A date-range filter
+        // re-scopes the whole analysis" non-obvious decision in Api/CLAUDE.md. When neither bound is
+        // supplied this is exactly repositorySessionIds, unchanged from before this filter existed.
+        var scopedSessionIds = from is null && to is null
+            ? repositorySessionIds
+            : sessions
+                .Where(session => repositorySessionIds.Contains(session.SessionId))
+                .Where(session => IsWithinDateRange(ParseTimestampAsUtc(session.StartedAt), from, to))
+                .Select(session => session.SessionId)
+                .ToHashSet(StringComparer.Ordinal);
         var scopedSessions = sessions.Where(session => scopedSessionIds.Contains(session.SessionId)).ToList();
 
         var scopedToolCalls = toolCalls.Where(call => scopedSessionIds.Contains(call.SessionId)).ToList();
@@ -229,11 +268,22 @@ public static class ApiHost
             scopedSessions, scopedRawEvents, scopedToolCalls, scopedTurns, scopedPermissions, scopedAgents,
             scopedSessionIds);
 
+        // Rule coverage stays scoped to the repository selection alone, the same "corpus-wide fact,
+        // not a ranking-scope lens" treatment MastheadCounters below already gets — a date filter
+        // narrows which sessions the findings ranking runs over, not which rule-set version's
+        // coverage figure is shown.
         var ruleCoverage = BuildRuleCoverageStatus(sessions, rawEvents, toolCalls, agents, repositoryScope);
+
+        // The served RepositoryScope.SessionIds follows the date filter: its own contract
+        // (Findings.RepositoryScope.SessionIds) is "the same session set every check ran over", which
+        // must stay true whether or not a date filter narrowed that set further.
+        var servedRepositoryScope = scopedSessionIds.SetEquals(repositorySessionIds)
+            ? repositoryScope
+            : repositoryScope with { SessionIds = OrderedSessionIds(scopedSessions) };
 
         var digest = ProcessDigest.Build(
             BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings,
-            repositoryScope, ruleCoverage);
+            servedRepositoryScope, ruleCoverage);
 
         // Digest session-naming, Slice 2: a session's own display label, resolved over the identical
         // scopedRawEvents already grouped by session for HookFailureEventLookup/DeclaredIntentLookup
@@ -443,6 +493,48 @@ public static class ApiHost
     static DateTimeOffset ParseTimestamp(string timestamp) =>
         DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
+    /// <summary>Code review Minor (both the internal and external review): <see cref="ParseTimestamp"/>'s
+    /// own <see cref="DateTimeStyles.RoundtripKind"/> reads an offset-less timestamp as the parsing
+    /// machine's own local time — harmless for the masthead span (a display value, formatted
+    /// <c>timeZone: 'UTC'</c> client-side regardless of the offset the server attached) but a real
+    /// determinism gap here specifically: <see cref="IsWithinDateRange"/> compares against
+    /// <see cref="StartOfDayUtc"/>/<see cref="EndOfDayUtc"/>, both fixed UTC instants, so a
+    /// local-time misread would shift which side of the boundary a session falls on depending on the
+    /// server's own machine timezone (PRD §3.8's determinism contract). Every real timestamp in the
+    /// live reference corpus carries an explicit offset (<c>Z</c>), so this is latent today, not
+    /// observed — fixed here rather than left for a machine in a non-UTC timezone to hit first. A
+    /// dedicated parse rather than changing <see cref="ParseTimestamp"/> itself: that shared method
+    /// mirrors <c>Findings.SessionRecording.ParseTimestamp</c>'s own established convention and has
+    /// two other call sites (the masthead span) this filter's own correctness does not need to
+    /// revisit.</summary>
+    internal static DateTimeOffset ParseTimestampAsUtc(string timestamp) =>
+        DateTimeOffset.Parse(
+            timestamp, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+
+    /// <summary>The date-range filter's own inclusive-of-the-whole-day comparison — a session
+    /// starting at any time on <paramref name="to"/>'s own calendar day is still in range, not
+    /// excluded for carrying a time-of-day later than midnight. Both bounds are optional and
+    /// independent: a caller may supply only one.</summary>
+    static bool IsWithinDateRange(DateTimeOffset startedAt, DateOnly? from, DateOnly? to)
+    {
+        if (from is not null && startedAt < StartOfDayUtc(from.Value))
+        {
+            return false;
+        }
+
+        if (to is not null && startedAt > EndOfDayUtc(to.Value))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    static DateTimeOffset StartOfDayUtc(DateOnly date) => new(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+    static DateTimeOffset EndOfDayUtc(DateOnly date) => new(date.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+
     /// <summary>
     /// FR-41 part 2 (S-54)'s default: the repository carrying the most sessions, ties broken
     /// ordinally for a deterministic pick (PRD §3.8) — PRD Part 8 Q5 decided the digest shows one
@@ -486,13 +578,22 @@ public static class ApiHost
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(repository => repository, StringComparer.Ordinal)
                 .ToList(),
-            SessionIds = scopedSessions
-                .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
-                .ThenBy(session => session.SessionId, StringComparer.Ordinal)
-                .Select(session => session.SessionId)
-                .ToList(),
+            SessionIds = OrderedSessionIds(scopedSessions),
         };
     }
+
+    /// <summary>The chronological session-id ordering both <see cref="BuildRepositoryScope"/> and
+    /// <see cref="GetDigest"/>'s own date-filtered <c>servedRepositoryScope</c> use — extracted so the
+    /// two call sites cannot silently drift onto two different orderings. By the session's own real
+    /// start time, never by session id text (a random UUID in the reference corpus has no
+    /// relationship to arrival order — the same defect PR #112 fixed for rule-set version ordering),
+    /// tie-broken by session id ordinally for a deterministic total order.</summary>
+    static List<string> OrderedSessionIds(IEnumerable<Session> sessions) =>
+        sessions
+            .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
+            .ThenBy(session => session.SessionId, StringComparer.Ordinal)
+            .Select(session => session.SessionId)
+            .ToList();
 
     /// <summary>
     /// FR-40's real orchestration (S-22, issue #35): resolves the whole store's <see cref="RawEvent"/>s

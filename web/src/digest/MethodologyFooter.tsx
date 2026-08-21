@@ -25,6 +25,27 @@ function plural(n: number, singular: string, pluralForm = `${singular}s`): strin
   return `${count.format(n)} ${n === 1 ? singular : pluralForm}`
 }
 
+/** The date-range filter's own optional bounds, mirroring `api/digest.ts`'s `DateRange` — kept as a
+ * separate, structurally identical type rather than importing it, so this file does not need to
+ * import from `api/digest.ts` just for one shape (`DigestPage.tsx` already imports both). */
+interface AppliedRange {
+  from: string | null
+  to: string | null
+}
+
+/** Code review Important #2: states the applied window in words, both bounds independent — a bare
+ * `to`-only range reads "through", a bare `from`-only range reads "from … onward", and both present
+ * reads as a plain span, the same "to" join `formatSpan` already uses for the corpus-wide span. */
+function formatRange(range: AppliedRange): string {
+  if (range.from !== null && range.to !== null) {
+    return `${day.format(new Date(range.from))} to ${day.format(new Date(range.to))}`
+  }
+  if (range.from !== null) {
+    return `from ${day.format(new Date(range.from))} onward`
+  }
+  return `through ${day.format(new Date(range.to!))}`
+}
+
 /**
  * Mockup parity item #9 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`,
  * "Methodology footer"): the mockup's own footer states what was measured and how the recurrence
@@ -33,8 +54,25 @@ function plural(n: number, singular: string, pluralForm = `${singular}s`): strin
  * figure is read straight off the `MastheadEnvelope` this page already fetched, the same
  * "nothing on this page counts anything" discipline `Masthead.tsx` documents for its own figures.
  * No absent-data caveat paragraph here: this app's findings are all real, not mockup placeholders.
+ *
+ * `range` (the pager & date-range filter task, code review Important #2): the corpus-wide "measured
+ * from N sessions" sentence below stays true whether or not a date filter is active — it is a fact
+ * about the corpus, per `AecoPostMortem.Api/CLAUDE.md`'s "A date-range filter re-scopes the whole
+ * analysis" decision that `MastheadCounters` ignores the filter — but that sentence alone left the
+ * page with no statement of what the *ranking itself* actually covers once a filter narrows it. When
+ * `range` is non-null (an active filter, passed by `DigestPage`), a second sentence states the real
+ * scope: how many of the corpus-wide sessions the ranking is actually over, and the applied window.
+ * `null` (the default when no filter is active) renders neither this sentence nor the "within the
+ * applied date range" clause on the session-strip sentence below — this component adds no new prose
+ * at all for the unfiltered case, byte-for-byte the same as before this parameter existed.
  */
-export function MethodologyFooter({ masthead }: { masthead: MastheadEnvelope }) {
+export function MethodologyFooter({
+  masthead,
+  range = null,
+}: {
+  masthead: MastheadEnvelope
+  range?: AppliedRange | null
+}) {
   const sessionsInScope = masthead.repositoryScope.sessionIds.length
 
   return (
@@ -46,14 +84,22 @@ export function MethodologyFooter({ masthead }: { masthead: MastheadEnvelope }) 
         events and {count.format(masthead.toolCallCount)} tool calls, read from this machine&rsquo;s
         own store. Every figure here is a served count, never recomputed on this page.
       </p>
+      {range !== null && (
+        <p>
+          Ranked over {sessionsInScope} of {count.format(masthead.sessionCount)} sessions,{' '}
+          {formatRange(range)} — a date filter re-scopes the whole ranking to just those sessions,
+          it does not merely hide rows computed against the full corpus above.
+        </p>
+      )}
       <p>
         Rule text shown anywhere in this digest is verbatim — exactly as Copilot injected it into the
         session, with no paraphrasing or normalisation.
       </p>
       <p>
         Each finding&rsquo;s session strip lays out the {plural(sessionsInScope, 'session')} in the
-        selected repository in chronological order, and lights the ones that finding actually
-        touched — the same session set every check on this page was run over.
+        selected repository{range !== null && ' within the applied date range'} in chronological
+        order, and lights the ones that finding actually touched — the same session set every check
+        on this page was run over.
       </p>
     </footer>
   )

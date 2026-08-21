@@ -11,7 +11,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean. Mockup parity item #6 added `Provenance`/`ProvenanceLabel`, projected straight from `CheckRegistryEntry.Provenance` (below) so a clean-check card can carry the same badge a finding does |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs. Mockup parity item #6 added `SilentChecks` (`SilentCheckEnvelope.From(digest.CheckRegistry)`), threading FR-42's surface through the same fetch. Mockup parity item #15 added `RuleCoverageStatusEnvelope` (`notYetAnalyzed`/`analyzed`, the closed wire shape for `Findings.RuleCoverageStatus`) and changed `MastheadEnvelope.RuleCoverage` from a bare enum to that type — `AnalyzedCoverage.Counts` reuses `RulesInventoryStatusCountsEnvelope` (`RulesInventoryEnvelope.cs`) verbatim rather than a second four-int shape. Digest session-naming Slice 2 added `RepositoryScopeEnvelope.SessionLabels` and a matching optional `sessionLabels` parameter threaded through `MastheadEnvelope.From`/`DigestEnvelope.From` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest` (`DigestRoute`), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest?from=&to=` (`DigestRoute`, `FromParameter`/`ToParameter` — the pager & date-range filter task's optional `DateOnly` bounds, both omittable, a caller error on `from > to` answering 400), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
 | `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
 | `SessionRuleSetLookup.cs` | FR-27's own not-yet-wired gap, closed: `SessionRuleSetLookup.BuildAll` resolves a whole store's `RawEvent`s into one `Rules.SessionRuleSet` per `Data.Execution.Session` row, calling `Ingestion.SessionRuleExtractor.Extract` per session — the corpus-wide walk nothing did before this landed |
@@ -1227,3 +1227,108 @@ renders a session's own resolved label as its link text, with the raw session id
 corpus and a real browser: the dominant repository's own 25 sessions all resolve a real label (e.g.
 "run ef database update for…", "i have cors issues for…"), rendered on a real, expanded Digest
 finding row in place of the bare session-id GUID it showed before.
+
+### A date-range filter re-scopes the whole analysis, not merely which already-computed findings display
+
+The pager & date-range filter task's own real design question, settled before writing any code:
+`Finding` carries no date of its own — only `Recurrence.Occurrences` (`AecoPostMortem.Findings/
+CLAUDE.md`) names the sessions a finding recurred in, and only `Session.StartedAt` is dated. Two
+readings of "filter findings from X to Y" existed: (a) keep every count/rank exactly as already
+computed and merely hide a finding whose occurrences all fall outside the window, or (b) narrow which
+*sessions* every check runs over and recompute everything from there. (a) was rejected: it would
+serve a `sessionsAffected` figure, a recurrence strip and a rank position that still silently counted
+occurrences the operator explicitly excluded from view — this project's own repeated discipline
+("never serve a number that could mislead," `MastheadCounters`'s "one served figure, never recounted
+differently" rule, `RepositoryScope`'s own "the served strip and the sessions every check ranks over
+are structurally guaranteed to agree") rules that out as dishonest by this codebase's own standard.
+(b) was built instead: `GetDigest(store, DateOnly? from, DateOnly? to)` narrows `scopedSessionIds` —
+already an intersection with the selected repository — by `Session.StartedAt` falling within
+`[StartOfDayUtc(from), EndOfDayUtc(to)]` (both bounds independent, either or both omittable) *before*
+calling `BuildFindingsForScope`, so every check re-runs over exactly the narrower session set the same
+way it already does for repository selection — no `Findings`-layer change was needed at all, since
+`RepositoryScope`/`ProcessDigest.Build` already treat their inputs as "already resolved, filter
+upstream."
+
+Two counters were then a real scope decision each, both resolved by the identical reasoning
+`MastheadCounters`'s and rule coverage's existing "corpus-wide, ignores repository selection" behaviour
+already establishes one dimension of (see "`GetDigest`'s rule-coverage figure..." above): a date range
+is the same kind of ranking-scope lens repository selection already is, not a second corpus-wide fact
+to also narrow. `MastheadCounters` (`BuildMastheadCounters`) and the served rule-coverage figure
+(`BuildRuleCoverageStatus`) both still read the corpus-wide, repository-unfiltered inputs, unaffected
+by `from`/`to` — the masthead states what the whole corpus/repository looks like regardless of which
+window is currently being ranked within. `RepositoryScope.SessionIds`, by contrast, *follows* the
+filter: its own documented contract ("the same set every check ran over," above) has to keep holding
+whether or not a date filter narrowed that set further, so `GetDigest` re-derives it (chronologically
+ordered, the same tie-break `BuildRepositoryScope` already uses) whenever the date-filtered set is a
+proper subset of the repository-only set, and reuses the unfiltered `RepositoryScope` verbatim
+otherwise (`from`/`to` both `null` behaves byte-for-byte as before this filter existed — no test in
+`DigestRouteTests.cs` predating this change needed to change).
+
+The pager was decided by the real corpus size, not by assumption: the live 35-session reference
+corpus serves 297 ranked findings for its dominant repository, and the whole `DigestEnvelope` (already
+fetched in one shot on every existing page load) is about 1.3 MB — small enough that a server-side
+offset/limit wire contract (a new `total` field, a new pagination parameter pair, and a second way for
+the served count to disagree with what a client renders) is not justified yet. `Pager` (`web/
+digest/Pager.tsx`) is a client-side, dumb slice over `rankedFindings`, deliberately deferred to a
+later story if a corpus's real scale ever demands it — see `web/CLAUDE.md`'s matching note.
+
+An inverted range (`from > to`) is a caller error, not a designed empty state: `GetDigest` throws
+`ArgumentException`, and the route handler answers `400 Bad Request` — the same "an honest refusal,
+not a silently empty result" shape `MonitorComparisonRoute`'s own missing-parameter 400 already
+established, rather than folding it into `DigestState.Analyzed`'s existing "no findings" wording, which
+would read as "the range genuinely has nothing in it" instead of "the range itself doesn't make sense."
+
+Verified against the live 35-session reference corpus (not only at the unit level): the dominant
+repository's own 25 sessions span `2026-04-28` to `2026-05-31` — `from=2026-04-28&to=2026-05-31`
+(covering that whole span) reproduces the identical unfiltered 297 findings / 25 sessions byte-for-byte
+(a true superset match), `from=2026-04-28&to=2026-05-10` (half that span) narrows to 281 findings / 16
+sessions with `masthead.sessionCount` still honestly 35, and `from=2026-05-31&to=2026-04-28` (inverted)
+answers 400 — confirmed both via direct `GET /api/digest` requests and in a real browser exercising the
+real `DateRangeFilter`/`Pager` controls end to end (the top-ranked finding's own count moved from "25
+of 25 sessions" to "16 of 16 sessions" under the filter, and the silent-checks section's own population
+moved from "24 checked" to "15 checked," both matching the served JSON exactly).
+
+**Two independent code reviews (an opus subagent and the coordinator's own separate pass) both
+caught the same real gap and one duplicate-validation smell, fixed in the same round as the initial
+implementation, not a later story:**
+
+A date range matching zero sessions in the selected repository is real, reachable behaviour (two
+clicks against a non-empty store), and every one of the ten check orchestrators
+(`BuildFindingsForScope`) sets `CheckRunStatus.Ran` unconditionally — including over a population of
+zero — so `ProcessDigest.Build` still derives `DigestState.Analyzed` for it. Served as-is, this is
+honest at the wire level (`SilentCheckEnvelope.From` is a pure filter, `Api/CLAUDE.md`'s own remarks
+above — it does not synthesise; a `population: 0` entry is a real fact about a check that genuinely
+ran over nothing), but the *client* rendering that fact without qualification would read as "clean",
+exactly the "clean vs. never looked" conflation PRD §3.9 names — this repo's own "Checks that found
+nothing" section states as much in its own copy. The fix landed at `DigestPage.tsx`, not by refusing
+to project the entry at the API layer: `SilentCheckEnvelope.From`'s contract stays a pure filter for
+every other caller (a `population: 0` entry is still meaningful data — "this check ran, over an empty
+set" — that a different client might legitimately want), and `GetDigest` still serves the honest,
+un-opinionated fact; `DigestPage` is where "was anything looked at" and "what to say about it" are
+this app's own decision, the same place the other three designed `DigestState` sentences already
+live. See `web/CLAUDE.md`'s matching entry for the render-side branch and its own real-corpus/real-
+browser verification (`from=2026-01-01&to=2026-01-31`, zero matching sessions in the dominant
+repository).
+
+The duplicate `from > to` pre-check the route handler originally carried alongside `GetDigest`'s own
+throw (both reviews caught this independently) is gone — `GetDigest` is now the one place this
+validates, and the route handler's `catch (ArgumentException ex) when (ex is not ArgumentNullException)`
+maps it to 400 instead. `ArgumentNullException` is explicitly excluded from that catch: a null
+`store` is a genuine caller bug, not a client-supplied 400 the route should paper over.
+
+`ParseTimestamp`'s own `DateTimeStyles.RoundtripKind` reads an offset-less timestamp as the parsing
+machine's local time — harmless for the masthead span (a display value the client re-formats
+`timeZone: 'UTC'` regardless) but a real determinism gap (PRD §3.8) for the date filter specifically,
+since `IsWithinDateRange` compares against fixed UTC boundaries (`StartOfDayUtc`/`EndOfDayUtc`): a
+local-time misread would shift which side of a boundary a session falls on depending on the server's
+own machine timezone. Every real timestamp in the live reference corpus carries an explicit `Z`, so
+this was latent, not observed — `ParseTimestampAsUtc` (`DateTimeStyles.AssumeUniversal |
+AdjustToUniversal`), a new, dedicated parse used only by the date filter, closes it without touching
+`ParseTimestamp` itself (still used, unchanged, by the masthead span — a display value with two other
+call sites this filter's own correctness does not need to revisit). `internal`, with
+`InternalsVisibleTo` added to `AecoPostMortem.Api.csproj` for `AecoPostMortem.Api.Tests` specifically
+so the regression test (`DigestRouteTests.An_offsetless_timestamp_is_read_as_UTC_not_the_parsing_
+machines_local_time`) can assert `DateTimeOffset.Offset == TimeSpan.Zero` directly — deterministic on
+every machine, unlike a differential HTTP-level test built on a real timestamp, whose own pass/fail
+would otherwise depend on the CI machine's ambient local offset (the same non-determinism PRD §3.8
+exists to rule out, one layer up from the bug itself).

@@ -206,13 +206,25 @@ function formatPlugin(step: SessionTapeStep): string | null {
 export function Tape({
   steps,
   onSelectStep,
+  onViewportChange,
 }: {
   steps: SessionTapeStep[]
   onSelectStep?: (step: SessionTapeStep) => void
+  /** Mockup parity item #16 (`session/TapeMinimap.tsx`): the smallest additive hook a parent needs
+   * to build a scroll-synced overview without lifting `scrollTop` itself out of this component or
+   * touching its own virtualisation/selection internals. Fired from the same place this file already
+   * recomputes `firstVisible`/`visible` (the `useMemo` below) — `firstVisibleIndex`/`visibleCount`
+   * are in *step* index space, never row space, so a caller never has to know `buildRows` inserts an
+   * extra header row per turn; `totalSteps` is `steps.length`, handed through so a caller does not
+   * have to hold `steps` itself just to know its own length. Deduplicated against the last emitted
+   * values (a ref, not state — this must not itself trigger a re-render) so a scroll tick that
+   * doesn't actually change which steps are mounted never fires a redundant parent update. */
+  onViewportChange?: (firstVisibleIndex: number, visibleCount: number, totalSteps: number) => void
 }) {
   const containerRef = useRef<HTMLUListElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const lastViewportRef = useRef<{ first: number; count: number; total: number } | null>(null)
 
   useEffect(() => {
     setSelectedIndex((current) => Math.min(current, Math.max(steps.length - 1, 0)))
@@ -238,6 +250,25 @@ export function Tape({
     const last = Math.min(rows.length - 1, first + rowsPerPage + 2 * OVERSCAN_ROWS)
     return { firstVisible: first, visible: rows.slice(first, last + 1) }
   }, [scrollTop, rows, rowsPerPage])
+
+  useEffect(() => {
+    if (!onViewportChange) {
+      return
+    }
+
+    const stepRows = visible.filter((row): row is Extract<TapeRow, { kind: 'step' }> => row.kind === 'step')
+    const firstStepIndex = stepRows.length > 0 ? stepRows[0].stepIndex : 0
+    const visibleCount = stepRows.length
+    const totalSteps = steps.length
+
+    const last = lastViewportRef.current
+    if (last && last.first === firstStepIndex && last.count === visibleCount && last.total === totalSteps) {
+      return
+    }
+
+    lastViewportRef.current = { first: firstStepIndex, count: visibleCount, total: totalSteps }
+    onViewportChange(firstStepIndex, visibleCount, totalSteps)
+  }, [visible, steps.length, onViewportChange])
 
   if (steps.length === 0) {
     return <p className="session-tape__empty">No steps were recorded for this session.</p>

@@ -201,6 +201,52 @@ describe('Each step kind renders its own glyph before the text label', () => {
   })
 })
 
+/** Mockup parity item #16 (`session/TapeMinimap.tsx`): `onViewportChange` is the one additive hook
+ * this file gives a parent to build a scroll-synced overview without lifting `scrollTop` itself out
+ * of this component. */
+describe('Mockup parity item #16: onViewportChange reports the mounted step window', () => {
+  it('reports the initial viewport once on mount, in step index space', () => {
+    const steps = buildSteps(10)
+    const calls: Array<[number, number, number]> = []
+    render(<Tape steps={steps} onViewportChange={(first, count, total) => calls.push([first, count, total])} />)
+
+    expect(calls.length).toBeGreaterThan(0)
+    const [first, count, total] = calls[calls.length - 1]
+    expect(first).toBe(0)
+    expect(count).toBe(steps.length)
+    expect(total).toBe(steps.length)
+  })
+
+  it('updates the reported viewport once the tape scrolls past the initial window', () => {
+    const steps = buildSteps(LARGEST_MEASURED_STEP_COUNT)
+    const calls: Array<[number, number, number]> = []
+    render(<Tape steps={steps} onViewportChange={(first, count, total) => calls.push([first, count, total])} />)
+
+    const tape = screen.getByRole('list', { name: 'Tape' })
+    calls.length = 0
+    fireEvent.scroll(tape, { target: { scrollTop: 10_000 } })
+
+    expect(calls.length).toBeGreaterThan(0)
+    const [first, , total] = calls[calls.length - 1]
+    expect(first).toBeGreaterThan(0)
+    expect(total).toBe(steps.length)
+  })
+
+  it('does not fire again when the reported viewport has not actually changed', () => {
+    const steps = buildSteps(10)
+    const calls: Array<[number, number, number]> = []
+    const record = (first: number, count: number, total: number) => calls.push([first, count, total])
+    const { rerender } = render(<Tape steps={steps} onViewportChange={record} />)
+
+    const callCountAfterMount = calls.length
+    // A new inline callback identity, but the mounted step window itself hasn't changed — the
+    // dedup guard compares emitted values, not the callback's own identity.
+    rerender(<Tape steps={steps} onViewportChange={(first, count, total) => record(first, count, total)} />)
+
+    expect(calls.length).toBe(callCountAfterMount)
+  })
+})
+
 describe('An empty tape', () => {
   it('states that no steps were recorded rather than rendering an empty virtualised list', () => {
     render(<Tape steps={[]} />)

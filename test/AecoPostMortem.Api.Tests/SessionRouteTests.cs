@@ -776,6 +776,56 @@ public sealed class SessionRouteTests
         }
     }
 
+    /// <summary>FR-21's own gap: an operator inspecting a tool-call step saw the call going out and
+    /// never what came back. This proves the fix end to end through the real wire route, not only at
+    /// the lookup level.</summary>
+    [Fact]
+    public async Task A_tool_calls_result_is_served_verbatim_alongside_its_call()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s1",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.RawEvents.Add(new RawEvent(
+                "s1", 1, "tool.execution_start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-1",
+                """{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}"""));
+            context.RawEvents.Add(new RawEvent(
+                "s1", 2, "tool.execution_complete", "2026-08-16T10:00:02Z", "0.0.339",
+                "events.jsonl", 100, "hash-2",
+                """{"id":"e2","data":{"toolCallId":"tc1","success":true,"result":{"content":"ok","detailedContent":"details"}}}"""));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var evidence = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "tc1", SessionTapeStepKind.ToolCall), ClientOptions, Cancellation);
+
+            Assert.NotNull(evidence);
+            var raw = Assert.IsType<RawStepEventEnvelope.Present>(evidence!.Raw);
+            Assert.Equal("tool.execution_start", raw.EventType);
+            var result = Assert.IsType<RawStepEventEnvelope.Present>(evidence.Result);
+            Assert.Equal("tool.execution_complete", result.EventType);
+            Assert.Contains("\"content\":\"ok\"", result.Payload);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     /// <summary>The wire route carries a <c>Prompt</c> step's own <c>StepId</c> — a
     /// <c>Turn.EventId</c>, an opaque envelope id rather than the small display counter it used to be
     /// — through to the right turn, with two turns in this session sharing one <c>data.turnId</c>.

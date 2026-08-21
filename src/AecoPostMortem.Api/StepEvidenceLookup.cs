@@ -59,6 +59,10 @@ public static class StepEvidenceLookup
                 {
                     Reason = "No raw event was found for this step; it may have been skipped at ingest.",
                 },
+                Result = new RawStepEventEnvelope.Skipped
+                {
+                    Reason = "No raw event was found for this step; it may have been skipped at ingest.",
+                },
             };
         }
 
@@ -75,6 +79,41 @@ public static class StepEvidenceLookup
                 EventType = found.Raw.EventType,
                 Payload = found.Raw.Payload,
             },
+            Result = FindResult(ordered, kind, stepId),
+        };
+    }
+
+    /// <summary>A tool call's own result — <c>tool.execution_complete</c>, joined by the identical
+    /// <c>data.toolCallId</c> field <see cref="Find"/> already joins the call's own
+    /// <c>tool.execution_start</c> on (confirmed against the live 35-session reference corpus: every
+    /// tool call, MCP or not, carries this field on its own completion event). Only a
+    /// <see cref="SessionTapeStepKind.ToolCall"/> or <see cref="SessionTapeStepKind.McpCall"/> step
+    /// produces one at all — every other step kind reports a fixed "not applicable" reason without
+    /// attempting a lookup, the same short-circuit <see cref="Find"/> already applies to
+    /// <see cref="ThinkingEnvelope"/> for a non-<c>Prompt</c> step.</summary>
+    static RawStepEventEnvelope FindResult(List<RawEvent> ordered, SessionTapeStepKind kind, string stepId)
+    {
+        if (kind != SessionTapeStepKind.ToolCall && kind != SessionTapeStepKind.McpCall)
+        {
+            return new RawStepEventEnvelope.Skipped
+            {
+                Reason = "Only a tool or MCP call produces a result; this step kind does not.",
+            };
+        }
+
+        var completion = FindByDataField(ordered, "tool.execution_complete", "toolCallId", stepId);
+        if (completion is not { } found)
+        {
+            return new RawStepEventEnvelope.Skipped
+            {
+                Reason = "No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.",
+            };
+        }
+
+        return new RawStepEventEnvelope.Present
+        {
+            EventType = found.Raw.EventType,
+            Payload = found.Raw.Payload,
         };
     }
 

@@ -264,6 +264,21 @@
   white-space: pre-wrap;
 }
 
+.inspector__raw-block + .inspector__raw-block {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+}
+
+.inspector__raw-block-label {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
+}
+
 .inspector__raw-event-type {
   font-weight: 600;
   margin: 0 0 0.5rem;

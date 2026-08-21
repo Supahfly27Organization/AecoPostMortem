@@ -79,7 +79,7 @@ public sealed class StepEvidenceLookupTests
             Ev(1, "assistant.turn_start", """{"id":"e1","data":{"turnId":"t1"}}"""),
         };
 
-        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
 
         var raw = Assert.IsType<RawStepEventEnvelope.Present>(result.Raw);
         Assert.Equal("assistant.turn_start", raw.EventType);
@@ -106,7 +106,7 @@ public sealed class StepEvidenceLookupTests
             Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"t1"}}"""),
         };
 
-        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
 
         var thinking = Assert.IsType<ThinkingEnvelope.Present>(result.Thinking);
         Assert.Equal("I should check the failing test first.", thinking.Text);
@@ -122,7 +122,7 @@ public sealed class StepEvidenceLookupTests
             Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"t1"}}"""),
         };
 
-        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
 
         var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
         Assert.NotEmpty(unavailable.Reason);
@@ -137,7 +137,7 @@ public sealed class StepEvidenceLookupTests
             Ev(2, "assistant.turn_end", """{"id":"e2","data":{"turnId":"t1"}}"""),
         };
 
-        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
 
         var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
         Assert.NotEmpty(unavailable.Reason);
@@ -159,7 +159,7 @@ public sealed class StepEvidenceLookupTests
             Ev(6, "assistant.turn_end", """{"id":"e6","data":{"turnId":"t2"}}"""),
         };
 
-        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
 
         var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
         Assert.Contains("gpt-5.4", unavailable.Reason);
@@ -194,12 +194,12 @@ public sealed class StepEvidenceLookupTests
             Ev(6, "assistant.turn_end", """{"id":"e6","data":{"turnId":"t2"}}"""),
         };
 
-        var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, ["t1", "t2"]);
+        var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, ["e1", "e4"]);
 
         Assert.Equal(2, byStepId.Count);
-        var present = Assert.IsType<ThinkingEnvelope.Present>(byStepId["t1"]);
+        var present = Assert.IsType<ThinkingEnvelope.Present>(byStepId["e1"]);
         Assert.Equal("Considering the fix.", present.Text);
-        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["t2"]);
+        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["e4"]);
         Assert.Contains("gpt-5.4", unavailable.Reason);
     }
 
@@ -217,6 +217,32 @@ public sealed class StepEvidenceLookupTests
         Assert.NotEmpty(unavailable.Reason);
     }
 
+    /// <summary>The real defect a collision-free <c>StepId</c> closes, measured against the live
+    /// 35-session reference corpus before this change: 20 of 25 sessions in the dominant repository
+    /// repeat a <c>data.turnId</c> within one session, and not one of the corpus's readable-reasoning
+    /// messages resolved as <c>present</c> through the served contract, because every colliding step
+    /// anchored on whichever turn carried that display counter first. Anchoring on the
+    /// <c>turn_start</c> envelope's own <c>id</c> gives each turn its own window.</summary>
+    [Fact]
+    public void Two_turn_starts_sharing_one_display_turn_id_each_resolve_their_own_reasoning()
+    {
+        var events = new[]
+        {
+            Ev(1, "assistant.turn_start", """{"id":"e1","data":{"turnId":"1"}}"""),
+            Ev(2, "assistant.message", """{"id":"e2","data":{"reasoningOpaque":"<encrypted>","model":"gpt-5.4"}}"""),
+            Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"1"}}"""),
+            Ev(4, "assistant.turn_start", """{"id":"e4","data":{"turnId":"1"}}"""),
+            Ev(5, "assistant.message", """{"id":"e5","data":{"reasoningText":"The second turn's own reasoning."}}"""),
+            Ev(6, "assistant.turn_end", """{"id":"e6","data":{"turnId":"1"}}"""),
+        };
+
+        var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, ["e1", "e4"]);
+
+        Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["e1"]);
+        var second = Assert.IsType<ThinkingEnvelope.Present>(byStepId["e4"]);
+        Assert.Equal("The second turn's own reasoning.", second.Text);
+    }
+
     /// <summary>A message carrying no <c>model</c> field of its own cannot be attributed to any
     /// model's readable share — it is excluded from the breakdown rather than folded into an
     /// invented "unknown" bucket, and the reason falls back to generic wording rather than naming
@@ -231,7 +257,7 @@ public sealed class StepEvidenceLookupTests
             Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"t1"}}"""),
         };
 
-        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "t1");
+        var result = StepEvidenceLookup.Find(events, SessionTapeStepKind.Prompt, "e1");
 
         var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(result.Thinking);
         Assert.DoesNotContain("gpt", unavailable.Reason);

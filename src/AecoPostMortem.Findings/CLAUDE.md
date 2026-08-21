@@ -416,17 +416,47 @@ count that produced it" discipline this project applies to a Waste finding's rat
 call site that supplies only six arguments still compiles and still reads `Complete` for a session
 with a recorded end, since `spawnResolution` defaults to `null`.
 
-`SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": Copilot's event
-log carries no separate prompt entity, and `Turn` itself carries no message text
-(`AecoPostMortem.Data/CLAUDE.md` — "messages are read from RAW"), so a prompt step's `Label` is the
-turn's own `Outcome` (`"Completed"`/`"Aborted"`/`"Unfinished"`) rather than a transcript excerpt this
-layer cannot see. `SessionTapeStepKind.McpCall` is a `ToolCall` whose `McpServerName` is not null,
+`SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": `Turn` itself
+carries no message text (`AecoPostMortem.Data/CLAUDE.md` — "messages are read from RAW"), so a
+prompt step's `Label` is the turn's own `Outcome` (`"Completed"`/`"Aborted"`/`"Unfinished"`)
+rather than a transcript excerpt this layer cannot see. The real prompt text *does* exist in RAW —
+a `user.message` event's own `data.content`, joined by `interactionId` — and is resolved one layer
+out, where RAW is reachable (`AecoPostMortem.Api.PromptTextLookup`); an earlier version of this
+file claimed Copilot's event log carried no prompt entity at all, which real-corpus verification
+disproved.
+`SessionTapeStepKind.McpCall` is a `ToolCall` whose `McpServerName` is not null,
 kept a distinct tape-step kind from a plain `ToolCall` rather than folded into it, matching the
 Gherkin's own five-way step vocabulary ("hooks, prompts, skills, tool calls and MCP calls").
 `SessionMasthead.ModelCount` reuses `Session.ModelCount` verbatim rather than deriving a second
 "models" figure from `Agent.Model`: NORMALIZED carries no main-thread model field today, only a
 subagent-scoped one, so the count already summed into `ContextSize`'s totals is the one figure this
 layer can state honestly as "models" — a documented scope note, not an oversight.
+
+### A `Prompt` step's `StepId` is `Turn.EventId`, never `Turn.TurnId`
+
+`SessionTapeStep.StepId` is the underlying entity's own *key*, so every kind carries the identity
+its `Data.Execution` row is keyed by: a `ToolCall.ToolCallId`, a `Skill`/`Hook` `EventId`, and —
+since this change — a `Turn.EventId`. It originally carried `Turn.TurnId`, which reads plausibly
+(Copilot prints it) but is the same defect `Data.Execution.Turn` itself was already re-keyed to
+`EventId` to escape (`AecoPostMortem.Data/CLAUDE.md`, "`Turn` is keyed by its own event id"):
+`data.turnId` is a small cycling display counter Copilot reuses within one session, not an
+identity. The fix here is a one-line change to which field `Build` passes, because every consumer
+already treated `StepId` as opaque; what it costs is nothing, and what it bought was measured
+against the live 35-session reference corpus through the served contract, before and after:
+
+| | before | after |
+|---|---|---|
+| sessions (of 25) with at least one colliding prompt `StepId` | 20 | **0** |
+| distinct `StepId`s across 1,878 real prompt steps | 586 | **1,878** |
+| prompt steps resolving `thinking: "present"` (PR #130's inline prose) | 0 | **35** |
+
+The middle row is the defect: 1,292 real prompt rows were addressable only as some *other* turn.
+The last row is why it mattered beyond tidiness — PR #130 shipped inline readable-reasoning prose
+and not one of the corpus's 35 real readable-reasoning messages ever reached a rendered row,
+because `StepEvidenceLookup.FindThinkingForPromptSteps` anchored each colliding step on whichever
+turn Copilot had numbered first and read *that* turn's message window. `Thinking` (S-52) and
+`PromptText` (PR #133) shared one root cause and are both fixed by this one change; nothing was
+fixed twice.
 
 Steps are ordered by wall-clock timestamp (Scenario 2), ties broken by step kind then the step's own
 id (`StringComparer.Ordinal`) for the same determinism reasoning `AbortedTurnCheck` gives its own

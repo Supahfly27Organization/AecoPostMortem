@@ -14,9 +14,16 @@ namespace AecoPostMortem.Api;
 /// row that produced it (`AecoPostMortem.Data/CLAUDE.md`: the payload stays authoritative, and
 /// nothing lifts an envelope's own <c>id</c> out into a NORMALIZED column). A step's own identity —
 /// <c>SessionTapeStep.StepId</c> — is exactly the field each event kind's envelope already carries
-/// (a turn's <c>turnId</c>, a tool call's <c>toolCallId</c>, or a skill/hook's own envelope
-/// <c>id</c>, per <c>SessionRecording.cs</c>'s own remarks), so this is a lookup by that same field,
-/// not a new identity scheme.
+/// (a turn's, skill's or hook's own envelope <c>id</c>; a tool call's <c>data.toolCallId</c>, the one
+/// natural id Copilot writes for the thing itself — per <c>SessionRecording.cs</c>'s own remarks), so
+/// this is a lookup by that same field, not a new identity scheme.
+///
+/// A prompt step is matched on the <c>assistant.turn_start</c> envelope's own <c>id</c>, never on
+/// <c>data.turnId</c>: that field is Copilot's own cycling display counter, repeated within one
+/// session on a measured 20 of 25 real sessions, so matching it would resolve several unrelated turns
+/// to whichever one carried the counter first (<c>SessionRecording.cs</c>'s <c>StepId</c> remarks
+/// carry the full measurement). The envelope id is the identity <c>Data.Execution.Turn</c> itself is
+/// keyed by, and is what a <c>Prompt</c> step's <c>StepId</c> now carries.
 /// </summary>
 public static class StepEvidenceLookup
 {
@@ -32,7 +39,7 @@ public static class StepEvidenceLookup
 
         var anchor = kind switch
         {
-            SessionTapeStepKind.Prompt => FindByDataField(ordered, "assistant.turn_start", "turnId", stepId),
+            SessionTapeStepKind.Prompt => FindByEnvelopeId(ordered, "assistant.turn_start", stepId),
             SessionTapeStepKind.ToolCall or SessionTapeStepKind.McpCall =>
                 FindByDataField(ordered, "tool.execution_start", "toolCallId", stepId),
             SessionTapeStepKind.Skill => FindByEnvelopeId(ordered, "skill.invoked", stepId),
@@ -92,7 +99,7 @@ public static class StepEvidenceLookup
 
         foreach (var stepId in promptStepIds)
         {
-            var anchor = FindByDataField(ordered, "assistant.turn_start", "turnId", stepId);
+            var anchor = FindByEnvelopeId(ordered, "assistant.turn_start", stepId);
             result[stepId] = anchor is { } found
                 ? FindThinking(ordered, found.Raw.Sequence)
                 : new ThinkingEnvelope.Unavailable
@@ -104,7 +111,8 @@ public static class StepEvidenceLookup
         return result;
     }
 
-    /// <summary>A prompt step is a whole <c>Turn</c>, bounded by its own <c>turn_start</c> and the
+    /// <summary>A prompt step is a whole <c>Turn</c>, bounded by <em>its own</em> <c>turn_start</c>
+    /// (matched by that event's envelope <c>id</c>, the step's own <c>StepId</c>) and the
     /// next <c>turn_start</c> (or end of session) — the same open-turn window
     /// <c>ExecutionRecordBuilder.WalkTurns</c> tracks while building the tape itself. Every
     /// main-thread <c>assistant.message</c> inside that window is a candidate: its

@@ -1,0 +1,24 @@
+/* Mockup parity item #16: the sticky vertical minimap beside the tape, ported from the mockup's own
+   `.tape`/`#tapeCanvas` (docs/product-superpowers/discovery/mockups/flight-recorder.html) — narrow,
+   fixed-height, never growing or shrinking the transcript column beside it. */
+.tape-minimap {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 480px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--sunk);
+  overflow: hidden;
+}
+
+.tape-minimap__marks,
+.tape-minimap__viewport {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Decorative only (see the component's own remarks) — never a click or drag target. */
+  pointer-events: none;
+}

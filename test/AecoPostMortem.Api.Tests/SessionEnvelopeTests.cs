@@ -395,7 +395,7 @@ public sealed class SessionEnvelopeTests
     }
 
     /// <summary>A prompt step's own resolved thinking is carried onto its step, joined by
-    /// <c>StepId</c> (the turn's own <c>TurnId</c>).</summary>
+    /// <c>StepId</c> (the turn's own <c>EventId</c> — never <c>TurnId</c>, a repeating display counter).</summary>
     [Fact]
     public void A_prompt_steps_resolved_thinking_is_carried_onto_its_own_step()
     {
@@ -415,7 +415,7 @@ public sealed class SessionEnvelopeTests
         var recording = SessionRecording.Build(session, turns, [], [], [], []);
         var thinking = new Dictionary<string, ThinkingEnvelope>(StringComparer.Ordinal)
         {
-            ["t1"] = new ThinkingEnvelope.Present { Text = "I should check the failing test first." },
+            ["e1"] = new ThinkingEnvelope.Present { Text = "I should check the failing test first." },
         };
 
         var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, thinkingByPromptStepId: thinking);
@@ -464,7 +464,7 @@ public sealed class SessionEnvelopeTests
     }
 
     /// <summary>A prompt step's own resolved real text is carried onto its step, joined by
-    /// <c>StepId</c> (the turn's own <c>TurnId</c>) — <c>Label</c> stays the turn's own
+    /// <c>StepId</c> (the turn's own <c>EventId</c>) — <c>Label</c> stays the turn's own
     /// <c>Outcome</c>, unchanged.</summary>
     [Fact]
     public void A_prompt_steps_resolved_prompt_text_is_carried_onto_its_own_step_without_changing_its_label()
@@ -485,7 +485,7 @@ public sealed class SessionEnvelopeTests
         var recording = SessionRecording.Build(session, turns, [], [], [], []);
         var promptText = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["t1"] = "run ef database update for both auth and regular projects",
+            ["e1"] = "run ef database update for both auth and regular projects",
         };
 
         var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, promptTextByStepId: promptText);

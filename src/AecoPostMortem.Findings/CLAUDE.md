@@ -416,17 +416,56 @@ count that produced it" discipline this project applies to a Waste finding's rat
 call site that supplies only six arguments still compiles and still reads `Complete` for a session
 with a recorded end, since `spawnResolution` defaults to `null`.
 
-`SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": Copilot's event
-log carries no separate prompt entity, and `Turn` itself carries no message text
-(`AecoPostMortem.Data/CLAUDE.md` — "messages are read from RAW"), so a prompt step's `Label` is the
-turn's own `Outcome` (`"Completed"`/`"Aborted"`/`"Unfinished"`) rather than a transcript excerpt this
-layer cannot see. `SessionTapeStepKind.McpCall` is a `ToolCall` whose `McpServerName` is not null,
+`SessionTapeStepKind.Prompt` stands in for "the user's prompt that started a turn": `Turn` itself
+carries no message text (`AecoPostMortem.Data/CLAUDE.md` — "messages are read from RAW"), so a
+prompt step's `Label` is the turn's own `Outcome` (`"Completed"`/`"Aborted"`/`"Unfinished"`)
+rather than a transcript excerpt this layer cannot see. The real prompt text *does* exist in RAW —
+a `user.message` event's own `data.content`, joined by `interactionId` — and is resolved one layer
+out, where RAW is reachable (`AecoPostMortem.Api.PromptTextLookup`); an earlier version of this
+file claimed Copilot's event log carried no prompt entity at all, which real-corpus verification
+disproved.
+`SessionTapeStepKind.McpCall` is a `ToolCall` whose `McpServerName` is not null,
 kept a distinct tape-step kind from a plain `ToolCall` rather than folded into it, matching the
 Gherkin's own five-way step vocabulary ("hooks, prompts, skills, tool calls and MCP calls").
 `SessionMasthead.ModelCount` reuses `Session.ModelCount` verbatim rather than deriving a second
 "models" figure from `Agent.Model`: NORMALIZED carries no main-thread model field today, only a
 subagent-scoped one, so the count already summed into `ContextSize`'s totals is the one figure this
 layer can state honestly as "models" — a documented scope note, not an oversight.
+
+### A `Prompt` step's `StepId` is `Turn.EventId`, never `Turn.TurnId`
+
+`SessionTapeStep.StepId` is the underlying entity's own *key*, so every kind carries the identity
+its `Data.Execution` row is keyed by: a `ToolCall.ToolCallId`, a `Skill`/`Hook` `EventId`, and —
+since this change — a `Turn.EventId`. It originally carried `Turn.TurnId`, which reads plausibly
+(Copilot prints it) but is the same defect `Data.Execution.Turn` itself was already re-keyed to
+`EventId` to escape (`AecoPostMortem.Data/CLAUDE.md`, "`Turn` is keyed by its own event id"):
+`data.turnId` is a small cycling display counter Copilot reuses within one session, not an
+identity. The fix here is a one-line change to which field `Build` passes, because every consumer
+already treated `StepId` as opaque; what it costs is nothing, and what it bought was measured
+against the live 35-session reference corpus through the served contract, before and after:
+
+| | before | after |
+|---|---|---|
+| sessions (of 25) with at least one colliding prompt `StepId` | 20 | **0** |
+| distinct `StepId`s across 1,878 real prompt steps | 586 | **1,878** |
+| prompt steps resolving `thinking: "present"` (PR #130's inline prose) | 0 | **35** |
+
+(These are the 25 sessions of the dominant repository, the scope every session endpoint defaults to.
+`AecoPostMortem.Data/CLAUDE.md` states the same fact over the whole 35-session corpus as "27 of 35" —
+a different population, not a different measurement.)
+
+The middle row is the defect: 1,292 real prompt rows were addressable only as some *other* turn.
+The last row is why it mattered beyond tidiness — PR #130 shipped inline readable-reasoning prose
+and not one of the corpus's 35 real readable-reasoning messages ever reached a rendered row,
+because `StepEvidenceLookup.FindThinkingForPromptSteps` anchored each colliding step on whichever
+turn Copilot had numbered first and read *that* turn's message window. `Thinking` (S-52) and
+`PromptText` (PR #133) shared one root cause and are both fixed by this one change; nothing was
+fixed twice.
+
+It also makes the tie-break paragraph immediately below this one true for the first time: "two
+entities can share a timestamp, never a `(kind, id)` pair within one session" was false for `Prompt`
+steps until this change, since two turns sharing a display counter shared a `(kind, id)` pair
+outright. The ordinal tie-break is now over a genuinely unique key, not merely a deterministic one.
 
 Steps are ordered by wall-clock timestamp (Scenario 2), ties broken by step kind then the step's own
 id (`StringComparer.Ordinal`) for the same determinism reasoning `AbortedTurnCheck` gives its own
@@ -574,11 +613,22 @@ optional `violationCounts` parameter both set (`Api/CLAUDE.md`), so the dozens o
 
 FR-57 names a class-specific key, but an abort has no recurring *cause* the way a hook or a tool
 does — `AbortedTurnFinding.ToFinding` keys `Recurrence` on `$"{SessionId}:{TurnId}"`, not
-`AbortedTurnOccurrence.TurnId` alone: `Turn`'s own natural key is the composite
-`(SessionId, TurnId)` (`PostMortemContext.MapTurn`), and a bare `TurnId` is not guaranteed unique
-across sessions — two unrelated aborts that happened to share one would otherwise collide into the
-same `Recurrence.Key`, which `Recurrence.cs` documents as impossible ("no constructor that could
-produce a second `Finding` for the same key"). Two aborts that happen to share reason text
+`AbortedTurnOccurrence.TurnId` alone: a bare `TurnId` is not unique across sessions — two unrelated
+aborts that happened to share one would otherwise collide into the same `Recurrence.Key`, which
+`Recurrence.cs` documents as impossible ("no constructor that could produce a second `Finding` for
+the same key").
+
+**Known, still-open weakness (recorded, not fixed here).** This composite is *not* `Turn`'s own key.
+`PostMortemContext.MapTurn` keys `Turn` on `(SessionId, EventId)`, because `data.turnId` also repeats
+*within* one session — the same cycling-display-counter fact that this file's own "A `Prompt` step's
+`StepId` is `Turn.EventId`" entry measures at 20 of 25 real sessions. So two aborts in the *same*
+session sharing a counter still collide. Measured against the live 35-session reference corpus this
+does not currently happen (6 aborted-turn findings, 6 distinct recurrence keys), which is why it is
+recorded rather than fixed in passing: moving this key onto `Turn.EventId` means widening
+`Rules.AbortedTurnCheck`'s `TurnRecord`/`AbortedTurnOccurrence` shapes and changing an established
+FR-57 finding identity — its own scoped change, not a drive-by.
+
+Two aborts that happen to share reason text
 (`"user_interrupt"`, say) in two different sessions still stay two distinct findings, each with
 exactly one `RecurrenceOccurrence` — grouping by reason instead would let a measured 9-across-8
 volume collapse into fewer, more heavily "recurring" findings than the corpus actually shows, the

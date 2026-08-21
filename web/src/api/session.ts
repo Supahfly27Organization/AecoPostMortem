@@ -23,6 +23,13 @@ export interface SessionTapeStep {
   offsetMs: number
   ownerKind: OwnerKind
   agentId: string | null
+  // Mockup parity item #13 ("Prose in transcript"): the model's own readable reasoning for this
+  // step, resolved the identical way the inspector's own Thinking tab resolves it for one step on
+  // click (`ThinkingEnvelope`, below) — but eagerly, for every `'prompt'` step, so the tape can
+  // render it inline. Null for every other step kind. Optional (rather than `| null` required) the
+  // same way `ThinkingEnvelope.Unavailable.readabilityByModel` already is here, below — so existing
+  // test literals that predate this field still type-check.
+  thinking?: ThinkingEnvelope | null
 }
 
 export type SessionTokenFigures =

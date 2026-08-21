@@ -71,6 +71,39 @@ public static class StepEvidenceLookup
         };
     }
 
+    /// <summary>Mockup parity item #13 ("Prose in transcript"): resolves every prompt step's own
+    /// readable-reasoning summary in one pass, reusing the identical <see cref="FindThinking"/>
+    /// resolution <see cref="Find"/> already uses for one step on click. Bounded by the caller's own
+    /// <paramref name="promptStepIds"/> — one per <c>Turn</c> (<c>SessionMasthead.TurnCount</c>),
+    /// never the whole tape's step count — which is what keeps eager-resolving this at session-fetch
+    /// time cheap even at this project's largest measured scale (84 turns, a session with 195 turns
+    /// confirmed against the live reference corpus): <c>ordered</c> is sorted once and reused for
+    /// every step, rather than each step re-sorting the session's own <see cref="RawEvent"/>s the way
+    /// two separate <see cref="Find"/> calls would.</summary>
+    public static IReadOnlyDictionary<string, ThinkingEnvelope> FindThinkingForPromptSteps(
+        IReadOnlyList<RawEvent> sessionEvents,
+        IReadOnlyCollection<string> promptStepIds)
+    {
+        ArgumentNullException.ThrowIfNull(sessionEvents);
+        ArgumentNullException.ThrowIfNull(promptStepIds);
+
+        var ordered = sessionEvents.OrderBy(e => e.Sequence).ToList();
+        var result = new Dictionary<string, ThinkingEnvelope>(StringComparer.Ordinal);
+
+        foreach (var stepId in promptStepIds)
+        {
+            var anchor = FindByDataField(ordered, "assistant.turn_start", "turnId", stepId);
+            result[stepId] = anchor is { } found
+                ? FindThinking(ordered, found.Raw.Sequence)
+                : new ThinkingEnvelope.Unavailable
+                {
+                    Reason = "No raw event was found for this step; it may have been skipped at ingest.",
+                };
+        }
+
+        return result;
+    }
+
     /// <summary>A prompt step is a whole <c>Turn</c>, bounded by its own <c>turn_start</c> and the
     /// next <c>turn_start</c> (or end of session) — the same open-turn window
     /// <c>ExecutionRecordBuilder.WalkTurns</c> tracks while building the tape itself. Every

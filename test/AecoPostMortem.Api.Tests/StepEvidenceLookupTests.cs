@@ -177,6 +177,46 @@ public sealed class StepEvidenceLookupTests
         Assert.Equal(100d, claude.ReadableSharePercent);
     }
 
+    /// <summary>Mockup parity item #13 ("Prose in transcript"): resolving every prompt step's own
+    /// thinking in one batch produces the identical result <see cref="StepEvidenceLookup.Find"/>
+    /// would produce for each step on its own — this is a batching optimisation, not a second
+    /// resolution rule.</summary>
+    [Fact]
+    public void Resolving_every_prompt_steps_thinking_at_once_matches_resolving_each_one_individually()
+    {
+        var events = new[]
+        {
+            Ev(1, "assistant.turn_start", """{"id":"e1","data":{"turnId":"t1"}}"""),
+            Ev(2, "assistant.message", """{"id":"e2","data":{"reasoningText":"Considering the fix."}}"""),
+            Ev(3, "assistant.turn_end", """{"id":"e3","data":{"turnId":"t1"}}"""),
+            Ev(4, "assistant.turn_start", """{"id":"e4","data":{"turnId":"t2"}}"""),
+            Ev(5, "assistant.message", """{"id":"e5","data":{"reasoningOpaque":"<encrypted>","model":"gpt-5.4"}}"""),
+            Ev(6, "assistant.turn_end", """{"id":"e6","data":{"turnId":"t2"}}"""),
+        };
+
+        var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, ["t1", "t2"]);
+
+        Assert.Equal(2, byStepId.Count);
+        var present = Assert.IsType<ThinkingEnvelope.Present>(byStepId["t1"]);
+        Assert.Equal("Considering the fix.", present.Text);
+        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["t2"]);
+        Assert.Contains("gpt-5.4", unavailable.Reason);
+    }
+
+    /// <summary>A prompt step id with no matching <c>turn_start</c> at all still resolves — the
+    /// batch lookup never throws for one bad id, matching <see cref="StepEvidenceLookup.Find"/>'s own
+    /// "skipped, not blank" behaviour for a missing raw event.</summary>
+    [Fact]
+    public void A_prompt_step_id_with_no_matching_raw_event_resolves_as_unavailable_not_a_missing_entry()
+    {
+        var events = Array.Empty<RawEvent>();
+
+        var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, ["t-missing"]);
+
+        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["t-missing"]);
+        Assert.NotEmpty(unavailable.Reason);
+    }
+
     /// <summary>A message carrying no <c>model</c> field of its own cannot be attributed to any
     /// model's readable share — it is excluded from the breakdown rather than folded into an
     /// invented "unknown" bucket, and the reason falls back to generic wording rather than naming

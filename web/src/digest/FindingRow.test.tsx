@@ -140,6 +140,28 @@ describe('FindingRow', () => {
     expect(strip).toHaveTextContent('session-2')
   })
 
+  /** Digest session-naming (Slice 2): `sessionLabels` passed to `FindingRow` reaches the recurrence
+   * strip unchanged, so a resolved label (not the bare session id) is what an operator sees there. */
+  it('threads sessionLabels through to the recurrence strip', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <ul>
+        <FindingRow
+          finding={waste()}
+          sessionIds={['session-1', 'session-2']}
+          sessionLabels={{ 'session-1': 'run ef database update for…' }}
+        />
+      </ul>
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { expanded: false }))
+
+    expect(screen.getByRole('link', { name: 'run ef database update for…' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'session-2' })).toBeInTheDocument()
+  })
+
   // Scenario 4: a finding with no suggestion template expands anyway.
   it('a finding with no suggestion template still expands, stating that none is offered', async () => {
     const user = userEvent.setup()

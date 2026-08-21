@@ -40,10 +40,18 @@ import './FindingRow.css'
 export function FindingRow({
   finding,
   sessionIds,
+  sessionLabels = {},
   variant = 'ranked',
 }: {
   finding: FindingEnvelope
   sessionIds: string[]
+  /** Digest session-naming (Slice 2): a session's own display label, keyed by session id — passed
+   * straight through to `RecurrenceStrip`. `masthead.repositoryScope.sessionLabels` (`DigestPage`).
+   * Optional (defaulting to `{}`, rather than `sessionIds`' own required convention) so this
+   * project's many literal `FindingRow`/`RecurrenceStrip` test fixtures need no edit for a field
+   * their own tests never exercise — the identical "reduce diff noise, no test value lost" reasoning
+   * `SessionTapeStep.findings`/`.thinking` are already optional for. */
+  sessionLabels?: Record<string, string>
   variant?: 'ranked' | 'unranked'
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -78,7 +86,7 @@ export function FindingRow({
               above deliberately shows no figure at all for the same reason. */}
           {finding.kind === 'adherence' && <AdherenceFigureBlock figure={finding.figure} />}
 
-          <RecurrenceStrip recurrence={finding.recurrence} />
+          <RecurrenceStrip recurrence={finding.recurrence} sessionLabels={sessionLabels} />
 
           <dl className="finding-row__evidence">
             {finding.evidence.map((item) => (

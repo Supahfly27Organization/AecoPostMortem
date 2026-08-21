@@ -17,6 +17,7 @@ function mastheadWith(overrides: Partial<MastheadEnvelope> = {}): MastheadEnvelo
       selectedRepository: 'aeco/AecoPostMortem',
       availableRepositories: ['aeco/AecoLedger', 'aeco/AecoPostMortem', 'aeco/Upfront'],
       sessionIds: ['session-1', 'session-2', 'session-3'],
+      sessionLabels: {},
     },
     ...overrides,
   }
@@ -66,6 +67,7 @@ describe('MethodologyFooter', () => {
             selectedRepository: 'aeco/AecoPostMortem',
             availableRepositories: ['aeco/AecoPostMortem'],
             sessionIds: ['session-1'],
+            sessionLabels: {},
           },
         })}
       />,

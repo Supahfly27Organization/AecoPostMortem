@@ -88,6 +88,7 @@ export function DigestPage() {
             key={`${finding.class}:${finding.recurrence.key}`}
             finding={finding}
             sessionIds={digest.masthead.repositoryScope.sessionIds}
+            sessionLabels={digest.masthead.repositoryScope.sessionLabels}
           />
         ))}
       </ul>
@@ -111,6 +112,7 @@ export function DigestPage() {
                 key={`${finding.class}:${finding.recurrence.key}`}
                 finding={finding}
                 sessionIds={digest.masthead.repositoryScope.sessionIds}
+                sessionLabels={digest.masthead.repositoryScope.sessionLabels}
                 variant="unranked"
               />
             ))}

@@ -235,7 +235,16 @@ public static class ApiHost
             BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings,
             repositoryScope, ruleCoverage);
 
-        return DigestEnvelope.From(digest, FindingEnvelope.From);
+        // Digest session-naming, Slice 2: a session's own display label, resolved over the identical
+        // scopedRawEvents already grouped by session for HookFailureEventLookup/DeclaredIntentLookup
+        // above — no new store read.
+        var sessionLabels = scopedRawEvents
+            .GroupBy(e => e.SessionId, StringComparer.Ordinal)
+            .Select(group => (SessionId: group.Key, Label: SessionLabelLookup.Find(group.Key, group.ToList())))
+            .Where(pair => pair.Label is not null)
+            .ToDictionary(pair => pair.SessionId, pair => pair.Label!, StringComparer.Ordinal);
+
+        return DigestEnvelope.From(digest, FindingEnvelope.From, sessionLabels);
     }
 
     /// <summary>

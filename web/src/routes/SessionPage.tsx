@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { ModelReasoningReadability, RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
 import { useStepEvidence } from '../api/useStepEvidence'
 import { MethodologyFooter } from '../session/MethodologyFooter'
 import { Tape } from '../session/Tape'
+import { TapeMinimap, type MinimapViewport } from '../session/TapeMinimap'
 import './SessionPage.css'
 
 const numberFormat = new Intl.NumberFormat('en-US')
@@ -399,6 +400,13 @@ function Inspector({ sessionId, selectedStep }: { sessionId: string; selectedSte
 function LoadedSession({ sessionId }: { sessionId: string }) {
   const query = useSession(sessionId)
   const [selectedStep, setSelectedStep] = useState<SessionTapeStep | null>(null)
+  // Mockup parity item #16: the one summary value lifted out of `Tape.tsx` (via its additive
+  // `onViewportChange` prop) so `TapeMinimap` can stay scroll-synced — `scrollTop` itself stays
+  // owned entirely inside `Tape.tsx`, per that file's own remarks on its `onViewportChange` prop.
+  const [tapeViewport, setTapeViewport] = useState<MinimapViewport | null>(null)
+  const handleTapeViewportChange = useCallback((firstVisibleIndex: number, visibleCount: number) => {
+    setTapeViewport({ firstVisibleIndex, visibleCount })
+  }, [])
 
   if (query.status === 'loading') {
     return null
@@ -422,7 +430,10 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
           <FindingChips chips={envelope.findings} />
           <AgentLanes lanes={envelope.lanes} />
           <div className="session-page__body">
-            <Tape steps={envelope.steps} onSelectStep={setSelectedStep} />
+            <div className="session-tape-group">
+              <TapeMinimap steps={envelope.steps} viewport={tapeViewport} />
+              <Tape steps={envelope.steps} onSelectStep={setSelectedStep} onViewportChange={handleTapeViewportChange} />
+            </div>
             <Inspector sessionId={sessionId} selectedStep={selectedStep} />
           </div>
         </>

@@ -375,4 +375,74 @@ public sealed class SessionEnvelopeTests
         var output = Assert.IsType<SubagentOutputEnvelope.Present>(servedLane.Output);
         Assert.Equal("Done.", output.Text);
     }
+
+    /// <summary>Mockup parity item #13 ("Prose in transcript"): a caller that supplies no
+    /// <c>thinkingByPromptStepId</c> argument still serialises every step's <c>Thinking</c> as
+    /// <see langword="null"/>, the same "additive, existing call sites unaffected" discipline
+    /// <see cref="No_lanes_argument_serialises_an_empty_lane_list"/> already proves for
+    /// <c>lanes</c>.</summary>
+    [Fact]
+    public void No_thinking_argument_leaves_every_steps_thinking_null()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Null(step.Thinking);
+    }
+
+    /// <summary>A prompt step's own resolved thinking is carried onto its step, joined by
+    /// <c>StepId</c> (the turn's own <c>TurnId</c>).</summary>
+    [Fact]
+    public void A_prompt_steps_resolved_thinking_is_carried_onto_its_own_step()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var turns = new[]
+        {
+            new Turn
+            {
+                SessionId = "s1",
+                EventId = "e1",
+                TurnId = "t1",
+                Outcome = TurnOutcome.Completed,
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            },
+        };
+        var recording = SessionRecording.Build(session, turns, [], [], [], []);
+        var thinking = new Dictionary<string, ThinkingEnvelope>(StringComparer.Ordinal)
+        {
+            ["t1"] = new ThinkingEnvelope.Present { Text = "I should check the failing test first." },
+        };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, thinkingByPromptStepId: thinking);
+
+        var step = Assert.Single(envelope.Steps);
+        var present = Assert.IsType<ThinkingEnvelope.Present>(step.Thinking);
+        Assert.Equal("I should check the failing test first.", present.Text);
+    }
+
+    /// <summary>A non-prompt step's own <c>Thinking</c> stays <see langword="null"/> even when the
+    /// caller supplies a lookup — <c>StepEvidenceLookup.FindThinkingForPromptSteps</c> is only ever
+    /// asked to resolve prompt step ids, but this proves the join itself is kind-gated too, not only
+    /// the resolver's own input.</summary>
+    [Fact]
+    public void A_tool_call_steps_thinking_stays_null_even_with_a_supplied_lookup()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+        var thinking = new Dictionary<string, ThinkingEnvelope>(StringComparer.Ordinal)
+        {
+            ["tc1"] = new ThinkingEnvelope.Present { Text = "Should never be read for a tool call." },
+        };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, thinkingByPromptStepId: thinking);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Null(step.Thinking);
+    }
 }

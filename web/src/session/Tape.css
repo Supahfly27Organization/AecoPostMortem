@@ -148,3 +148,30 @@
 .session-tape__empty {
   color: var(--ink-2);
 }
+
+/* Mockup parity item #13 ("Prose in transcript"): a single-line, italicised preview of a prompt
+   step's own readable reasoning, inserted directly under that step's row (Tape.tsx's `buildRows`).
+   Fixed to the identical 32px row height every other row uses — the mockup's own prose blocks wrap
+   across several lines, but this file's absolute-positioning windowing math requires every row to be
+   the same fixed height (see Tape.tsx's own remarks) — so the text clamps to one line with an
+   ellipsis rather than wrapping; the Thinking tab is still where the full text reads. */
+.session-tape__thinking {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem 0 calc(0.6rem + 4.5rem + 0.75rem + 4.5rem + 0.75rem);
+  border-bottom: 1px solid var(--rule);
+}
+
+.session-tape__thinking-text {
+  font-style: italic;
+  font-size: 0.8rem;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

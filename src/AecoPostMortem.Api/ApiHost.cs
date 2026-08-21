@@ -900,8 +900,10 @@ public static class ApiHost
             .Select(step => step.StepId)
             .ToList();
         var thinkingByPromptStepId = StepEvidenceLookup.FindThinkingForPromptSteps(rawEvents, promptStepIds);
+        var promptTextByStepId = PromptTextLookup.FindForPromptSteps(rawEvents, promptStepIds);
 
-        return SessionEnvelope.From(recording, findings, FindingEnvelope.From, lanes, stepFindings, thinkingByPromptStepId);
+        return SessionEnvelope.From(
+            recording, findings, FindingEnvelope.From, lanes, stepFindings, thinkingByPromptStepId, promptTextByStepId);
     }
 
     /// <summary>

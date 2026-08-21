@@ -19,6 +19,11 @@ export interface SessionTapeStep {
   // Copilot recorded no plugin for.
   pluginName: string | null
   pluginVersion: string | null
+  // A 'prompt' step's own real text, resolved from the same user.message event the mockup's own
+  // tape shows content for — `label` stays the turn's own Outcome ('Completed'/'Aborted') unchanged;
+  // this is a second, additive fact. Null for every other step kind, and for a prompt step whose own
+  // text could not be resolved (no matching user.message) — never a placeholder string.
+  promptText?: string | null
   timestamp: string
   offsetMs: number
   ownerKind: OwnerKind

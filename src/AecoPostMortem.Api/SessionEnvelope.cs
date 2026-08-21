@@ -146,6 +146,17 @@ public sealed record SessionTapeStepEnvelope
     /// <summary>Paired with <see cref="PluginName"/> — never populated without it.</summary>
     public string? PluginVersion { get; init; }
 
+    /// <summary>A <see cref="Findings.SessionTapeStepKind.Prompt"/> step's own real text
+    /// (<see cref="PromptTextLookup"/>), resolved the identical way <see cref="Thinking"/> is —
+    /// eagerly, for every <c>Prompt</c> step, keyed by <see cref="StepId"/>. <see cref="Label"/> stays
+    /// the turn's own <c>Outcome</c> unchanged; this is a second, additive fact, <see langword="null"/>
+    /// for every other step kind and for a prompt step whose own text could not be resolved (no
+    /// matching <c>user.message</c>) — never a placeholder string. Known limitation, shared with
+    /// <see cref="Thinking"/>: <see cref="StepId"/> for a <c>Prompt</c> step is <c>Turn.TurnId</c>, a
+    /// display counter that can repeat within one session (measured on 20 of 25 real sessions) — see
+    /// <see cref="PromptTextLookup"/>'s own remarks.</summary>
+    public string? PromptText { get; init; }
+
     public required DateTimeOffset Timestamp { get; init; }
 
     public required long OffsetMs { get; init; }
@@ -180,7 +191,8 @@ public sealed record SessionTapeStepEnvelope
     public static SessionTapeStepEnvelope From(
         SessionTapeStep step,
         IReadOnlyList<FindingEnvelope>? findings = null,
-        ThinkingEnvelope? thinking = null)
+        ThinkingEnvelope? thinking = null,
+        string? promptText = null)
     {
         ArgumentNullException.ThrowIfNull(step);
 
@@ -191,6 +203,7 @@ public sealed record SessionTapeStepEnvelope
             Label = step.Label,
             PluginName = step.PluginName,
             PluginVersion = step.PluginVersion,
+            PromptText = promptText,
             Timestamp = step.Timestamp,
             OffsetMs = (long)step.Offset.TotalMilliseconds,
             OwnerKind = step.OwnerKind,
@@ -365,7 +378,8 @@ public sealed record SessionEnvelope
         Func<Finding, FindingEnvelope> mapFinding,
         IReadOnlyList<SessionAgentLaneEnvelope>? lanes = null,
         IReadOnlyDictionary<(SessionTapeStepKind Kind, string StepId), IReadOnlyList<Finding>>? stepFindings = null,
-        IReadOnlyDictionary<string, ThinkingEnvelope>? thinkingByPromptStepId = null)
+        IReadOnlyDictionary<string, ThinkingEnvelope>? thinkingByPromptStepId = null,
+        IReadOnlyDictionary<string, string>? promptTextByStepId = null)
     {
         ArgumentNullException.ThrowIfNull(recording);
         ArgumentNullException.ThrowIfNull(findings);
@@ -382,6 +396,9 @@ public sealed record SessionEnvelope
                         : null,
                     step.Kind == SessionTapeStepKind.Prompt && thinkingByPromptStepId is not null
                         ? thinkingByPromptStepId.GetValueOrDefault(step.StepId)
+                        : null,
+                    step.Kind == SessionTapeStepKind.Prompt
+                        ? promptTextByStepId?.GetValueOrDefault(step.StepId)
                         : null))
                 .ToList(),
             Status = SessionRecordingStatusEnvelope.From(recording.Status),

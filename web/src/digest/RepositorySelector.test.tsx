@@ -15,6 +15,7 @@ describe('RepositorySelector', () => {
           selectedRepository: 'aeco/AecoPostMortem',
           availableRepositories: ['aeco/AecoPostMortem'],
           sessionIds: [],
+          sessionLabels: {},
         }}
       />,
     )
@@ -29,6 +30,7 @@ describe('RepositorySelector', () => {
           selectedRepository: 'aeco/AecoPostMortem',
           availableRepositories: ['aeco/AecoLedger', 'aeco/AecoPostMortem', 'aeco/Upfront'],
           sessionIds: [],
+          sessionLabels: {},
         }}
       />,
     )
@@ -48,6 +50,7 @@ describe('RepositorySelector', () => {
           selectedRepository: 'aeco/AecoPostMortem',
           availableRepositories: ['aeco/AecoLedger', 'aeco/AecoPostMortem'],
           sessionIds: [],
+          sessionLabels: {},
         }}
         onSelect={onSelect}
       />,

@@ -21,7 +21,16 @@ public sealed record RepositoryScopeEnvelope
     /// position, not only how many.</summary>
     public required IReadOnlyList<string> SessionIds { get; init; }
 
-    public static RepositoryScopeEnvelope From(RepositoryScope scope)
+    /// <summary>Digest session-naming (Slice 2): a session's own display label — the first five
+    /// words of its earliest real prompt (<see cref="SessionLabelLookup"/>) — keyed by session id.
+    /// Never <see langword="null"/>, empty when the caller resolved none: absence of a session's own
+    /// entry means "no label available", not "this feature is off", the same "empty is the designed
+    /// state, never an omission" discipline this project's other optional-additive fields already
+    /// establish (<see cref="SessionAgentLaneEnvelope"/>'s own <c>Lanes</c>, for one).</summary>
+    public required IReadOnlyDictionary<string, string> SessionLabels { get; init; }
+
+    public static RepositoryScopeEnvelope From(
+        RepositoryScope scope, IReadOnlyDictionary<string, string>? sessionLabels = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -30,6 +39,7 @@ public sealed record RepositoryScopeEnvelope
             SelectedRepository = scope.SelectedRepository,
             AvailableRepositories = scope.AvailableRepositories,
             SessionIds = scope.SessionIds,
+            SessionLabels = sessionLabels ?? new Dictionary<string, string>(StringComparer.Ordinal),
         };
     }
 }
@@ -114,7 +124,8 @@ public sealed record MastheadEnvelope
 
     public required RepositoryScopeEnvelope RepositoryScope { get; init; }
 
-    public static MastheadEnvelope From(Masthead masthead)
+    public static MastheadEnvelope From(
+        Masthead masthead, IReadOnlyDictionary<string, string>? sessionLabels = null)
     {
         ArgumentNullException.ThrowIfNull(masthead);
 
@@ -128,7 +139,7 @@ public sealed record MastheadEnvelope
             ToolCallCount = masthead.Counters.ToolCallCount,
             SubagentCount = masthead.Counters.SubagentCount,
             RuleCoverage = RuleCoverageStatusEnvelope.Of(masthead.RuleCoverage),
-            RepositoryScope = RepositoryScopeEnvelope.From(masthead.RepositoryScope),
+            RepositoryScope = RepositoryScopeEnvelope.From(masthead.RepositoryScope, sessionLabels),
         };
     }
 }
@@ -168,14 +179,17 @@ public sealed record DigestEnvelope
     /// caller, which already has the resolution, does. <see cref="ProcessDigest.RankedFindings"/>'s
     /// order is preserved: the ranking already happened, this only maps each entry to its wire
     /// shape.</summary>
-    public static DigestEnvelope From(ProcessDigest digest, Func<Finding, FindingEnvelope> mapFinding)
+    public static DigestEnvelope From(
+        ProcessDigest digest,
+        Func<Finding, FindingEnvelope> mapFinding,
+        IReadOnlyDictionary<string, string>? sessionLabels = null)
     {
         ArgumentNullException.ThrowIfNull(digest);
         ArgumentNullException.ThrowIfNull(mapFinding);
 
         return new DigestEnvelope
         {
-            Masthead = MastheadEnvelope.From(digest.Masthead),
+            Masthead = MastheadEnvelope.From(digest.Masthead, sessionLabels),
             State = digest.State,
             RankedFindings = digest.RankedFindings.Select(mapFinding).ToList(),
             InferredFindings = digest.InferredFindings.Select(mapFinding).ToList(),

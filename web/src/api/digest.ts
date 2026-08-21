@@ -142,6 +142,10 @@ export interface RepositoryScopeEnvelope {
    * which of the scope's own sessions a finding's `recurrence.occurrences` touched, and in what
    * position, not only how many. */
   sessionIds: string[]
+  /** Digest session-naming (Slice 2): a session's own display label — the first five words of its
+   * earliest real prompt — keyed by session id. Never missing an entry maliciously; a session with
+   * no resolvable label simply has no key here, so a reader falls back to the raw session id. */
+  sessionLabels: Record<string, string>
 }
 
 export interface MastheadEnvelope {

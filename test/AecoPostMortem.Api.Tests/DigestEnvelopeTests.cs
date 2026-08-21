@@ -331,6 +331,33 @@ public sealed class DigestEnvelopeTests
             envelope.Masthead.RepositoryScope.SessionIds);
     }
 
+    // Digest session-naming, Slice 2: a caller that supplies no sessionLabels argument still
+    // serialises an empty dictionary, the same "additive, existing call sites unaffected" discipline
+    // SessionEnvelopeTests already proves for thinkingByPromptStepId/promptTextByStepId.
+    [Fact]
+    public void No_session_labels_argument_serialises_an_empty_dictionary()
+    {
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
+
+        Assert.Empty(envelope.Masthead.RepositoryScope.SessionLabels);
+    }
+
+    [Fact]
+    public void Supplied_session_labels_are_carried_onto_the_repository_scope_envelope()
+    {
+        var digest = ProcessDigest.Build(Counters(), RanCleanRegistry(), [], SingleRepoScope());
+        var sessionLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["session-1"] = "run ef database update for…",
+        };
+
+        var envelope = DigestEnvelope.From(digest, FindingEnvelope.From, sessionLabels);
+
+        Assert.Equal("run ef database update for…", envelope.Masthead.RepositoryScope.SessionLabels["session-1"]);
+    }
+
     [Fact]
     public void DigestEnvelope_serialises_the_state_and_the_ranked_findings()
     {

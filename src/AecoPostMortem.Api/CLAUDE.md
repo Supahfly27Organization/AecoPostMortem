@@ -833,23 +833,37 @@ bare-string shape this project's own `ToolArguments.cs` precedent exists for (th
 real `apply_patch` string-shaped case in this corpus is that field, not the result. On failure (373 of
 16,076) there is no `result` key at all, only `data.error: {message, code}` — still a real, present
 `tool.execution_complete` event, so `StepEvidenceLookup.FindResult` serves it as `Present` with the
-error payload, never `Absent`. Max measured payload size was 42,976 characters (~43 KB) — nowhere near
-"very large" — so `Result.Payload` follows the exact precedent `Raw.Payload` already set: served
-whole, verbatim, never truncated (`RawStepEventEnvelope.Present.Payload`'s own doc comment, "byte-exact
-... a pass-through, never a re-serialisation").
+error payload, never `Skipped` — the union has no third `Absent` shape, only `Present`/`Skipped`, the
+same two `RawStepEventEnvelope` always had. Max measured payload size was 42,976 characters (~43 KB) —
+nowhere near "very large" — so `Result.Payload` follows the exact precedent `Raw.Payload` already set:
+served whole, verbatim, never truncated (`RawStepEventEnvelope.Present.Payload`'s own doc comment,
+"byte-exact ... a pass-through, never a re-serialisation"). Code review flagged that an unbounded
+~43 KB block could still push the tape off-screen in the browser even though the server should never
+truncate it — `web/CLAUDE.md`'s matching entry covers the display-side `max-height`/`overflow-y`
+bound this added, a client-side concern with no server-side counterpart.
 
 `Result` reuses `RawStepEventEnvelope` (`Present`/`Skipped`) rather than a new type: this is not a
 re-parsed `content`/`detailedContent` shape, it is the identical "the literal event payload, or a
 stated absence" question `Raw` already answers, asked of a second event — inventing a
 `ToolResultEnvelope` would have duplicated that exact two-state union for no behavioural difference.
-`RawStepEventEnvelope.Skipped.Reason` distinguishes two real, different causes rather than collapsing
-them into one string: a step kind that never produces a tool result at all (`Prompt`/`Skill`/`Hook` —
-"Only a tool or MCP call produces a result; this step kind does not.") versus a `ToolCall`/`McpCall`
-step whose own `tool.execution_complete` was never recorded — still running when the log was captured,
-or the session ended mid-call — a distinct, stated state per the task's own requirement, never an
-empty string read as "the result was empty." `StepEvidenceLookupTests` pins all four states: a real
-result, a failed call's error payload (still `Present`), a call with no recorded completion
-(`Skipped`), and a non-tool-call step kind (`Skipped`, different reason).
+`RawStepEventEnvelope.Skipped.Reason` distinguishes three real, different causes, each a named
+`const string` on `StepEvidenceLookup` rather than an inline literal, so a caller (and a test) can
+tell them apart on their own terms, not merely on all being non-empty strings (code review): a step
+kind that never produces a tool result at all (`ResultNotApplicableReason`, for `Prompt`/`Skill`/
+`Hook`); a `ToolCall`/`McpCall` step whose own `tool.execution_complete` was never recorded — still
+running when the log was captured, or the session ended mid-call (`NoRecordedCompletionReason`) — a
+distinct, stated state per the task's own requirement, never an empty string read as "the result was
+empty"; and the pre-existing `NoRawEventFoundReason` a step with no matching raw event at all already
+used for `Thinking`/`Raw`, now shared by `Result` too rather than a fourth copy of the same string
+literal. `StepEvidenceLookupTests` pins all these states with substance assertions
+(`Assert.Contains`/`Assert.DoesNotContain` on each reason's own distinguishing text, not bare
+`NotEmpty`), plus a real result, a failed call's error payload (still `Present`), an MCP call
+resolving the same way a plain tool call does, two completions sharing one `toolCallId` resolving to
+the *last* one (matching `Ingestion.ExecutionRecordBuilder.BuildToolCalls`'s own overwrite-on-
+duplicate `completions` dictionary semantics — `FindByDataField` was changed from first-match to
+last-match for this reason, code review), and a missing `tool.execution_start` that does not suppress
+a real, present `tool.execution_complete` (the early-return branch for "no anchor found" now calls
+`FindResult` instead of hardcoding a third `Skipped` copy, code review).
 
 Verified against the live 35-session reference corpus via a real `GET /api/sessions/{id}/steps/{stepId}
 ?kind=toolCall` request and a real browser: of this project's own real tool calls, every one with a

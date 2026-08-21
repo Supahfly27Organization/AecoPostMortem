@@ -112,10 +112,11 @@ public sealed record StepEvidenceEnvelope
     /// live 35-session reference corpus to always be object-shaped on success — never the bare-string
     /// shape this project's own <c>ToolArguments.cs</c> precedent exists for), it is the same
     /// "the literal event payload, or a stated absence" question <see cref="Raw"/> already answers,
-    /// asked of a second event. <see cref="RawStepEventEnvelope.Skipped"/> covers two distinct
-    /// reasons: this step kind never produces a tool result at all (a <c>Prompt</c>/<c>Skill</c>/
-    /// <c>Hook</c> step), or a <c>ToolCall</c>/<c>McpCall</c> step whose own
-    /// <c>tool.execution_complete</c> was never recorded — still running, or the session ended
-    /// mid-call — never an empty string read as "the result was empty".</summary>
+    /// asked of a second event. <see cref="RawStepEventEnvelope.Skipped"/> covers three distinct
+    /// reasons, each named so a caller can tell them apart: this step kind never produces a tool
+    /// result at all (a <c>Prompt</c>/<c>Skill</c>/<c>Hook</c> step); a <c>ToolCall</c>/<c>McpCall</c>
+    /// step whose own <c>tool.execution_complete</c> was never recorded — still running, or the
+    /// session ended mid-call — never an empty string read as "the result was empty"; or no raw event
+    /// was found for the step at all (the same reason <see cref="Raw"/> reports for that case).</summary>
     public required RawStepEventEnvelope Result { get; init; }
 }

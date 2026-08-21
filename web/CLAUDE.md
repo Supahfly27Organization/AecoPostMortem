@@ -753,6 +753,15 @@ and "Result", both reading `api/session.ts`'s `RawStepEventEnvelope` union — s
 rather than a new type. A call still lacks a recorded result (still running, or the session ended
 mid-call) states that fact in its own "Result" block rather than an empty one.
 
+`.inspector__raw-payload` (`SessionPage.css`) gained a `max-height: 24rem`/`overflow-y: auto` bound
+(code review): the server deliberately serves a result whole, never truncated
+(`AecoPostMortem.Api/CLAUDE.md`'s matching decision), and the real corpus's own measured max
+(~43 KB) is small enough that server-side truncation would be the wrong fix for the wrong layer — but
+an unbounded block still pushes the rest of the tape off-screen once two such blocks (Call and
+Result) can stack in one panel. This is a display-only bound: the full payload is still in the DOM
+and still scrollable, never cut, so there is no truncation for an operator to be misled by, only a
+scrollbar.
+
 Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vitest.config.ts`
 (read instead of `vite.config.ts` when both exist, so the React plugin is duplicated there
 rather than shared) and `src/vitest-setup.ts` (jest-dom matchers, and `afterEach(cleanup)` since

@@ -5,6 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionAgentLane, SessionEnvelope, StepEvidenceEnvelope } from '../api/session'
 import { SessionPage } from './SessionPage'
 
+/** The server's own "still running, or the session ended mid-call" reason
+ * (`StepEvidenceLookup.NoRecordedCompletionReason`) — a shared constant here too, so the many
+ * fixtures below that don't care about the Result block's own wording (only that it resolves to
+ * *some* skipped state) stay in sync with one source rather than seven independent copies. */
+const NO_RECORDED_COMPLETION_REASON =
+  'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.'
+
 function respondWith(envelope: SessionEnvelope) {
   vi.stubGlobal(
     'fetch',
@@ -413,7 +420,7 @@ describe('The finding chips summarise the session', () => {
     respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 
@@ -429,7 +436,7 @@ describe('Nothing selected is a designed state', () => {
     respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
       thinking: { kind: 'unavailable', reason: 'irrelevant' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 
@@ -445,7 +452,7 @@ describe('Selecting a step shows its evidence', () => {
     respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message; this step kind carries none of its own.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 
@@ -488,7 +495,7 @@ describe("A tool call's own result", () => {
     respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
       thinking: { kind: 'unavailable', reason: 'Thinking is recorded per assistant message; this step kind carries none of its own.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{"id":"e1","data":{"toolName":"view","toolCallId":"tc1"}}' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 
@@ -508,7 +515,7 @@ describe('Readable reasoning is shown', () => {
     respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
       thinking: { kind: 'present', text: 'Checking the failing assertion before writing a fix.' },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 
@@ -536,7 +543,7 @@ describe('Encrypted reasoning is explained, not blanked', () => {
         ],
       },
       raw: { kind: 'present', eventType: 'tool.execution_start', payload: '{}' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 
@@ -562,7 +569,7 @@ describe('A step whose raw event was skipped at ingest', () => {
     respondWithSessionAndEvidence(ONE_STEP_ENVELOPE, {
       thinking: { kind: 'unavailable', reason: 'No reasoning was recorded for this step.' },
       raw: { kind: 'skipped', reason: 'No raw event was found for this step; it may have been skipped at ingest.' },
-      result: { kind: 'skipped', reason: 'No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.' },
+      result: { kind: 'skipped', reason: NO_RECORDED_COMPLETION_REASON },
     })
     renderAtSession('session-1')
 

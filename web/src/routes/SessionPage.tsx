@@ -326,7 +326,7 @@ function ThinkingPanel({ thinking }: { thinking: ThinkingEnvelope }) {
 function RawEventBlock({ label, event }: { label: string; event: RawStepEventEnvelope }) {
   return (
     <div className="inspector__raw-block">
-      <h3 className="inspector__raw-block-label">{label}</h3>
+      <p className="inspector__raw-block-label">{label}</p>
       {event.kind === 'skipped' ? (
         <p className="inspector__unavailable">{event.reason}</p>
       ) : (

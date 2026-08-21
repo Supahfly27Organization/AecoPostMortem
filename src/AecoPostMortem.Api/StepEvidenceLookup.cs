@@ -27,6 +27,23 @@ namespace AecoPostMortem.Api;
 /// </summary>
 public static class StepEvidenceLookup
 {
+    const string NoRawEventFoundReason =
+        "No raw event was found for this step; it may have been skipped at ingest.";
+
+    /// <summary>The "wrong step kind" reason — a <c>Prompt</c>/<c>Skill</c>/<c>Hook</c> step never
+    /// produces a <c>tool.execution_complete</c> at all, so no lookup is even attempted. Named
+    /// separately from <see cref="NoRecordedCompletionReason"/> so a test (or a future caller) can
+    /// tell the two apart on their own terms, not merely on both being non-empty strings (code
+    /// review).</summary>
+    const string ResultNotApplicableReason =
+        "Only a tool or MCP call produces a result; this step kind does not.";
+
+    /// <summary>The "still running, or the session ended mid-call" reason — a real
+    /// <c>ToolCall</c>/<c>McpCall</c> step whose own <c>tool.execution_complete</c> was never
+    /// recorded, distinct from <see cref="ResultNotApplicableReason"/> above.</summary>
+    const string NoRecordedCompletionReason =
+        "No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.";
+
     public static StepEvidenceEnvelope Find(
         IReadOnlyList<RawEvent> sessionEvents,
         SessionTapeStepKind kind,
@@ -51,18 +68,13 @@ public static class StepEvidenceLookup
         {
             return new StepEvidenceEnvelope
             {
-                Thinking = new ThinkingEnvelope.Unavailable
-                {
-                    Reason = "No raw event was found for this step; it may have been skipped at ingest.",
-                },
-                Raw = new RawStepEventEnvelope.Skipped
-                {
-                    Reason = "No raw event was found for this step; it may have been skipped at ingest.",
-                },
-                Result = new RawStepEventEnvelope.Skipped
-                {
-                    Reason = "No raw event was found for this step; it may have been skipped at ingest.",
-                },
+                Thinking = new ThinkingEnvelope.Unavailable { Reason = NoRawEventFoundReason },
+                Raw = new RawStepEventEnvelope.Skipped { Reason = NoRawEventFoundReason },
+                // A missing tool.execution_start (e.g. skipped at ingest) does not imply a missing
+                // tool.execution_complete — the two are independent events, so a real, present
+                // result must still surface here rather than inheriting the call's own absence
+                // (code review).
+                Result = FindResult(ordered, kind, stepId),
             };
         }
 
@@ -95,19 +107,13 @@ public static class StepEvidenceLookup
     {
         if (kind != SessionTapeStepKind.ToolCall && kind != SessionTapeStepKind.McpCall)
         {
-            return new RawStepEventEnvelope.Skipped
-            {
-                Reason = "Only a tool or MCP call produces a result; this step kind does not.",
-            };
+            return new RawStepEventEnvelope.Skipped { Reason = ResultNotApplicableReason };
         }
 
         var completion = FindByDataField(ordered, "tool.execution_complete", "toolCallId", stepId);
         if (completion is not { } found)
         {
-            return new RawStepEventEnvelope.Skipped
-            {
-                Reason = "No tool.execution_complete was recorded for this call; it may still be running, or the session ended before it completed.",
-            };
+            return new RawStepEventEnvelope.Skipped { Reason = NoRecordedCompletionReason };
         }
 
         return new RawStepEventEnvelope.Present
@@ -141,10 +147,7 @@ public static class StepEvidenceLookup
             var anchor = FindByEnvelopeId(ordered, "assistant.turn_start", stepId);
             result[stepId] = anchor is { } found
                 ? FindThinking(ordered, found.Raw.Sequence)
-                : new ThinkingEnvelope.Unavailable
-                {
-                    Reason = "No raw event was found for this step; it may have been skipped at ingest.",
-                };
+                : new ThinkingEnvelope.Unavailable { Reason = NoRawEventFoundReason };
         }
 
         return result;
@@ -266,19 +269,28 @@ public static class StepEvidenceLookup
             .ToList();
     }
 
+    /// <summary>Returns the <em>last</em> matching event in sequence order, not the first — the same
+    /// overwrite-on-duplicate semantics <c>Ingestion.ExecutionRecordBuilder.BuildToolCalls</c>
+    /// already gives its own <c>toolCallId</c>-keyed <c>completions</c> dictionary, so this lookup and
+    /// the Detail tab's derived <c>ToolCall.Success</c>/<c>.CompletedAt</c> columns can never disagree
+    /// about which of two same-id events is authoritative (code review) — an essentially theoretical
+    /// case on the live corpus (every measured <c>toolCallId</c> is unique per event type), but one
+    /// event id should mean one answer regardless.</summary>
     static (RawEvent Raw, EventEnvelope Envelope)? FindByDataField(
         List<RawEvent> ordered, string eventType, string dataField, string expectedValue)
     {
+        (RawEvent Raw, EventEnvelope Envelope)? match = null;
+
         foreach (var raw in ordered.Where(e => e.EventType == eventType))
         {
             if (EventEnvelopeReader.TryRead(raw, out var envelope)
                 && GetString(envelope.Data, dataField) == expectedValue)
             {
-                return (raw, envelope);
+                match = (raw, envelope);
             }
         }
 
-        return null;
+        return match;
     }
 
     /// <summary>An empty envelope <c>id</c> never matches, the same rule <see cref="PromptTextLookup"/>

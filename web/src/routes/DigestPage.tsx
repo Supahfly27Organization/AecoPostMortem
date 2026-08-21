@@ -3,6 +3,7 @@ import { useDigest } from '../api/useDigest'
 import { CleanChecks } from '../digest/CleanChecks'
 import { FindingRow } from '../digest/FindingRow'
 import { Masthead } from '../digest/Masthead'
+import { MethodologyFooter } from '../digest/MethodologyFooter'
 import { RepositorySelector } from '../digest/RepositorySelector'
 import './DigestPage.css'
 
@@ -118,6 +119,8 @@ export function DigestPage() {
       )}
 
       <CleanChecks checks={digest.silentChecks} />
+
+      <MethodologyFooter masthead={digest.masthead} />
     </div>
   )
 }

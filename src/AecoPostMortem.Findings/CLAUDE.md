@@ -16,8 +16,8 @@ The four finding classes, provenance, recurrence, the Monitor comparison, sugges
 | `Suggestion.cs` | FR-56's deterministic template text |
 | `SuggestionTemplate.cs` | FR-56's template bound to a check shape — `CheckId` plus a `{Placeholder}` `Format` string |
 | `SuggestionRenderer.cs` | FR-56's rendering mechanism — pure substitution of `SuggestionTemplate.Format` from a finding's own `EvidenceItem`s and `Resolution`, nothing else |
-| `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired |
-| `Digest.cs` | FR-41 part 1 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking; FR-41 part 2 (issue #45, S-54): `RepositoryScope`, carried on `Masthead`. FR-48 (issue #52, S-42) split `ProcessDigest.RankedFindings` into that (Observed/Derived only) plus `InferredFindings`, its own unranked section |
+| `CheckRegistry.cs` | `CheckRunStatus`, `CheckRegistryEntry`, `CheckRegistry` — every check's run status and population, whether or not it fired. Mockup parity item #6 added `CheckRegistryEntry.Provenance`, required — a fixed, caller-stated fact (every check orchestrator has exactly one provenance for the findings it would produce), not derived here, so `AecoPostMortem.Api.SilentCheckEnvelope` can serve the same provenance badge a finding gets |
+| `Digest.cs` | FR-41 part 1 (issue #44, S-36): `MastheadCounters`, `RuleCoverageStatus`, `DigestState`, `Masthead`, `ProcessDigest` — the corpus masthead and the findings ranking; FR-41 part 2 (issue #45, S-54): `RepositoryScope`, carried on `Masthead`. FR-48 (issue #52, S-42) split `ProcessDigest.RankedFindings` into that (Observed/Derived only) plus `InferredFindings`, its own unranked section. Mockup parity item #6 added `ProcessDigest.CheckRegistry` — the exact registry `Build` already received, carried through unchanged rather than dropped once `DigestState` is computed, so `AecoPostMortem.Api.DigestEnvelope.From` can project it into FR-42's "checks that found nothing" surface |
 | `ProvenanceLabel.cs` | FR-48 (issue #52, S-42): `ProvenanceLabel.For(Provenance)` — the fixed, textually distinct sentence per provenance level, served on every `FindingEnvelope` so the distinguishing signal is in the finding's own words, not only its styling |
 | `HookFailureFinding.cs` | FR-17 (issue #27): `HookFailureEvent` (one failed hook pair, plain input), `HookFailureFinding.Build` — orchestrates `Rules.HookFailureCheck` into `Finding`s and a `CheckRegistryEntry` |
 | `RepeatedFileReadFindingCheck.cs` | FR-15's orchestration (issue #25): reads `ToolCall` through `Data`, decides which calls are reads (today: `ToolName == "view"` with a path — see its own remarks), calls `Rules.RepeatedReadCheck`, and folds the result into one `Finding` per path plus a `CheckRegistryEntry` |
@@ -602,6 +602,21 @@ including `0` — when `Status` is `Ran`. `CheckRunStatus` has exactly two value
 acceptance criteria name exactly two states to distinguish; a third "never attempted" status was
 considered and rejected as unmotivated by anything in FR-37 or FR-42.
 
+### `CheckRegistryEntry.Provenance` is a caller-stated fact, not derived from any `Finding` the check produced
+
+A clean run (`FindingCount == 0`) builds no `Finding` at all, so there is nothing on a `Finding` this
+field could be read back from even if that were the design — mockup parity item #6 needed the
+provenance a *silent* check's card should carry regardless. Every orchestrator wired into `GetDigest`
+already has exactly one fixed `Provenance` for the findings it would produce, whether or not it
+produces any this run (`hook-failure`/`interruption-load` are `Observed`; `repeated-file-read`,
+`failed-tool-calls`, `aborted-turn`, `phase-churn`, `banned-tool-used`, `never-read-path-used`,
+`use-a-after-b` and `always-pass-param` are `Derived`) — so each orchestrator sets the identical
+literal on its own `CheckRegistryEntry` a few lines from where it sets the same value on `Finding.
+Provenance`, never a second decision. `required`, the same "fails construction by being required, not
+by validating" reasoning `Finding.Provenance` documents above (`CheckRegistryTests.
+Provenance_is_a_required_member`) — a caller cannot build an entry without stating it, so a silently
+wrong or omitted badge cannot ship.
+
 ### Suggestions are template substitution, not generation — and the template lives here, not in `Rules`
 
 FR-56 forbids a model call (§3.8), so `SuggestionRenderer.Render` is pure substitution:
@@ -916,6 +931,24 @@ textually distinct sentence per provenance level, served on `Api.FindingEnvelope
 `ProvenanceLabel`, closing the non-textual-discriminator gap FR-48 left open (see "Gap closed by
 S-54" above) — `web/src/routes/DigestPage.tsx` is no longer the `ComingSoon` placeholder either
 story left it as.
+
+Mockup parity item #6 (FR-42, issue #46, `docs/product-superpowers/discovery/2026-08-21-ui-mockup-
+parity.md`, "Checks that found nothing") added `ProcessDigest.CheckRegistry` — `Build` used to use
+its `checkRegistry` parameter only to compute `DigestState` and then drop it; it now carries the
+same registry through onto the built digest, unchanged, the same already-resolved-plain-input
+pattern this file's `MastheadCounters`/`RepositoryScope` already establish.
+`AecoPostMortem.Api.DigestEnvelope.From` is the real consumer: it calls `SilentCheckEnvelope.
+From(digest.CheckRegistry)` to populate `DigestEnvelope.SilentChecks` (`Api/CLAUDE.md`'s own
+remarks) — `SilentCheckEnvelope.From` itself needed no change, confirming the item's own
+prioritisation-doc estimate that the filtering mechanism was already built and tested; the real gap
+was only that nothing carried its input past this method to a caller. `CheckRegistryEntry.
+Provenance` (same story, `CheckRegistry.cs`) is the one genuine new fact each of the ten check
+orchestrators wired into `GetDigest` now states about itself — see "`CheckRegistryEntry.Provenance`
+is a caller-stated fact" above for the full Observed/Derived mapping. Verified against the live
+35-session reference corpus: three of `GetDigest`'s ten checks render as clean cards
+(`banned-tool-used`, `use-a-after-b`, `always-pass-param`, all `Derived`, 24 sessions each) and
+`never-read-path-used` — the one piece-3 check with a real violation on this corpus — correctly does
+not appear.
 
 `AdherenceFigure` (issue #38, S-24, FR-33) publishes the shape every adherence percentage is served
 through: the percentage computed from its per-operand call counts, each operand's S-23 resolution

@@ -62,6 +62,7 @@ public sealed class AlwaysPassParamFindingTests
 
         Assert.Empty(result.Findings);
         Assert.Equal(0, result.RegistryEntry.FindingCount);
+        Assert.Equal(Provenance.Derived, result.RegistryEntry.Provenance);
     }
 
     [Fact]

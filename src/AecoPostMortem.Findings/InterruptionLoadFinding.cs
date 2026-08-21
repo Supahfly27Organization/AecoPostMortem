@@ -68,6 +68,7 @@ public static class InterruptionLoadFinding
             Status = CheckRunStatus.Ran,
             Population = population,
             FindingCount = findings.Length,
+            Provenance = Provenance.Observed,
         };
 
         return new Result { Findings = findings, RegistryEntry = registryEntry };

@@ -112,6 +112,7 @@ public sealed class HookFailureFindingTests
         Assert.Equal(CheckRunStatus.Ran, registry.Status);
         Assert.Equal(2, registry.Population);
         Assert.Equal(0, registry.FindingCount);
+        Assert.Equal(Provenance.Observed, registry.Provenance);
     }
 
     [Fact]

@@ -5,6 +5,20 @@
   background: var(--accent-soft);
 }
 
+.suggestion-block__label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.suggestion-block__text {
+  margin: 0;
+}
+
 .suggestion-block--absent {
   border-left-color: var(--rule-2);
   background: var(--sunk);

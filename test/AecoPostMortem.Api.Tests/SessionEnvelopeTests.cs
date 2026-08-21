@@ -214,6 +214,7 @@ public sealed class SessionEnvelopeTests
             Status = CheckRunStatus.Ran,
             Population = 5,
             FindingCount = 2,
+            Provenance = Provenance.Observed,
         };
         var recording = SessionRecording.Build(session, [], [], [], [], [], spawnResolution);
 

@@ -134,6 +134,7 @@ public sealed class RepeatedFileReadFindingCheckTests
 
         Assert.Equal(1, result.RegistryEntry.FindingCount);
         Assert.Equal(2, result.RegistryEntry.Population);
+        Assert.Equal(Provenance.Derived, result.RegistryEntry.Provenance);
     }
 
     /// <summary>The operand boundary: a tool call that carries a path but is not a read is not

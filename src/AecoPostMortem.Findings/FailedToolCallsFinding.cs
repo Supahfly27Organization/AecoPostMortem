@@ -34,6 +34,7 @@ public static class FailedToolCallsFinding
             Status = CheckRunStatus.Ran,
             Population = outcomes.Count,
             FindingCount = findings.Length,
+            Provenance = Provenance.Derived,
         };
 
         return new FailedToolCallsResult

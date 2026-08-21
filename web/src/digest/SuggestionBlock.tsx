@@ -10,5 +10,10 @@ export function SuggestionBlock({ suggestion }: { suggestion: SuggestionEnvelope
     return <p className="suggestion-block suggestion-block--absent">No suggestion is offered.</p>
   }
 
-  return <p className="suggestion-block">{suggestion.text}</p>
+  return (
+    <div className="suggestion-block">
+      <span className="suggestion-block__label">Suggested change</span>
+      <p className="suggestion-block__text">{suggestion.text}</p>
+    </div>
+  )
 }

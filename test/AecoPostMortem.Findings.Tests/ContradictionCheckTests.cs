@@ -118,6 +118,7 @@ public sealed class ContradictionCheckTests
         Assert.Equal(CheckRunStatus.Ran, result.RegistryEntry.Status);
         Assert.Equal(2, result.RegistryEntry.Population);
         Assert.Equal(1, result.RegistryEntry.FindingCount);
+        Assert.Equal(Provenance.Inferred, result.RegistryEntry.Provenance);
     }
 
     /// <summary>A clean run (no contradiction found across the whole corpus) still registers as

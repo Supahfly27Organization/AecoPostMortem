@@ -55,6 +55,7 @@ function digestWith(overrides: Partial<DigestEnvelope> = {}): DigestEnvelope {
       },
     ],
     inferredFindings: [],
+    silentChecks: [],
     ...overrides,
   }
 }
@@ -228,5 +229,39 @@ describe('DigestPage', () => {
     await screen.findByText('src/hot.cs was read repeatedly')
 
     expect(screen.queryByText(/judgment calls/i)).not.toBeInTheDocument()
+  })
+
+  // Mockup parity item #6 (`docs/product-superpowers/discovery/mockups/digest.html`'s "Checks that
+  // found nothing" section): a check that ran clean states its population, its zero count and its
+  // provenance, so silence never reads as "never looked".
+  it('renders a card for each silent check, naming its population and provenance', async () => {
+    respondWith(
+      digestWith({
+        silentChecks: [
+          {
+            checkId: 'hook-failure',
+            population: 35,
+            findingCount: 0,
+            provenance: 'observed',
+            provenanceLabel: 'Observed — read directly from the session log.',
+          },
+        ],
+      }),
+    )
+    render(<DigestPage />)
+
+    expect(await screen.findByText(/checks that found nothing/i)).toBeInTheDocument()
+    expect(screen.getByText('Hook Failure')).toBeInTheDocument()
+    expect(screen.getByText(/0 found.*35 checked/)).toBeInTheDocument()
+    expect(screen.getByText('Observed')).toBeInTheDocument()
+  })
+
+  it('renders no "Checks that found nothing" section at all when no check ran clean', async () => {
+    respondWith(digestWith())
+    render(<DigestPage />)
+
+    await screen.findByText('src/hot.cs was read repeatedly')
+
+    expect(screen.queryByText(/checks that found nothing/i)).not.toBeInTheDocument()
   })
 })

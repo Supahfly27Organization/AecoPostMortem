@@ -191,6 +191,7 @@ public sealed class PhaseChurnFindingTests
         Assert.Equal(CheckRunStatus.Ran, result.RegistryEntry.Status);
         Assert.Equal(2, result.RegistryEntry.Population);
         Assert.Equal(1, result.RegistryEntry.FindingCount);
+        Assert.Equal(Provenance.Derived, result.RegistryEntry.Provenance);
     }
 
     [Fact]

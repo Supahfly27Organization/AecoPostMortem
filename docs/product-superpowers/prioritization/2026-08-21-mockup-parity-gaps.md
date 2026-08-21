@@ -47,8 +47,9 @@ Feasibility, then left as a genuine tie (called out below, per the skill's "ties
 | 18 | **"Not checkable" status** (Rules) | **2** — not a bug: nothing in `RulesInventoryClassifier` has ever decided which normative-but-unobservable *reason* to attribute to a statement — real design work, the same "don't guess field names" caution this project has hit before | **2 (L)** — per-statement reason classification, not a simple lookup | **1 Could** — the current fallback (`CheckableNotYetBuilt`) isn't wrong, just less precise; no user-facing harm today | **5** | Open |
 | 19 | **Masthead — synthesized human title** (Session) | **2** — no such field exists anywhere in Copilot's own logs; would need real summarization (e.g. from the first user message), not extraction | **2 (L, uncertain)** — effort is genuinely unclear until the summarization approach is chosen | **0 Won't** — the data model doesn't support it without a new inference step; not scoped for now | **4** | Won't (for now) |
 | 20 | **Subagent lanes — inline nesting** (Session) | — | — | **0 Won't** — Part 4 of the discovery doc documents this as deliberate: concurrent subagents interleave in real wall-clock time, so a mockup-style contiguous block would misattribute rows | **0** | Won't (deliberate) |
+| 21 | **No way to click through from the Digest to a session** (Digest → Session) | **5** — `/sessions/:sessionId` already exists and fully works (masthead, tape, inspector); `RecurrenceStrip` already renders every session id a finding touched, as plain text | **5 (XS–S)** — wrap the existing session-id text in `RecurrenceStrip` (and/or the `SessionStrip` cells) in a `react-router-dom` `<Link to={\`/sessions/${id}\`}>` — the router and route are already wired, this is markup only | **5 Must** — not in either mockup (neither draws cross-page navigation), but discovered live: today the only way to open a session found via the Digest is copying a UUID out of the expanded row and hand-editing the URL bar. Blocks the tool's own core loop — "found a problem, now go look at the session" — with no workaround inside the UI itself | **15** | Open — found 2026-08-21 during a live walkthrough, not in the original mockup comparison |
 
-**6 of 20 done** (#1, #2, #3, #5, #6, plus the two effort-estimate corrections logged inline above). Remaining open items, highest total first: #4 (chip bar), #7 (violations column), #8–#11 (four-way tie, cheap polish), then #12 onward.
+**6 of 21 done** (#1, #2, #3, #5, #6, plus the two effort-estimate corrections logged inline above). Remaining open items, highest total first: **#21 (Digest→Session link, new, ties for the top score)**, #4 (chip bar), #7 (violations column), #8–#11 (four-way tie, cheap polish), then #12 onward.
 
 Row 20 is not a real candidate — Part 4 of the discovery doc documents it as a deliberate,
 reasoned divergence (concurrent subagents interleave in real time; a mockup-style contiguous block
@@ -58,6 +59,11 @@ would misattribute rows). Scored 0 and listed only for completeness, not for sch
 
 ## Quick wins (Must/Should, cheap, ship first)
 
+0. **#21, Digest→Session link (15, new top open item)** — not a mockup gap (neither mockup draws
+   cross-page navigation at all), found live instead: nothing on the Digest links a session id to
+   `/sessions/:sessionId`, even though that page fully works. Same shape as #1's own story — the
+   destination already exists and works, a UI affordance to reach it is just missing. Cheapest fix
+   on the whole list with the highest possible score; do this before anything else still open.
 1. **Inferred findings surfaced (15)** — the single highest-leverage item on this list. The server
    already computes and serves `DigestEnvelope.InferredFindings`; the frontend TypeScript type
    simply never declares the field, so real, already-computed data is silently dropped on arrival.

@@ -756,10 +756,26 @@ window.
 
 `Findings.SessionRecording` now builds a `Prompt` step's `StepId` from `Turn.EventId`
 (`Findings/CLAUDE.md`'s own entry carries the before/after table), so all three lookups here match
-on the `turn_start` envelope's own `id` instead — `FindByEnvelopeId`, the identical helper a
-`Skill`/`Hook` step already used, rather than a fourth identity scheme. `FindByDataField` survives
-for its one remaining honest use: a tool call's `data.toolCallId`, which *is* a natural id Copilot
-writes for the thing itself.
+on the `turn_start` envelope's own `id` instead: the two `StepEvidenceLookup` sites through
+`FindByEnvelopeId` (the identical helper a `Skill`/`Hook` step already used), and `PromptTextLookup`
+by keying its own `interactionId` dictionary on that same field — one identity, not a fourth scheme.
+`FindByDataField` survives for its one remaining honest use: a tool call's `data.toolCallId`, which
+*is* a natural id Copilot writes for the thing itself.
+
+All three sites also refuse an *empty* envelope id (code review). `Ingestion.EventEnvelopeReader.
+TryRead` rejects a missing or non-string `id` but accepts `"id":""`, so an unguarded `==` would
+collapse every such event onto one empty step id and resolve them all to whichever came first —
+literally the same identity failure this entry is about, one level down. Guarding is cheaper than
+reasoning about whether it can occur, and `StepEvidenceLookupTests.
+An_empty_envelope_id_matches_nothing_rather_than_colliding_on_the_first_such_event` pins it.
+
+An empty `StepId` was also *more* reachable before this change than after it, which is worth stating
+because it is the opposite of the usual "new key, new edge case" worry: `Ingestion.
+ExecutionRecordBuilder` writes `Turn.TurnId` as `GetString(..., "turnId") ?? string.Empty` (a real,
+tested case — a `turn_start` carrying no `turnId` must still close and persist), so a `Prompt` step's
+`StepId` was genuinely empty for such a turn and the step could not be addressed by the route at all.
+`Turn.EventId` has no such fallback — a `turn_start` whose envelope will not read never opens a turn
+in the first place — so those steps are now ordinarily addressable.
 
 The blast radius turned out to be far smaller than this file's own earlier note (written when the
 fix was deferred) predicted, and it is worth recording why: **every consumer already treated
@@ -767,7 +783,8 @@ fix was deferred) predicted, and it is worth recording why: **every consumer alr
 it through verbatim; `SessionTapeStepEnvelope.StepId` is a passthrough field; and `web/`'s DOM ids
 (`tape-step-${stepId}`), React keys and `useStepEvidence` cache keys are all built from whatever the
 server sends. So the frontend needed **no change at all** — 162 web tests passed untouched — and the
-change is three call sites plus their tests. The earlier note's estimate of "a materially larger
+change is four production edits — the three lookups here, plus `SessionRecording.Build`'s own field
+choice over in `Findings` — and their tests. The earlier note's estimate of "a materially larger
 blast radius" was the pessimism this repository has now mis-estimated in the same direction several
 times (see the `UseAAfterB` "no existing check shape carries timing" note above, and piece 2's "five
 unconfirmed fields"): the honest lesson is to *measure* a blast radius by grepping the consumers

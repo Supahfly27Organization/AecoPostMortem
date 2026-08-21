@@ -450,6 +450,10 @@ against the live 35-session reference corpus through the served contract, before
 | distinct `StepId`s across 1,878 real prompt steps | 586 | **1,878** |
 | prompt steps resolving `thinking: "present"` (PR #130's inline prose) | 0 | **35** |
 
+(These are the 25 sessions of the dominant repository, the scope every session endpoint defaults to.
+`AecoPostMortem.Data/CLAUDE.md` states the same fact over the whole 35-session corpus as "27 of 35" —
+a different population, not a different measurement.)
+
 The middle row is the defect: 1,292 real prompt rows were addressable only as some *other* turn.
 The last row is why it mattered beyond tidiness — PR #130 shipped inline readable-reasoning prose
 and not one of the corpus's 35 real readable-reasoning messages ever reached a rendered row,
@@ -457,6 +461,11 @@ because `StepEvidenceLookup.FindThinkingForPromptSteps` anchored each colliding 
 turn Copilot had numbered first and read *that* turn's message window. `Thinking` (S-52) and
 `PromptText` (PR #133) shared one root cause and are both fixed by this one change; nothing was
 fixed twice.
+
+It also makes the tie-break paragraph immediately below this one true for the first time: "two
+entities can share a timestamp, never a `(kind, id)` pair within one session" was false for `Prompt`
+steps until this change, since two turns sharing a display counter shared a `(kind, id)` pair
+outright. The ordinal tie-break is now over a genuinely unique key, not merely a deterministic one.
 
 Steps are ordered by wall-clock timestamp (Scenario 2), ties broken by step kind then the step's own
 id (`StringComparer.Ordinal`) for the same determinism reasoning `AbortedTurnCheck` gives its own
@@ -604,11 +613,22 @@ optional `violationCounts` parameter both set (`Api/CLAUDE.md`), so the dozens o
 
 FR-57 names a class-specific key, but an abort has no recurring *cause* the way a hook or a tool
 does — `AbortedTurnFinding.ToFinding` keys `Recurrence` on `$"{SessionId}:{TurnId}"`, not
-`AbortedTurnOccurrence.TurnId` alone: `Turn`'s own natural key is the composite
-`(SessionId, TurnId)` (`PostMortemContext.MapTurn`), and a bare `TurnId` is not guaranteed unique
-across sessions — two unrelated aborts that happened to share one would otherwise collide into the
-same `Recurrence.Key`, which `Recurrence.cs` documents as impossible ("no constructor that could
-produce a second `Finding` for the same key"). Two aborts that happen to share reason text
+`AbortedTurnOccurrence.TurnId` alone: a bare `TurnId` is not unique across sessions — two unrelated
+aborts that happened to share one would otherwise collide into the same `Recurrence.Key`, which
+`Recurrence.cs` documents as impossible ("no constructor that could produce a second `Finding` for
+the same key").
+
+**Known, still-open weakness (recorded, not fixed here).** This composite is *not* `Turn`'s own key.
+`PostMortemContext.MapTurn` keys `Turn` on `(SessionId, EventId)`, because `data.turnId` also repeats
+*within* one session — the same cycling-display-counter fact that this file's own "A `Prompt` step's
+`StepId` is `Turn.EventId`" entry measures at 20 of 25 real sessions. So two aborts in the *same*
+session sharing a counter still collide. Measured against the live 35-session reference corpus this
+does not currently happen (6 aborted-turn findings, 6 distinct recurrence keys), which is why it is
+recorded rather than fixed in passing: moving this key onto `Turn.EventId` means widening
+`Rules.AbortedTurnCheck`'s `TurnRecord`/`AbortedTurnOccurrence` shapes and changing an established
+FR-57 finding identity — its own scoped change, not a drive-by.
+
+Two aborts that happen to share reason text
 (`"user_interrupt"`, say) in two different sessions still stay two distinct findings, each with
 exactly one `RecurrenceOccurrence` — grouping by reason instead would let a measured 9-across-8
 volume collapse into fewer, more heavily "recurring" findings than the corpus actually shows, the

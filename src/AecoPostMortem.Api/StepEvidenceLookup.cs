@@ -242,12 +242,24 @@ public static class StepEvidenceLookup
         return null;
     }
 
+    /// <summary>An empty envelope <c>id</c> never matches, the same rule <see cref="PromptTextLookup"/>
+    /// applies when it keys its own dictionary on this field. <c>EventEnvelopeReader.TryRead</c>
+    /// rejects a missing or non-string <c>id</c> but accepts <c>"id":""</c>, so without this guard
+    /// every event carrying one would collide on a single empty step id and resolve to whichever came
+    /// first — exactly the identity failure this lookup was changed to escape, one level down.</summary>
     static (RawEvent Raw, EventEnvelope Envelope)? FindByEnvelopeId(
         List<RawEvent> ordered, string eventType, string expectedId)
     {
+        if (expectedId.Length == 0)
+        {
+            return null;
+        }
+
         foreach (var raw in ordered.Where(e => e.EventType == eventType))
         {
-            if (EventEnvelopeReader.TryRead(raw, out var envelope) && envelope.Id == expectedId)
+            if (EventEnvelopeReader.TryRead(raw, out var envelope)
+                && envelope.Id is { Length: > 0 }
+                && envelope.Id == expectedId)
             {
                 return (raw, envelope);
             }

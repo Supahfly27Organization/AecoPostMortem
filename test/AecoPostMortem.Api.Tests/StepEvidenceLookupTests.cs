@@ -238,9 +238,36 @@ public sealed class StepEvidenceLookupTests
 
         var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, ["e1", "e4"]);
 
-        Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["e1"]);
+        // The first turn's own reason must name the model its own window's encrypted message
+        // carried — a bare `Unavailable` assertion would also be satisfied by "no raw event was
+        // found for this step", which is what a `turnId` match produces for an envelope id, so it
+        // would pass for the wrong reason.
+        var first = Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId["e1"]);
+        Assert.Contains("gpt-5.4", first.Reason);
+
         var second = Assert.IsType<ThinkingEnvelope.Present>(byStepId["e4"]);
         Assert.Equal("The second turn's own reasoning.", second.Text);
+    }
+
+    /// <summary>An empty envelope <c>id</c> is not an identity, so it matches nothing — the same
+    /// discipline this change applies to <c>data.turnId</c>, one level down.
+    /// <c>EventEnvelopeReader.TryRead</c> rejects a missing or non-string <c>id</c> but accepts
+    /// <c>"id":""</c>, so without this guard every such event would collide on one empty
+    /// <c>StepId</c>, which is precisely the defect class being closed here.</summary>
+    [Fact]
+    public void An_empty_envelope_id_matches_nothing_rather_than_colliding_on_the_first_such_event()
+    {
+        var events = new[]
+        {
+            Ev(1, "assistant.turn_start", """{"id":"","data":{"turnId":"1"}}"""),
+            Ev(2, "assistant.message", """{"id":"e2","data":{"reasoningText":"Should not be reachable."}}"""),
+            Ev(3, "assistant.turn_start", """{"id":"","data":{"turnId":"2"}}"""),
+        };
+
+        var byStepId = StepEvidenceLookup.FindThinkingForPromptSteps(events, [""]);
+
+        var unavailable = Assert.IsType<ThinkingEnvelope.Unavailable>(byStepId[""]);
+        Assert.Contains("No raw event was found", unavailable.Reason);
     }
 
     /// <summary>A message carrying no <c>model</c> field of its own cannot be attributed to any

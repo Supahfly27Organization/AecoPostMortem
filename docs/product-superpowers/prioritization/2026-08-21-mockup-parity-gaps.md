@@ -115,6 +115,33 @@ summarization, not extraction).
 - **#8–#11 (four items, all 10, all Could):** a genuine four-way tie on cheap polish. Grouped as one
   batch above; order within the batch doesn't matter.
 
+## Parallel-safety for the remaining open items (updated 2026-08-21, after #4/#7/#9/#21 merged)
+
+The first round dispatched #4, #7, #9 and #21 as four parallel subagents, each in its own isolated
+git worktree, chosen specifically because a file-ownership check found them fully disjoint —
+result: PRs #121/#122/#119/#120, zero merge conflicts. The same method applied to what's left below.
+
+Remaining open items land in four file clusters. **Within a cluster, items conflict on the same
+file(s) and must be sequenced, not parallelized.** Across clusters, one item from each can run at
+the same time.
+
+| Cluster | Items | Shared file(s) |
+|---|---|---|
+| Digest masthead | #8 (Subagents count), #15 (Rule coverage bar) | `web/src/digest/Masthead.tsx` + backend `MastheadCounters` |
+| Session masthead/footer (lighter) | #11 (Session methodology footer), #14 (wall-clock start→end range) | `web/src/routes/SessionPage.tsx` — different functions (`Masthead`/a new footer mount in `LoadedSession`), same file, lower risk than the tape cluster but not zero |
+| Session tape (heavy) | #10 (step glyphs), #12 (turn grouping), #13 (prose in transcript), #16 (tape minimap) | `web/src/session/Tape.tsx` — #12 restructures the flat list into grouped sections, which #10/#13/#16 all render into; sequence #12 first (or last, deliberately) rather than mixing it into a parallel batch |
+| Rules classifier | #18 ("Not checkable" status) | `src/AecoPostMortem.Api/RulesInventoryClassifier.cs` — fully independent of every other remaining item, since #7 already merged its own `RulesInventoryClassifier.cs`/`RulesInventoryEnvelope.cs`/`RulesInventoryPage.tsx` changes |
+
+**#17 (inline per-step flagbox)** is left out of the table above on purpose: beyond the file-conflict
+question, it needs its own scoping pass first (a real domain-model gap — attaching a `Finding` to one
+`SessionTapeStep`, which the data model doesn't support today) per the "Big bets" section above. Don't
+fold it into a parallel batch with the Session tape cluster until that design question is settled.
+
+**A safe parallel batch right now**: one item per cluster — #18 (Rules, always safe), plus a pick
+from each of the other three clusters (e.g. #8, #14, #10 — the four highest-scored, lowest-risk
+picks) — dispatched the same way as the first round: one subagent per item, each in its own git
+worktree, each briefed on which other files are off-limits this round.
+
 ## Framework note
 
 This is not RICE: there's no reach or confidence estimate here because none of these are

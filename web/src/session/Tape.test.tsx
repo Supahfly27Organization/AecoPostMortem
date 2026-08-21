@@ -28,7 +28,7 @@ function buildSteps(count: number): SessionTapeStep[] {
 const LARGEST_MEASURED_STEP_COUNT = 84 + 764
 
 describe('A long session renders without loading every step', () => {
-  it('virtualises rather than mounting every step at once', () => {
+  it('virtualises rather than mounting every step at once, turn headers included', () => {
     const steps = buildSteps(LARGEST_MEASURED_STEP_COUNT)
     render(<Tape steps={steps} />)
 
@@ -36,6 +36,13 @@ describe('A long session renders without loading every step', () => {
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.length).toBeLessThan(100)
     expect(rows.length).toBeLessThan(steps.length)
+
+    // Mockup parity item #12: `buildSteps` alternates 'prompt' every other step, so this fixture
+    // really does exercise turn-header insertion at scale (not just absent by construction) —
+    // confirming the windowing budget above still holds once headers are a second row type.
+    const headers = document.querySelectorAll('.session-tape__turn-header')
+    expect(headers.length).toBeGreaterThan(0)
+    expect(headers.length).toBeLessThan(100)
   })
 
   it('mounts the step scrolled to, not only the steps at the very start', () => {
@@ -63,6 +70,8 @@ describe('The tape is navigable without a mouse', () => {
     expect(lastRow).not.toBeNull()
     expect(lastRow).toHaveAttribute('aria-selected', 'true')
     expect(tape).toHaveAttribute('aria-activedescendant', `tape-step-${lastStepId}`)
+    // Mockup parity item #12: reachability lands on a real step, never a turn-header row.
+    expect(lastRow).not.toHaveClass('session-tape__turn-header')
   })
 
   it('reaches and selects the first step via Home after moving away from it', () => {
@@ -77,6 +86,26 @@ describe('The tape is navigable without a mouse', () => {
     const firstRow = screen.getByText('Step 0').closest('li')
     expect(firstRow).toHaveAttribute('aria-selected', 'true')
     expect(tape).toHaveAttribute('aria-activedescendant', 'tape-step-step-0')
+    // Step 0 is itself a 'prompt' step (Turn 1's own), so this also proves Home lands on the real
+    // step row beneath its own turn header, not the header row rendered just above it.
+    expect(firstRow).not.toHaveClass('session-tape__turn-header')
+  })
+
+  it('never selects a turn header while stepping through every row with the arrow key', () => {
+    // Every other step is a 'prompt' (see buildSteps), so a header sits immediately before roughly
+    // half of these 60 rows — the densest realistic turn-grouping case this fixture family can
+    // produce, well past initial-viewport scale.
+    const steps = buildSteps(60)
+    render(<Tape steps={steps} />)
+
+    const tape = screen.getByRole('list', { name: 'Tape' })
+    tape.focus()
+
+    for (let i = 0; i < steps.length - 1; i += 1) {
+      fireEvent.keyDown(tape, { key: 'ArrowDown' })
+      const activeId = tape.getAttribute('aria-activedescendant')
+      expect(activeId).toBe(`tape-step-${steps[i + 1].stepId}`)
+    }
   })
 
   it('moves selection one step at a time with the arrow keys', () => {
@@ -218,5 +247,113 @@ describe('Lanes are visually separable from the main thread', () => {
     expect(laneOf(a1First)).not.toBe(laneOf(a2))
     // The same agent keeps the same lane across two non-contiguous rows of its own steps.
     expect(laneOf(a1First)).toBe(laneOf(a1Second))
+  })
+})
+
+function buildStep(step: Pick<SessionTapeStep, 'kind' | 'stepId' | 'label' | 'offsetMs'> & Partial<SessionTapeStep>): SessionTapeStep {
+  return {
+    pluginName: null,
+    pluginVersion: null,
+    timestamp: '2026-08-16T10:00:00Z',
+    ownerKind: 'main',
+    agentId: null,
+    ...step,
+  }
+}
+
+/** Mockup parity item #12 (`docs/product-superpowers/prioritization/2026-08-21-mockup-parity-gaps.md`,
+ * row #12): the tape groups into visual turn sections. The only turn-boundary signal the wire
+ * carries at all is `step.kind === 'prompt'` (`SessionTapeStep` has no `turnId` — verified against
+ * `src/AecoPostMortem.Api/SessionEnvelope.cs`'s `SessionTapeStepEnvelope`, which has none either);
+ * a prompt step's own `label` is the turn's own `Outcome` (`Api/CLAUDE.md`'s remarks on that
+ * envelope), so a header reuses it rather than inventing a second text source. */
+describe('Mockup parity item #12: the tape groups into turn sections', () => {
+  it('renders one header per turn, immediately before that turn\'s own prompt row, labelled with the prompt\'s own reused label', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'prompt', stepId: 'p1', label: 'Fix the reconciliation bug', offsetMs: 0 }),
+      buildStep({ kind: 'toolCall', stepId: 't1', label: 'rg', offsetMs: 1_000 }),
+      buildStep({ kind: 'toolCall', stepId: 't2', label: 'view', offsetMs: 2_000, ownerKind: 'agent', agentId: 'a1' }),
+      buildStep({ kind: 'prompt', stepId: 'p2', label: 'Write a regression test', offsetMs: 5_000 }),
+      buildStep({ kind: 'toolCall', stepId: 't3', label: 'apply_patch', offsetMs: 6_000 }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('.session-tape__turn-header, .session-tape__step'))
+    const shapes = rows.map((row) =>
+      row.classList.contains('session-tape__turn-header')
+        ? { kind: 'header' as const, text: row.textContent }
+        : { kind: 'step' as const, id: row.id },
+    )
+
+    expect(shapes).toEqual([
+      { kind: 'header', text: 'Turn 1 — Fix the reconciliation bug' },
+      { kind: 'step', id: 'tape-step-p1' },
+      { kind: 'step', id: 'tape-step-t1' },
+      { kind: 'step', id: 'tape-step-t2' },
+      { kind: 'header', text: 'Turn 2 — Write a regression test' },
+      { kind: 'step', id: 'tape-step-p2' },
+      { kind: 'step', id: 'tape-step-t3' },
+    ])
+  })
+
+  it('keeps a subagent step occurring between two prompts inside the earlier turn\'s group, at its normal wall-clock position, still carrying its own lane marker', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'prompt', stepId: 'p1', label: 'Fix the reconciliation bug', offsetMs: 0 }),
+      buildStep({ kind: 'toolCall', stepId: 't1', label: 'rg', offsetMs: 1_000 }),
+      // A subagent step, interleaved in real wall-clock order between turn 1's prompt and turn 2's —
+      // it must stay in turn 1's group, never be pulled into a block of its own (the rejected design,
+      // item #20, "Won't") and never reordered relative to its wall-clock neighbours.
+      buildStep({ kind: 'toolCall', stepId: 'agent-1', label: 'view', offsetMs: 2_000, ownerKind: 'agent', agentId: 'a1' }),
+      buildStep({ kind: 'prompt', stepId: 'p2', label: 'Write a regression test', offsetMs: 5_000 }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('.session-tape__turn-header, .session-tape__step'))
+    const ids = rows.map((row) => (row.classList.contains('session-tape__turn-header') ? `header:${row.textContent}` : row.id))
+
+    // The agent step sits between t1 and the Turn 2 header — inside Turn 1's group, in its normal
+    // wall-clock position, not reordered ahead of or behind its main-thread neighbours.
+    expect(ids).toEqual([
+      'header:Turn 1 — Fix the reconciliation bug',
+      'tape-step-p1',
+      'tape-step-t1',
+      'tape-step-agent-1',
+      'header:Turn 2 — Write a regression test',
+      'tape-step-p2',
+    ])
+
+    const agentRow = container.querySelector('#tape-step-agent-1')
+    expect(agentRow).toHaveAttribute('data-owner-kind', 'agent')
+    expect(agentRow).toHaveAttribute('data-agent-id', 'a1')
+    expect(agentRow).toHaveAttribute('data-agent-lane')
+  })
+
+  it('does not count a turn header as a listitem — only real, selectable steps are', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'prompt', stepId: 'p1', label: 'Fix the reconciliation bug', offsetMs: 0 }),
+      buildStep({ kind: 'toolCall', stepId: 't1', label: 'rg', offsetMs: 1_000 }),
+      buildStep({ kind: 'prompt', stepId: 'p2', label: 'Write a regression test', offsetMs: 5_000 }),
+    ]
+    render(<Tape steps={steps} />)
+
+    // 3 steps, 2 turn headers — if a header counted as a listitem this would be 5, not 3.
+    expect(screen.getAllByRole('listitem')).toHaveLength(steps.length)
+    expect(document.querySelectorAll('.session-tape__turn-header')).toHaveLength(2)
+  })
+
+  it('is not a click target: clicking a header never selects it or fires onSelectStep', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'prompt', stepId: 'p1', label: 'Fix the reconciliation bug', offsetMs: 0 }),
+      buildStep({ kind: 'toolCall', stepId: 't1', label: 'rg', offsetMs: 1_000 }),
+    ]
+    let selected: SessionTapeStep | null = null
+    const { container } = render(<Tape steps={steps} onSelectStep={(step) => { selected = step }} />)
+
+    const header = container.querySelector('.session-tape__turn-header')
+    expect(header).not.toBeNull()
+    expect(header!.querySelector('button')).toBeNull()
+
+    fireEvent.click(header!)
+    expect(selected).toBeNull()
   })
 })

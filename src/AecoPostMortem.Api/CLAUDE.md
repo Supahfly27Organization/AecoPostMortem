@@ -18,7 +18,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `ToolInvocationShapeLookup.cs` | The real `Rules.ToolInvocationShape` corpus (piece 3), closed: `BuildAll` reads `HasPath`/`McpServerName` straight off `Data.Execution.ToolCall` (already real columns) and `SpawnsAgent` off `Data.Execution.Agent.SpawningToolCallId` (already structural) — no new RAW parsing for any of the three — and reads `HasPattern`/`HasReplacement`/`HasFileText`/`HasCommand` from each call's own RAW `tool.execution_start.data.arguments`, field names verified against the live 35-session reference corpus: `pattern` (`rg`/`grep`/`glob`), `old_str`/`new_str` (`edit`), `file_text` (`create`), `command` (`powershell`). `apply_patch`'s own `arguments` is a JSON string (the whole patch body), not an object — a real wrinkle the corpus check caught — so all four are `false` for a string-shaped call rather than guessed at. The public `BuildAll(rawEvents)` overload parses RAW itself; an `internal BuildAll(argumentsByCall)` overload (piece 3's fifth slice, code review) takes an already-built dictionary instead, so `GetDigest` can share one parse pass with `ParamCarryingCallLookup` rather than each lookup parsing the same payloads separately |
 | `RawToolArguments.cs` | Piece 3's fifth slice: `ByCall` — the RAW-parsing pass factored out of `ToolInvocationShapeLookup` so `ParamCarryingCallLookup` (below) can reuse the identical `tool.execution_start` → `ToolArguments` read rather than walking `rawEvents` a second time for the same question |
 | `ParamCarryingCallLookup.cs` | Piece 3's fifth and final slice: the real `Rules.ParamCarryingCall` corpus `Rules.AlwaysPassParamCheck` resolves its mentions against. `SpawnsAgent` reuses `Agent.SpawningToolCallId` the same structural way `ToolInvocationShapeLookup` does; `ArgumentKeys` reads every field name a call's own RAW arguments carried (`Ingestion.ToolArguments.PropertyNames`, new this slice) rather than one fixed set, since the parameter a rule names is arbitrary — unlike `ToolInvocationShapeLookup`'s four closed booleans. `ArgumentsRecorded` (code review) is `true` only when a call's own arguments were object-shaped, so "no record at all" never collapses into "recorded with no keys". The public `BuildAll(rawEvents)` and an `internal BuildAll(argumentsByCall)` overload mirror `ToolInvocationShapeLookup`'s own split (below) |
-| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` or `AlwaysPassParam` match is `Watched` unconditionally, no resolution involved (piece 3's third and fifth slices — neither operand is a tool name); every other matched shape stays `CheckableNotYetBuilt`, and the caller-supplied `NotCheckable(reason)` stays unreachable |
+| `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` or `AlwaysPassParam` match is `Watched` unconditionally, no resolution involved (piece 3's third and fifth slices — neither operand is a tool name); every other matched shape stays `CheckableNotYetBuilt`. Mockup parity item #18 gave the caller-supplied `NotCheckable(reason)` its first real constructor: an unmatched, directive statement (`UnmatchedStatementDisposition.CheckableNotBuilt`) gated on whether an action was *needed*/*necessary*/*relevant* to "the task" (`TaskRelevanceObligation`) is `NotCheckable`, everything else in that disposition stays `CheckableNotYetBuilt` |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions. Mockup parity item #7 added `RuleViolationCountEnvelope` (`"counted"`/`"notAvailable"`) and `RulesInventoryRowEnvelope.ViolationCount` — a Watched row's own violation count, `null` for every other status |
 | `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles). Mockup parity item #14 added `SessionMastheadEnvelope.StartedAt` (`required DateTimeOffset`) and `.EndedAt` (`DateTimeOffset?`), passed through unchanged from `Findings.SessionMasthead` |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
@@ -383,7 +383,7 @@ JSON string (the whole patch body), never an object, so none of those four field
 — `ToolInvocationShapeLookup.HasField` guards on `ToolArguments.Kind == Object` before reading any of
 them, reporting all four `false` for a string-shaped call rather than parsing the patch text to guess.
 
-### `RulesInventoryClassifier` watches `PreferAOverB` and `ToolIsBanned` for real; `NotCheckable(reason)` stays unreachable
+### `RulesInventoryClassifier` watches `PreferAOverB` and `ToolIsBanned` for real; `NotCheckable(reason)` was unreachable until mockup parity item #18
 
 With a real `ToolInvocationShape` corpus in hand, `RulesInventoryClassifier.BuildClassifier` takes it
 as a second parameter and actually attempts resolution for two shapes. `RuleShapeKind.PreferAOverB` —
@@ -426,9 +426,45 @@ closes the last piece-3 gap: every one of FR-34's five shapes now has a real cla
 every unmatched statement carrying a normative marker
 (`UnmatchedStatementDisposition.CheckableNotBuilt`), as `RuleStatementStatus.CheckableNotYetBuilt`;
 an unmatched statement carrying none (`UnmatchedStatementDisposition.NotCheckable`) still classifies
-as `RuleStatementStatus.NotARule`. The caller-supplied `NotCheckable(reason)` variant is never
-constructed anywhere in this file — no shape's absence is attributed to what the logs cannot record,
-only to what no check yet watches.
+as `RuleStatementStatus.NotARule`. This closed the last piece-3 gap — every one of FR-34's five
+shapes has a real classification path — but the caller-supplied `NotCheckable(reason)` variant still
+went unconstructed anywhere in this file until mockup parity item #18, below.
+
+### Mockup parity item #18: `NotCheckable(reason)`'s first real constructor is one narrow, real-corpus-grounded pattern
+
+The item's own scoring (`docs/product-superpowers/prioritization/2026-08-21-mockup-parity-gaps.md`,
+row #18) named the real gap correctly: "nothing in `RulesInventoryClassifier` has ever decided which
+normative-but-unobservable *reason* to attribute to a statement — real design work". Rather than
+guess a taxonomy, this story dumped every distinct statement `RuleShapeCatalogue.MatchAll` classifies
+`UnmatchedStatementDisposition.CheckableNotBuilt` against the live local store (a throwaway console
+tool, not a fixture) and read all nine real hits by hand. Eight ask something a future extension of
+tool-name/path/parameter/call-ordering checking could plausibly answer some day (a repeated path, a
+call-volume threshold, a call ordering, an argument key) — genuinely "not yet built", not
+"unbuildable" — and stay `CheckableNotYetBuilt`. Exactly one is structurally different: this
+repository's own root `CLAUDE.md` (`" Read ONLY files directly needed for the current task"`, also
+carried verbatim by the live corpus's own dominant repository, `supahfly27/UpFront` — the same author
+template, a real, independent hit) gates its obligation on whether a read was truly *needed for the
+task* — content and intent, which Copilot's own event logs never carry (they record which tool was
+called with which argument, never why). `RulesInventoryClassifier.TaskRelevanceObligation` is a
+narrow regex over that one real pattern — `needed|necessary|relevant` immediately followed by
+`for`/`to` "the/this/current task"/"request"/"ticket" — deliberately narrow enough that its three
+real, adjacent-corpus neighbours (`"Do not re-read files already in context"`, `"Never explore the
+codebase broadly before starting"`, and `"...based on topical relevance"`, which never gates on "the
+task" itself) all still classify `CheckableNotYetBuilt`, proven by
+`RulesInventoryClassifierTests`'s own regression cases using that exact real text. Verified against
+the live local store both at the unit level and via a real `GET /api/rules-inventory` request: the
+dominant repository's default rule-set version measured `checkableNotYetBuilt` 6 → 5 and
+`notCheckable` 0 → 1 (17 rows total, unchanged), with the served `reason` naming why — no other row's
+status moved. `web/src/routes/RulesInventoryPage.tsx`'s `StatusCell` already rendered a `notCheckable`
+row's reason (`web/CLAUDE.md`'s own remarks); this story needed no frontend change to make that render
+against real data for the first time.
+
+This is a deliberately narrow slice, not a taxonomy: several real, adjacent statements in the same
+corpus were genuinely ambiguous under closer reading (e.g. `"Fall back to Grep tool only for raw
+text/config values not in the graph"` — arguably checkable via MCP-response outcome ordering, arguably
+not, since "in the graph" is external knowledge) and were left `CheckableNotYetBuilt` on purpose, per
+this item's own scoring ("the current fallback isn't wrong, just less precise, no user-facing harm
+today") — a human can revisit them with more corpus evidence later.
 
 ### `GetDigest`'s seventh check reuses `GetRulesInventory`'s two corpora, scoped to the selected repository instead of corpus-wide
 
@@ -855,10 +891,12 @@ once a check produces one.
 note names as still missing), `RulesInventoryClassifier` classifies every distinct statement once,
 and the selected repository defaults the same way `GetDigest`'s `BuildRepositoryScope` already does
 — this surface has no repository selector of its own (`web/CLAUDE.md`). Verified end to end against
-the live 35-session reference corpus: this repository's own `CLAUDE.md`/`AGENTS.md` rules render as
-17 statements (0 watched, 7 checkable — not yet built, 0 not checkable, 10 not a rule), and a real
-browser renders `web/`'s `RulesInventoryPage` against it with no frontend change — the same promise
-`web/CLAUDE.md` recorded ahead of this wiring.
+the live reference corpus: this repository's own `CLAUDE.md`/`AGENTS.md` rules render as 17
+statements, and a real browser renders `web/`'s `RulesInventoryPage` against it with no frontend
+change — the same promise `web/CLAUDE.md` recorded ahead of this wiring. A live re-check at the time
+of mockup parity item #18 (below) measured 1 watched / 5 checkable — not yet built / 1 not checkable /
+10 not a rule (the corpus, and piece 3's own `NeverReadPath` match, has grown since this note was
+first written); the one `notCheckable` row is that item's own real, narrow addition.
 
 `ToolInvocationShapeLookup.cs` (piece 3, first slice) closed the missing-corpus gap this section once
 documented: `GetRulesInventory` now also builds a real `ToolInvocationShape` corpus corpus-wide and

@@ -87,6 +87,50 @@ function formatOffset(offsetMs: number): string {
   return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
+/** Mockup parity item #12: one row per position in the flat, wall-clock-ordered `steps` array,
+ * plus one extra `'header'` row inserted immediately before each `'prompt'` step — the only
+ * turn-boundary signal the wire carries at all (`SessionTapeStep` has no `turnId`; a prompt step's
+ * own `label` already *is* the turn's own `Outcome`, `Api/CLAUDE.md`'s remarks on
+ * `SessionTapeStepEnvelope`). This is deliberately a flat row list, not a second, nested
+ * grouping/virtualisation structure layered on top of `steps`: a header is just another
+ * fixed-`ROW_HEIGHT_PX` row type, so the windowing (`firstVisible`/`visible`), `ensureVisible` and
+ * `moveSelection` machinery below needs no second math to learn — it already knows how to window
+ * over "a flat list of fixed-height rows," and a `TapeRow` is still exactly that.
+ *
+ * Grouping is positional, never a re-sort: a subagent's own steps interleave with the main thread
+ * in real wall-clock order (see this file's own "A subagent's lane is a per-row marker, not a
+ * contiguous block" precedent, `web/CLAUDE.md` — mockup parity item #20 was marked "Won't" for the
+ * identical reason), and this function's single linear pass over `steps` preserves that order
+ * unchanged. A subagent step occurring between turn N's prompt and turn N+1's prompt therefore
+ * renders inside turn N's group, at its normal wall-clock position, carrying its own lane marker
+ * (`data-owner-kind`/`data-agent-lane`, item #10) as the only signal distinguishing it from a
+ * main-thread step in the same group — this function does not special-case `ownerKind` at all, and
+ * never reorders `steps`. Any leading steps before the tape's first `'prompt'` (not expected from a
+ * real session, which always opens on the user's own prompt, but not structurally ruled out) render
+ * with no header above them, rather than inventing an unlabelled zeroth turn.
+ */
+type TapeRow =
+  | { kind: 'header'; key: string; turnNumber: number; label: string }
+  | { kind: 'step'; key: string; step: SessionTapeStep; stepIndex: number }
+
+function buildRows(steps: SessionTapeStep[]): { rows: TapeRow[]; rowIndexByStep: number[] } {
+  const rows: TapeRow[] = []
+  const rowIndexByStep: number[] = new Array(steps.length)
+  let turnNumber = 0
+
+  steps.forEach((step, stepIndex) => {
+    if (step.kind === 'prompt') {
+      turnNumber += 1
+      rows.push({ kind: 'header', key: `turn-${step.stepId}`, turnNumber, label: step.label })
+    }
+
+    rowIndexByStep[stepIndex] = rows.length
+    rows.push({ kind: 'step', key: step.stepId, step, stepIndex })
+  })
+
+  return { rows, rowIndexByStep }
+}
+
 /** FR-22 (S-09, issue #18), Scenario 5: a deterministic lane index (0-7) for one subagent's own
  * `agentId`, cheap enough to recompute per row rather than carried in state — two rows sharing an
  * `agentId` always land in the same lane, and this needs no lane list to be passed in at all
@@ -131,6 +175,15 @@ function formatPlugin(step: SessionTapeStep): string | null {
  * gives a mouse user the same "select any step" contract (FR-21 part 2 of 3, S-52, issue #16,
  * Scenario 1) that `moveSelection` plus Enter/Space already give a keyboard user, converging on the
  * one `onSelectStep` callback either input method calls.
+ *
+ * Mockup parity item #12 (turn grouping): `selectedIndex`/`moveSelection`/keyboard handling all
+ * still operate purely in *step* index space — `buildRows`'s header rows are never counted or
+ * addressable there, so Home/End/Arrow/PageUp/PageDown can only ever land on a real step, matching
+ * this file's own "a row is a real click target but never a second tab stop" discipline extended one
+ * level further: a header is not a tab stop *and* not a click target *and* not individually
+ * selectable at all. Only `ensureVisible` needs to know a row can be a header — it translates a step
+ * index to its row position (`rowIndexByStep`) before doing the identical scroll-into-view math it
+ * always has.
  */
 export function Tape({
   steps,
@@ -158,21 +211,27 @@ export function Tape({
     }
   }, [scrollTop])
 
-  const totalHeight = steps.length * ROW_HEIGHT_PX
+  const { rows, rowIndexByStep } = useMemo(() => buildRows(steps), [steps])
+  const totalHeight = rows.length * ROW_HEIGHT_PX
   const rowsPerPage = Math.max(1, Math.ceil(VIEWPORT_HEIGHT_PX / ROW_HEIGHT_PX))
 
   const { firstVisible, visible } = useMemo(() => {
     const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT_PX) - OVERSCAN_ROWS)
-    const last = Math.min(steps.length - 1, first + rowsPerPage + 2 * OVERSCAN_ROWS)
-    return { firstVisible: first, visible: steps.slice(first, last + 1) }
-  }, [scrollTop, steps, rowsPerPage])
+    const last = Math.min(rows.length - 1, first + rowsPerPage + 2 * OVERSCAN_ROWS)
+    return { firstVisible: first, visible: rows.slice(first, last + 1) }
+  }, [scrollTop, rows, rowsPerPage])
 
   if (steps.length === 0) {
     return <p className="session-tape__empty">No steps were recorded for this session.</p>
   }
 
-  function ensureVisible(index: number) {
-    const rowTop = index * ROW_HEIGHT_PX
+  /** `stepIndex` addresses `steps`, never `rows` — the caller (`moveSelection`/`selectRow`) always
+   * has a step in hand, and this is the one place that turns it into the row position (which may sit
+   * one past the step's own index, once a header has been inserted ahead of it) the scroll math
+   * needs. */
+  function ensureVisible(stepIndex: number) {
+    const rowIndex = rowIndexByStep[stepIndex] ?? stepIndex
+    const rowTop = rowIndex * ROW_HEIGHT_PX
     const rowBottom = rowTop + ROW_HEIGHT_PX
     setScrollTop((current) => {
       if (rowTop < current) {
@@ -195,7 +254,8 @@ export function Tape({
 
   /** A row is not its own tab stop (see the roving-tab-stop remarks above), but a mouse click still
    * has to move the selection and fire `onSelectStep` — the same "select and show evidence" contract
-   * Enter/Space give a keyboard user. */
+   * Enter/Space give a keyboard user. `index` is a step index, the same space `moveSelection` already
+   * operates in — a header row never calls this at all (see the render loop below). */
   function selectRow(index: number) {
     setSelectedIndex(index)
     ensureVisible(index)
@@ -256,12 +316,30 @@ export function Tape({
       style={{ height: Math.min(VIEWPORT_HEIGHT_PX, totalHeight) || undefined }}
     >
       <li aria-hidden="true" className="session-tape__spacer" style={{ height: totalHeight }} />
-      {visible.map((step, offset) => {
-        const index = firstVisible + offset
-        const isSelected = index === selectedIndex
+      {visible.map((row, offset) => {
+        const rowIndex = firstVisible + offset
+        const top = rowIndex * ROW_HEIGHT_PX
+
+        if (row.kind === 'header') {
+          // Mockup parity item #12: a section divider, not a step — `role="presentation"` keeps it
+          // out of `getAllByRole('listitem')` the same way the spacer above is kept out via
+          // `aria-hidden`, so "listitem" still means "a real, selectable step" (the S-08-era
+          // invariant `web/CLAUDE.md` documents). Never a tab stop, never a click target: nothing
+          // here calls `selectRow`/`moveSelection`. The turn number and the reused prompt label are
+          // rendered as one combined string in one element (not two separate spans) so this text
+          // never exactly duplicates the prompt step's own `session-tape__label` text below it.
+          return (
+            <li key={row.key} role="presentation" className="session-tape__turn-header" style={{ top }}>
+              <span className="session-tape__turn-header-text">{`Turn ${row.turnNumber} — ${row.label}`}</span>
+            </li>
+          )
+        }
+
+        const { step, stepIndex } = row
+        const isSelected = stepIndex === selectedIndex
         const plugin = formatPlugin(step)
 
-        const rowStyle: CSSProperties & { '--session-tape-lane'?: number } = { top: index * ROW_HEIGHT_PX }
+        const rowStyle: CSSProperties & { '--session-tape-lane'?: number } = { top }
         if (step.ownerKind === 'agent' && step.agentId !== null) {
           rowStyle['--session-tape-lane'] = laneIndex(step.agentId)
         }
@@ -281,7 +359,7 @@ export function Tape({
             {/* tabIndex={-1}: a mouse/screen-reader click target, not a second tab stop — the
              * roving tab stop above stays the list's only one, per the doc comment's own
              * reasoning; `aria-activedescendant` is what names this row current, not focus. */}
-            <button type="button" className="session-tape__step-button" tabIndex={-1} onClick={() => selectRow(index)}>
+            <button type="button" className="session-tape__step-button" tabIndex={-1} onClick={() => selectRow(stepIndex)}>
               <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
               <span className="session-tape__kind">
                 <StepGlyph kind={step.kind} />

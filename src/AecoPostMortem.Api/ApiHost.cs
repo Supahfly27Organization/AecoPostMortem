@@ -225,6 +225,38 @@ public static class ApiHost
         var scopedRawEvents = rawEvents.Where(e => scopedSessionIds.Contains(e.SessionId)).ToList();
         var scopedAgents = agents.Where(a => scopedSessionIds.Contains(a.SessionId)).ToList();
 
+        var (findings, checkRegistry) = BuildFindingsForScope(
+            scopedSessions, scopedRawEvents, scopedToolCalls, scopedTurns, scopedPermissions, scopedAgents,
+            scopedSessionIds);
+
+        var digest = ProcessDigest.Build(
+            BuildMastheadCounters(sessions, rawEvents, toolCalls), checkRegistry, findings, repositoryScope);
+
+        return DigestEnvelope.From(digest, FindingEnvelope.From);
+    }
+
+    /// <summary>
+    /// Mockup parity item #4's shared orchestration: the identical ten check orchestrators
+    /// <see cref="GetDigest"/> already ran inline (<see cref="RepeatedFileReadFindingCheck"/>,
+    /// <see cref="FailedToolCallsFinding"/>, <see cref="AbortedTurnFinding"/>,
+    /// <see cref="HookFailureFinding"/>, <see cref="InterruptionLoadFinding"/>,
+    /// <see cref="PhaseChurnFinding"/>, <see cref="BannedToolFinding"/>,
+    /// <see cref="NeverReadPathFinding"/>, <see cref="UseAAfterBFinding"/>,
+    /// <see cref="AlwaysPassParamFinding"/>), factored out so <see cref="GetSession"/> can build the
+    /// identical set for one session's own repository rather than duplicating the call sequence.
+    /// Every parameter is already scoped by the caller — this method filters nothing itself, the same
+    /// "already-resolved plain input" discipline every check orchestrator's own <c>Findings/CLAUDE.md</c>
+    /// entry documents.
+    /// </summary>
+    static (List<Finding> Findings, CheckRegistry CheckRegistry) BuildFindingsForScope(
+        IReadOnlyList<Session> scopedSessions,
+        IReadOnlyList<RawEvent> scopedRawEvents,
+        IReadOnlyList<ToolCall> scopedToolCalls,
+        IReadOnlyList<Turn> scopedTurns,
+        IReadOnlyList<Permission> scopedPermissions,
+        IReadOnlyList<Agent> scopedAgents,
+        IReadOnlySet<string> scopedSessionIds)
+    {
         var sessionsWithToolCall = scopedToolCalls.Select(call => call.SessionId).ToHashSet(StringComparer.Ordinal);
 
         var hookFailures = scopedRawEvents
@@ -290,10 +322,7 @@ public static class ApiHost
             ],
         };
 
-        var digest = ProcessDigest.Build(
-            BuildMastheadCounters(sessions, rawEvents, toolCalls), checkRegistry, findings, repositoryScope);
-
-        return DigestEnvelope.From(digest, FindingEnvelope.From);
+        return (findings, checkRegistry);
     }
 
     /// <summary>The plain operand <see cref="FailedToolCallsCheck"/> takes: a call with no recorded
@@ -596,6 +625,16 @@ public static class ApiHost
     /// <c>Turn</c>/<c>ToolCall</c>/<c>Agent</c> rows it also returns, which would be exactly the
     /// duplicate reconstruction path the remark above rules out. A session's own RAW events are
     /// bounded by that session, so this second read stays cheap regardless of corpus size.
+    ///
+    /// Mockup parity item #4 closes the chip row's own gap: <see cref="SessionEnvelope.Findings"/>
+    /// used to be built from an empty <see cref="Finding"/> list unconditionally. This method now
+    /// reads every session sharing this session's own <see cref="Session.Repository"/> and runs the
+    /// identical ten check orchestrators <see cref="GetDigest"/> runs for a whole repository
+    /// (<see cref="BuildFindingsForScope"/>), then filters the result down to this one session via
+    /// <see cref="Findings.SessionFindings.For"/> — the same "scope by repository, filter to one
+    /// session" split <see cref="GetDigest"/> already establishes for a whole repository's own
+    /// ranked list, just narrowed one step further here since a session belongs to exactly one
+    /// repository, never an explicitly-selected one.
     /// </summary>
     public static SessionEnvelope? GetSession(LocalStore store, string sessionId)
     {
@@ -621,12 +660,31 @@ public static class ApiHost
 
         var recording = SessionRecording.Build(session, turns, toolCalls, agents, skills, hooks, spawnResolution);
 
-        // No check orchestrator runs against the live store yet (FR-21 part 2 of 3, S-52, issue
-        // #16) — the same "not yet wired to a live corpus" gap `ProcessDigest`/`DigestEnvelope`
-        // document for their own `findings` input (`Findings/CLAUDE.md`, `Api/CLAUDE.md`). An empty
-        // list is the honest answer today: `SessionFindings.For` still runs, so the chip row's own
-        // designed "no findings" state is real, not a placeholder skipped by short-circuiting here.
-        var findings = SessionFindings.For(sessionId, []);
+        // Mockup parity item #4: the same ten check orchestrators GetDigest runs for a whole
+        // repository (BuildFindingsForScope), scoped here to this session's own repository — its
+        // own Session.Repository field, not an explicitly-selected one, since GetSession has no
+        // repository selector of its own. A session with a null Repository scopes to every other
+        // session that also carries no repository, the same equality-based grouping
+        // BuildRepositoryScope's own fallback uses when no repository is recorded at all.
+        var repositorySessions = context.Sessions.Where(s => s.Repository == session.Repository).ToList();
+        var repositorySessionIds = repositorySessions.Select(s => s.SessionId).ToHashSet(StringComparer.Ordinal);
+
+        var repositoryRawEvents = context.RawEvents
+            .Where(e => repositorySessionIds.Contains(e.SessionId)).ToList();
+        var repositoryToolCalls = context.ToolCalls
+            .Where(t => repositorySessionIds.Contains(t.SessionId)).ToList();
+        var repositoryTurns = context.Turns
+            .Where(t => repositorySessionIds.Contains(t.SessionId)).ToList();
+        var repositoryPermissions = context.Permissions
+            .Where(p => repositorySessionIds.Contains(p.SessionId)).ToList();
+        var repositoryAgents = context.Agents
+            .Where(a => repositorySessionIds.Contains(a.SessionId)).ToList();
+
+        var (repositoryFindings, _) = BuildFindingsForScope(
+            repositorySessions, repositoryRawEvents, repositoryToolCalls, repositoryTurns,
+            repositoryPermissions, repositoryAgents, repositorySessionIds);
+
+        var findings = SessionFindings.For(sessionId, repositoryFindings);
 
         // FR-22 (S-09, issue #18): one lane per subagent, each carrying the report it actually
         // produced — resolved from the same `rawEvents` read above, ordered by `StartedAt` so the

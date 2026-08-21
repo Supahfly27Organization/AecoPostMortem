@@ -71,6 +71,122 @@ public sealed class SessionRouteTests
             Assert.Equal("org/repo", envelope.Masthead.Repository);
             var step = Assert.Single(envelope.Steps);
             Assert.Equal("tc1", step.StepId);
+            // Mockup parity item #4: a session with no real violation gets an honestly empty chip
+            // row, not a placeholder — proves the real wiring below doesn't spuriously fire.
+            Assert.Empty(envelope.Findings);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>Mockup parity item #4 (`docs/product-superpowers/prioritization/2026-08-21-mockup-
+    /// parity-gaps.md`, item #4): the chip row is wired to a real corpus scan — the same
+    /// hook-failure check <c>DigestRouteTests</c> already exercises for <c>ApiHost.GetDigest</c>,
+    /// here scoped to this session's own repository via <c>Session.Repository</c> rather than an
+    /// explicitly-selected one.</summary>
+    [Fact]
+    public async Task A_session_with_a_real_violation_serves_a_non_empty_finding_chip_row()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s8",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = "2026-08-16T10:10:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s8/events.jsonl",
+                Cwd = @"C:\repo",
+                Repository = "org/repo",
+            });
+            const string startPayload = """{"id":"h1","data":{"hookInvocationId":"inv-1","hookType":"sessionStart"}}""";
+            const string endPayload = """{"id":"h2","data":{"hookInvocationId":"inv-1","hookType":"sessionStart","success":false,"error":{"message":"ParserError: bad token"}}}""";
+            context.RawEvents.Add(new RawEvent(
+                "s8", 0, "hook.start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-0", startPayload));
+            context.RawEvents.Add(new RawEvent(
+                "s8", 1, "hook.end", "2026-08-16T10:00:02Z", "0.0.339",
+                "events.jsonl", 100, "hash-1", endPayload));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s8"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var chip = Assert.Single(envelope!.Findings);
+            Assert.Equal(1, chip.SessionsAffected);
+            Assert.Contains(
+                chip.Finding.Evidence, item => item.Field == "data.error" && item.Value == "ParserError: bad token");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>A violation in a different repository than this session's own must never leak into
+    /// this session's chip row — the same real-filter guarantee <c>DigestRouteTests</c>' own
+    /// <c>A_finding_in_the_non_selected_repository_never_appears_in_the_ranked_list</c> proves for
+    /// <c>ApiHost.GetDigest</c>.</summary>
+    [Fact]
+    public async Task A_violation_in_a_different_repository_never_appears_in_this_sessions_chip_row()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s9",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = "2026-08-16T10:10:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s9/events.jsonl",
+                Cwd = @"C:\repo",
+                Repository = "org/this-repo",
+            });
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s10",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = "2026-08-16T10:10:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s10/events.jsonl",
+                Cwd = @"C:\repo",
+                Repository = "org/other-repo",
+            });
+            const string startPayload = """{"id":"h1","data":{"hookInvocationId":"inv-1","hookType":"sessionStart"}}""";
+            const string endPayload = """{"id":"h2","data":{"hookInvocationId":"inv-1","hookType":"sessionStart","success":false,"error":{"message":"ParserError: bad token"}}}""";
+            context.RawEvents.Add(new RawEvent(
+                "s10", 0, "hook.start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-0", startPayload));
+            context.RawEvents.Add(new RawEvent(
+                "s10", 1, "hook.end", "2026-08-16T10:00:02Z", "0.0.339",
+                "events.jsonl", 100, "hash-1", endPayload));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s9"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Empty(envelope!.Findings);
         }
         finally
         {

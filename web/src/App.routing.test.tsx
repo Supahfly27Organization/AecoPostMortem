@@ -87,6 +87,22 @@ describe('App routing', () => {
     expect(screen.getByRole('heading', { name: 'Process Digest' })).toBeInTheDocument()
   })
 
+  it('states a dead end, with the navigation still present, for an unrouted URL such as the retired bare /sessions', () => {
+    render(
+      <MemoryRouter initialEntries={['/sessions']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    // The bare `/sessions` route was removed with the "Session view" nav link. An unmatched URL
+    // must still say so — React Router matches no route at all for one, so without the catch-all
+    // even `AppShell`'s own navigation is absent and the operator gets a blank page with no way back.
+    expect(screen.getByRole('alert')).toHaveTextContent('There is no page at this address.')
+    expect(screen.getByRole('link', { name: 'Go to the Process Digest' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Digest' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Rules Inventory' })).toBeInTheDocument()
+  })
+
   it('reaches one session\'s Flight Recorder at /sessions/:sessionId (S-08)', async () => {
     vi.stubGlobal(
       'fetch',

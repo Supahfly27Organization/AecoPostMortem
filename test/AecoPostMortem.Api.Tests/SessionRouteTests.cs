@@ -178,6 +178,133 @@ public sealed class SessionRouteTests
         }
     }
 
+    /// <summary>Mockup parity item #17: the same hook-failure violation the test above serves as a
+    /// chip also serves on the exact failed <c>Hook</c> tape step it is about — the finding's own
+    /// <c>Recurrence.Key</c> ("sessionStart") matches this session's own <c>Data.Execution.Hook.Name</c>,
+    /// so the join is real, not asserted only at the unit level.</summary>
+    [Fact]
+    public async Task A_failed_hooks_tape_step_carries_the_matching_finding()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s11",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = "2026-08-16T10:10:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s11/events.jsonl",
+                Cwd = @"C:\repo",
+                Repository = "org/repo",
+            });
+            context.Hooks.Add(new Hook
+            {
+                SessionId = "s11",
+                EventId = "h1",
+                Name = "sessionStart",
+                StartedAt = "2026-08-16T10:00:01Z",
+                EndedAt = "2026-08-16T10:00:02Z",
+                Success = false,
+                OwnerKind = OwnerKind.Main,
+            });
+            const string startPayload = """{"id":"h1","data":{"hookInvocationId":"inv-1","hookType":"sessionStart"}}""";
+            const string endPayload = """{"id":"h2","data":{"hookInvocationId":"inv-1","hookType":"sessionStart","success":false,"error":{"message":"ParserError: bad token"}}}""";
+            context.RawEvents.Add(new RawEvent(
+                "s11", 0, "hook.start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-0", startPayload));
+            context.RawEvents.Add(new RawEvent(
+                "s11", 1, "hook.end", "2026-08-16T10:00:02Z", "0.0.339",
+                "events.jsonl", 100, "hash-1", endPayload));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s11"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var step = Assert.Single(envelope!.Steps);
+            Assert.Equal(SessionTapeStepKind.Hook, step.Kind);
+            var match = Assert.Single(step.Findings);
+            Assert.Contains(
+                match.Evidence, item => item.Field == "data.error" && item.Value == "ParserError: bad token");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>Mockup parity item #17: a failed tool call's own rate finding
+    /// (<c>FailedToolCallsFinding</c>) attaches to every failing call of that tool identity in this
+    /// session — the conservative "attach to all, not a guessed single call" reading — while a
+    /// succeeding call of the same tool never carries a flag.</summary>
+    [Fact]
+    public async Task A_failed_tool_calls_tape_step_carries_the_matching_rate_finding()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s12",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = "2026-08-16T10:10:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s12/events.jsonl",
+                Cwd = @"C:\repo",
+                Repository = "org/repo-tool-failure",
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s12",
+                ToolCallId = "tc-fail",
+                ToolName = "view",
+                StartedAt = "2026-08-16T10:00:01Z",
+                Success = false,
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s12",
+                ToolCallId = "tc-ok",
+                ToolName = "view",
+                StartedAt = "2026-08-16T10:00:02Z",
+                Success = true,
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s12"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var failedStep = envelope!.Steps.Single(step => step.StepId == "tc-fail");
+            var okStep = envelope.Steps.Single(step => step.StepId == "tc-ok");
+
+            var match = Assert.Single(failedStep.Findings);
+            Assert.Contains(match.Evidence, item => item.Field == "toolIdentity" && item.Value == "view");
+            Assert.Empty(okStep.Findings);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     /// <summary>A violation in a different repository than this session's own must never leak into
     /// this session's chip row — the same real-filter guarantee <c>DigestRouteTests</c>' own
     /// <c>A_finding_in_the_non_selected_repository_never_appears_in_the_ranked_list</c> proves for

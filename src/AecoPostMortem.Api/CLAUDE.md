@@ -20,7 +20,8 @@ Endpoints for the three surfaces, and the host that serves them.
 | `ParamCarryingCallLookup.cs` | Piece 3's fifth and final slice: the real `Rules.ParamCarryingCall` corpus `Rules.AlwaysPassParamCheck` resolves its mentions against. `SpawnsAgent` reuses `Agent.SpawningToolCallId` the same structural way `ToolInvocationShapeLookup` does; `ArgumentKeys` reads every field name a call's own RAW arguments carried (`Ingestion.ToolArguments.PropertyNames`, new this slice) rather than one fixed set, since the parameter a rule names is arbitrary — unlike `ToolInvocationShapeLookup`'s four closed booleans. `ArgumentsRecorded` (code review) is `true` only when a call's own arguments were object-shaped, so "no record at all" never collapses into "recorded with no keys". The public `BuildAll(rawEvents)` and an `internal BuildAll(argumentsByCall)` overload mirror `ToolInvocationShapeLookup`'s own split (below) |
 | `RulesInventoryClassifier.cs` | FR-40's caller-supplied classify function (`Rules.RulesInventory.Build`'s own contract): `RulesInventoryClassifier.BuildClassifier` maps `Rules.RuleShapeCatalogue.MatchAll`'s output onto `RuleStatementStatus`, taking the real `ToolInvocationShapeLookup` corpus — a `PreferAOverB` or `UseAAfterB` match whose both operands resolve against it (`Rules.OperandResolver.ResolveTwoOperands`) is `Watched` (piece 3's fourth slice added `UseAAfterB` to this branch); a `ToolIsBanned` match whose single operand resolves (`Rules.OperandResolver.Resolve`, no `ToolRole` involved) is also `Watched`; a `NeverReadPath` or `AlwaysPassParam` match is `Watched` unconditionally, no resolution involved (piece 3's third and fifth slices — neither operand is a tool name); every other matched shape stays `CheckableNotYetBuilt`. Mockup parity item #18 gave the caller-supplied `NotCheckable(reason)` its first real constructor: an unmatched, directive statement (`UnmatchedStatementDisposition.CheckableNotBuilt`) gated on whether an action was *needed*/*necessary*/*relevant* to "the task" (`TaskRelevanceObligation`) is `NotCheckable`, everything else in that disposition stays `CheckableNotYetBuilt` |
 | `RulesInventoryEnvelope.cs` | FR-40's served inventory (S-22, issue #35): `RuleStatementStatusEnvelope` (four closed shapes, `"watched"`/`"checkableNotYetBuilt"`/`"notCheckable"`/`"notARule"`), `RuleRetirementEnvelope` (`"inForce"`/`"retired"`), `RuleSetVersionEnvelope`, `RulesInventoryRowEnvelope`, `RulesInventoryStatusCountsEnvelope` and `RulesInventoryEnvelope.From` — one rule-set version's statements, never a union across versions. Mockup parity item #7 added `RuleViolationCountEnvelope` (`"counted"`/`"notAvailable"`) and `RulesInventoryRowEnvelope.ViolationCount` — a Watched row's own violation count, `null` for every other status |
-| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles). Mockup parity item #14 added `SessionMastheadEnvelope.StartedAt` (`required DateTimeOffset`) and `.EndedAt` (`DateTimeOffset?`), passed through unchanged from `Findings.SessionMasthead` |
+| `SessionEnvelope.cs` | FR-21, part 1 of 3 (S-08, issue #15): `SessionTokenFiguresEnvelope`, `SessionMastheadEnvelope`, `SessionTapeStepEnvelope`, `SessionEnvelope` — the served masthead and tape, assembled from `Findings.SessionRecording`. FR-21 part 2 of 3 (S-52, issue #16) added `SessionFindingChipEnvelope` and `SessionEnvelope.Findings`, assembled from `Findings.SessionFindings`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatusEnvelope` (`Complete`/`IngestIncomplete`/`ReconstructionFailed`) and the required `SessionEnvelope.Status` field; FR-22 (S-09, issue #18) added `SessionAgentLaneEnvelope` and the required `SessionEnvelope.Lanes` field (an optional `lanes` parameter on `From`, defaulting to an empty list — every existing call site still compiles). Mockup parity item #14 added `SessionMastheadEnvelope.StartedAt` (`required DateTimeOffset`) and `.EndedAt` (`DateTimeOffset?`), passed through unchanged from `Findings.SessionMasthead`. Mockup parity item #17 added `SessionTapeStepEnvelope.Findings` (`required IReadOnlyList<FindingEnvelope>`, defaulting to `[]` via a new optional `findings` parameter on `From`) and a matching optional `stepFindings` parameter on `SessionEnvelope.From` — see `SessionTapeStepFindingLookup.cs` below for what populates it |
+| `SessionTapeStepFindingLookup.cs` | Mockup parity item #17: attaches a finding to the specific tape step(s) it is unambiguously about, for the narrow set of finding shapes whose own `Finding.Evidence` names an identity (a tool name, a hook name) a session's own `ToolCall`/`Hook` rows can be matched against exactly — `Build(sessionFindings, toolCalls, hooks)` returns a `(SessionTapeStepKind, StepId)`-keyed map. Covers exactly two shapes today, matched by the marker `EvidenceItem.Field` name(s) each orchestrator already writes (the same technique `RulesInventoryEnvelope.cs`'s own `BuildViolationCounts` already uses to join a served count back to its source check, applied here to a new question): a `toolIdentity` field (`FailedToolCallsFinding`/`ToolFailureClusterFinding`) matches every failed `ToolCall` of that exact tool identity in the session — every failing call, not a guessed "first" or "most recent" one, since the finding's own evidence is an aggregate rate over all of them; a `data.success`/`data.error` field pair (`HookFailureFinding`) matches every failed `Hook` row whose `Name` equals the finding's own `Recurrence.Key`. Every other finding-producing check (`RepeatedFileReadFindingCheck`, `AbortedTurnFinding`, `InterruptionLoadFinding`, `PhaseChurnFinding`, `BannedToolFinding`, `NeverReadPathFinding`, `UseAAfterBFinding`, `AlwaysPassParamFinding`) is deliberately left uncovered — see the non-obvious decision below for why each one doesn't fit |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does. FR-23 (S-10, issue #19) added `StepEvidenceLookup.ReasoningReadabilityByModel`, scanning the whole session's own main-thread `assistant.message` events (not just the current turn) to build the per-model readable share |
 | `SubagentOutputEnvelope.cs` | FR-22 (S-09, issue #18): the inspector's lane-output contract — `Present`/`NotRecorded`/`Failed`, a closed three-shape union so "a real report", "nothing recorded" and "the subagent failed" are each a stated value, never inferred |
@@ -135,6 +136,12 @@ sequence) for the Digest masthead's own rule-coverage figure — corpus-wide, at
 repository's own most recent rule-set version, the identical pipeline `GetRulesInventory` uses. See
 "`GetDigest`'s rule-coverage figure reuses `GetRulesInventory`'s own pipeline..." below for the scope
 decision and why the two endpoints can never disagree.
+
+Mockup parity item #17 widens `GetSession` a fourth way, narrowly: it calls
+`SessionTapeStepFindingLookup.Build` over `findings.Chips` (the session-scoped findings
+`SessionFindings.For` already resolved, mapped back to plain `Finding`s) and the same
+`toolCalls`/`hooks` rows this method already reads for the tape itself — no new query. The result
+threads through the new `stepFindings` parameter on `SessionEnvelope.From`.
 
 ## Non-obvious decisions
 
@@ -732,6 +739,52 @@ direction: here the type always produces *something*, because "shows that fact r
 panel" (the story's own edge case) requires an explicit value for a client to render, not an HTTP
 status a client would have to interpret.
 
+### Mockup parity item #17 is deliberately narrow: two finding shapes covered, eight left as "not attempted"
+
+The mockup shows a flag on the exact tape row a finding is *about* — but `Finding` (`Findings/CLAUDE.md`'s
+own "the finding record has no `Id` and no `SessionId`" note) carries no step-level identity at all,
+only `Recurrence.Occurrences` (which sessions, not which steps). Rather than force every
+finding-producing check into one taxonomy, this story asked of each: does its own `Evidence` name an
+identity a real `ToolCall`/`Hook` row can be matched against *exactly*, with no guessing? Two do:
+
+- **`HookFailureFinding`** — `Recurrence.Key` is the hook's own name (`HookFailureFinding.cs`'s own
+  `group.Key`), the identical value `Data.Execution.Hook.Name` carries. A failed `Hook` row of that
+  name in this session is unambiguously one of the pairs the finding's own corpus-wide count was
+  built from.
+- **`FailedToolCallsFinding`**/**`ToolFailureClusterFinding`** — both carry the exact tool identity
+  their rate was computed over on a `toolIdentity` evidence field (`ToolCallOutcome.ToolIdentity`,
+  verbatim `ToolCall.ToolName`). Every failed `ToolCall` of that identity in this session is
+  unambiguously part of the rate — never only "the first" or "the most recent" one, since the
+  evidence is an aggregate, not a single call's own identity. This is the conservative reading this
+  story picked deliberately: attaching to every confidently-identified call, not fewer, weakly-guessed
+  ones (per this story's own instruction to resolve a genuine fork conservatively).
+
+Eight finding-producing checks are left uncovered, honestly, rather than guessed at:
+`RepeatedFileReadFindingCheck` (its own recurrence key is a path touched by potentially many reads
+across many sessions — which specific read event a flag would attach to is genuinely ambiguous, the
+same "which of N reads" question this item's own prioritisation-doc row named), `PhaseChurnFinding`
+(a whole-session aggregate over declared intents — `Findings/CLAUDE.md`'s own "no single object" note
+for why its recurrence key is the session id, not a sub-object any one step is more "about" than
+another), `AbortedTurnFinding` (arguably attachable to its own aborted `Turn`'s `Prompt` step, but
+left out this pass — a turn's own tape step is a `Prompt`, not the point of abortion itself, and this
+story stopped at the two shapes with no such wrinkle), `InterruptionLoadFinding` (one finding per
+whole analysis run, `Recurrence.Key = "interruption-load"` — no per-step identity at all), and
+`BannedToolFinding`/`NeverReadPathFinding`/`UseAAfterBFinding`/`AlwaysPassParamFinding` (every one of
+these names a tool identity or path in its own evidence the same shape a tool-failure finding does,
+and could plausibly be added the same way in a later pass — deliberately left out here only because
+none of the ten check orchestrators `BuildFindingsForScope` runs actually produces one on the live
+reference corpus today, `Api/CLAUDE.md`'s own status notes, so there was no real data to verify the
+join against; a future pass should extend `SessionTapeStepFindingLookup` rather than replace it).
+
+This is the same "honest narrow slice, not a forced full taxonomy" discipline mockup parity item #18
+(PR #126) already established in this exact backlog — see that row's own remarks. Verified against
+the live 35-session reference corpus, not only at the unit level: a real `GET /api/sessions/{id}`
+request for a session in `supahfly27/UpFront` served 20 flagged steps out of 2,249 — the real
+`sessionStart` hook-failure step, and every real failed `view`/`grep`/`glob` call in that session,
+each carrying its own correct finding headline and none other — confirmed both via the raw JSON
+response and via the real browser's own accessibility tree (`role="img"`, `aria-label="Flagged: …"`)
+on the matching row.
+
 ### Thinking is resolved only for a Prompt step, and only from the main thread
 
 `StepEvidenceLookup.FindThinking` scans every `assistant.message` between a turn's own
@@ -936,6 +989,17 @@ when no repository is recorded anywhere in the store. `SessionRouteTests` proves
 case (a real hook-failure violation in this session's own repository serves a non-empty chip) and the
 negative one (a violation in a different repository never leaks into this session's chip row), the
 same real-filter guarantee `DigestRouteTests` already proves for `GetDigest`.
+
+Mockup parity item #17 added `SessionTapeStepEnvelope.Findings` and `SessionTapeStepFindingLookup`:
+a small flag on the exact tape row a finding is about, for the two finding shapes whose own evidence
+names an identity (a tool name, a hook name) this session's own `ToolCall`/`Hook` rows can be matched
+against exactly — see that file's own remarks below for the full scoping reasoning and which eight
+finding-producing checks were deliberately left uncovered. `web/src/session/Tape.tsx` (`web/CLAUDE.md`)
+is the real rendering consumer: a small `role="img"` flag on the matching row(s), naming every
+flagging finding's own `headline`. Verified against the live 35-session reference corpus: a real
+`GET /api/sessions/{id}` request for a session in the dominant repository served 20 real flagged
+steps — the real `sessionStart` hook failure and every real failed `view`/`grep`/`glob` call in that
+session — confirmed both in the raw JSON and in a real browser's own accessibility tree.
 
 FR-21 part 3 of 3 (S-53, issue #17) added `Status` (`SessionRecordingStatusEnvelope`) to the same
 envelope: `GetSession` now also runs the session's own RAW events through `Ingestion.

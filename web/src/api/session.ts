@@ -23,6 +23,15 @@ export interface SessionTapeStep {
   offsetMs: number
   ownerKind: OwnerKind
   agentId: string | null
+  /** Mockup parity item #17: the specific finding(s) this exact step is unambiguously *about* — see
+   * `AecoPostMortem.Api.SessionTapeStepEnvelope.Findings`'s own remarks for which finding shapes are
+   * covered. The server always sends this (never omits it, empty array for the overwhelming
+   * majority of steps), but it is declared optional here rather than required: three engineers'
+   * worktrees touch `Tape.test.tsx`'s many literal step fixtures in this same round, and making this
+   * required would force an edit to every one of them for a field their own tests never exercise —
+   * `step.findings ?? []` at every read site treats a missing field identically to a served empty
+   * array, so nothing about rendering depends on the distinction. */
+  findings?: FindingEnvelope[]
 }
 
 export type SessionTokenFigures =

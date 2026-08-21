@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import type { SessionTapeStep } from '../api/session'
+import type { FindingEnvelope } from '../api/digest'
 import { Tape } from './Tape'
 
 afterEach(() => {
@@ -355,5 +356,55 @@ describe('Mockup parity item #12: the tape groups into turn sections', () => {
 
     fireEvent.click(header!)
     expect(selected).toBeNull()
+  })
+})
+
+/** Mockup parity item #17: a step named in the server's per-step `findings` field carries a small
+ * flag/callout, mirroring the mockup's own row-level flag rather than only the session-level chip
+ * bar (`routes/SessionPage.tsx`). Only the fields `StepFlag` actually reads are set here — the same
+ * "minimal fixture, not a full envelope" precedent `FindingRow.test.tsx`'s own `waste()` helper
+ * follows for the same wire type. */
+function findingWithHeadline(headline: string): FindingEnvelope {
+  return {
+    kind: 'general',
+    class: 'waste',
+    provenance: 'derived',
+    headline,
+    evidence: [],
+    recurrence: { key: 'view', occurrences: [] },
+    sessionsAffected: 1,
+    suggestion: { state: 'absent' },
+    operatorResponse: 'ignored',
+  } as FindingEnvelope
+}
+
+describe('Mockup parity item #17: a flagged step carries a small flag naming the finding', () => {
+  it('renders a flag, with an accessible label naming the headline, only on the step whose own findings are non-empty', () => {
+    const flaggingFinding = findingWithHeadline('view failed 1 of 2 calls (50%) across 1 session.')
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'toolCall', stepId: 't1', label: 'view', offsetMs: 0, findings: [flaggingFinding] }),
+      buildStep({ kind: 'toolCall', stepId: 't2', label: 'view', offsetMs: 1_000, findings: [] }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    const flaggedRow = container.querySelector('#tape-step-t1')
+    const unflaggedRow = container.querySelector('#tape-step-t2')
+
+    expect(flaggedRow).toHaveAttribute('data-flagged', 'true')
+    expect(unflaggedRow).not.toHaveAttribute('data-flagged')
+
+    const flag = flaggedRow!.querySelector('[role="img"]')
+    expect(flag).not.toBeNull()
+    expect(flag).toHaveAttribute('aria-label', 'Flagged: view failed 1 of 2 calls (50%) across 1 session.')
+    expect(unflaggedRow!.querySelector('[role="img"]')).toBeNull()
+  })
+
+  it('renders no flag at all on a step whose findings field is absent', () => {
+    const steps: SessionTapeStep[] = [buildStep({ kind: 'toolCall', stepId: 't1', label: 'view', offsetMs: 0 })]
+    const { container } = render(<Tape steps={steps} />)
+
+    const row = container.querySelector('#tape-step-t1')
+    expect(row).not.toHaveAttribute('data-flagged')
+    expect(row!.querySelector('[role="img"]')).toBeNull()
   })
 })

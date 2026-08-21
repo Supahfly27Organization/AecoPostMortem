@@ -154,7 +154,20 @@ public sealed record SessionTapeStepEnvelope
 
     public string? AgentId { get; init; }
 
-    public static SessionTapeStepEnvelope From(SessionTapeStep step)
+    /// <summary>Mockup parity item #17: the specific finding(s) this exact step is unambiguously
+    /// *about* — e.g. a failed tool-call row for a finding whose evidence names this exact tool
+    /// identity, or a failed hook row for a finding whose evidence is this exact hook's own
+    /// success/error fields (<see cref="SessionTapeStepFindingLookup"/>). Empty for the overwhelming
+    /// majority of steps: today this covers only the finding shapes named there, deliberately not
+    /// every finding class — this is a narrower, step-level fact than
+    /// <see cref="SessionEnvelope.Findings"/> (the chip row, "every finding affecting this session").
+    /// Defaults to an empty list — the same "empty list is the designed state, never an omission"
+    /// discipline <see cref="SessionEnvelope.Findings"/> and <see cref="SessionEnvelope.Lanes"/>
+    /// already establish — so every pre-existing call to <see cref="From(SessionTapeStep)"/> still
+    /// compiles and still serves an empty list.</summary>
+    public required IReadOnlyList<FindingEnvelope> Findings { get; init; }
+
+    public static SessionTapeStepEnvelope From(SessionTapeStep step, IReadOnlyList<FindingEnvelope>? findings = null)
     {
         ArgumentNullException.ThrowIfNull(step);
 
@@ -169,6 +182,7 @@ public sealed record SessionTapeStepEnvelope
             OffsetMs = (long)step.Offset.TotalMilliseconds,
             OwnerKind = step.OwnerKind,
             AgentId = step.AgentId,
+            Findings = findings ?? [],
         };
     }
 }
@@ -322,12 +336,17 @@ public sealed record SessionEnvelope
     /// list) rather than being required, the same additive-parameter shape
     /// <see cref="SessionRecording.Build"/> already uses for its own <c>spawnResolution</c>
     /// parameter — every existing call site that supplies no lanes still compiles and still serves
-    /// an empty list.</summary>
+    /// an empty list. <paramref name="stepFindings"/> (mockup parity item #17) follows the identical
+    /// shape: <see langword="null"/> when the caller built no <see cref="SessionTapeStepFindingLookup"/>
+    /// map (or does not want this behaviour at all — e.g. every pre-existing test in this project),
+    /// in which case every step serves an empty <see cref="SessionTapeStepEnvelope.Findings"/> list.
+    /// </summary>
     public static SessionEnvelope From(
         SessionRecording recording,
         SessionFindings findings,
         Func<Finding, FindingEnvelope> mapFinding,
-        IReadOnlyList<SessionAgentLaneEnvelope>? lanes = null)
+        IReadOnlyList<SessionAgentLaneEnvelope>? lanes = null,
+        IReadOnlyDictionary<(SessionTapeStepKind Kind, string StepId), IReadOnlyList<Finding>>? stepFindings = null)
     {
         ArgumentNullException.ThrowIfNull(recording);
         ArgumentNullException.ThrowIfNull(findings);
@@ -336,7 +355,13 @@ public sealed record SessionEnvelope
         return new SessionEnvelope
         {
             Masthead = SessionMastheadEnvelope.From(recording.Masthead),
-            Steps = recording.Tape.Steps.Select(SessionTapeStepEnvelope.From).ToList(),
+            Steps = recording.Tape.Steps
+                .Select(step => SessionTapeStepEnvelope.From(
+                    step,
+                    stepFindings is not null && stepFindings.TryGetValue((step.Kind, step.StepId), out var matches)
+                        ? matches.Select(mapFinding).ToList()
+                        : null))
+                .ToList(),
             Status = SessionRecordingStatusEnvelope.From(recording.Status),
             Findings = findings.Chips.Select(chip => SessionFindingChipEnvelope.From(chip, mapFinding)).ToList(),
             Lanes = lanes ?? [],

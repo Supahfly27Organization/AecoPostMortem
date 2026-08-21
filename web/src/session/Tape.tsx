@@ -87,6 +87,29 @@ function formatOffset(offsetMs: number): string {
   return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
+/** Mockup parity item #17: a small flag on the specific row a finding is unambiguously about — e.g.
+ * the exact failed tool-call or hook row, not only the session-level chip bar
+ * (`routes/SessionPage.tsx`'s `FindingChips`). `step.findings` is empty for the overwhelming
+ * majority of rows (only the finding shapes `AecoPostMortem.Api.SessionTapeStepFindingLookup`
+ * covers today ever populate it), so this renders nothing for a normal row — the same "no glyph
+ * unless there is a real reason for one" discipline `StepGlyph`'s own kind icons already follow.
+ * One `role="img"` with a single joined `aria-label` for however many findings flag this row,
+ * mirroring `SessionStrip.tsx`'s own precedent for a compact marker that names everything it
+ * represents in one accessible string rather than one per item. */
+function StepFlag({ findings }: { findings: SessionTapeStep['findings'] }) {
+  if (!findings || findings.length === 0) {
+    return null
+  }
+
+  const label = findings.map((finding) => finding.headline).join(' ')
+
+  return (
+    <span className="session-tape__flag" role="img" aria-label={`Flagged: ${label}`} title={label}>
+      ⚑
+    </span>
+  )
+}
+
 /** Mockup parity item #12: one row per position in the flat, wall-clock-ordered `steps` array,
  * plus one extra `'header'` row inserted immediately before each `'prompt'` step — the only
  * turn-boundary signal the wire carries at all (`SessionTapeStep` has no `turnId`; a prompt step's
@@ -338,6 +361,7 @@ export function Tape({
         const { step, stepIndex } = row
         const isSelected = stepIndex === selectedIndex
         const plugin = formatPlugin(step)
+        const isFlagged = (step.findings?.length ?? 0) > 0
 
         const rowStyle: CSSProperties & { '--session-tape-lane'?: number } = { top }
         if (step.ownerKind === 'agent' && step.agentId !== null) {
@@ -354,6 +378,7 @@ export function Tape({
             data-owner-kind={step.ownerKind}
             data-agent-id={step.agentId ?? undefined}
             data-agent-lane={step.ownerKind === 'agent' && step.agentId !== null ? laneIndex(step.agentId) : undefined}
+            data-flagged={isFlagged ? 'true' : undefined}
             style={rowStyle}
           >
             {/* tabIndex={-1}: a mouse/screen-reader click target, not a second tab stop — the
@@ -367,6 +392,7 @@ export function Tape({
               </span>
               <span className="session-tape__label">{step.label}</span>
               {plugin !== null && <span className="session-tape__plugin">{plugin}</span>}
+              <StepFlag findings={step.findings} />
             </button>
           </li>
         )

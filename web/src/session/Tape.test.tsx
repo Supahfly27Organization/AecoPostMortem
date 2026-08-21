@@ -357,3 +357,101 @@ describe('Mockup parity item #12: the tape groups into turn sections', () => {
     expect(selected).toBeNull()
   })
 })
+
+/** Mockup parity item #13 (`docs/product-superpowers/prioritization/2026-08-21-mockup-parity-gaps.md`,
+ * row #13): the model's own readable reasoning for a prompt step, inlined directly under that
+ * step's row rather than requiring a click into the inspector's Thinking tab. */
+describe('Mockup parity item #13: readable reasoning inlines under its own prompt row', () => {
+  it('renders a preview row immediately after a prompt step whose thinking is present', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({
+        kind: 'prompt',
+        stepId: 'p1',
+        label: 'Completed',
+        offsetMs: 0,
+        thinking: { kind: 'present', text: 'I should check the failing test first.' },
+      }),
+      buildStep({ kind: 'toolCall', stepId: 't1', label: 'rg', offsetMs: 1_000 }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>('.session-tape__turn-header, .session-tape__step, .session-tape__thinking'),
+    )
+    const shapes = rows.map((row) => {
+      if (row.classList.contains('session-tape__turn-header')) return { kind: 'header' as const }
+      if (row.classList.contains('session-tape__thinking')) return { kind: 'thinking' as const, text: row.textContent }
+      return { kind: 'step' as const, id: row.id }
+    })
+
+    expect(shapes).toEqual([
+      { kind: 'header' },
+      { kind: 'step', id: 'tape-step-p1' },
+      { kind: 'thinking', text: 'I should check the failing test first.' },
+      { kind: 'step', id: 'tape-step-t1' },
+    ])
+  })
+
+  it('renders no extra row for a prompt step whose thinking is unavailable', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({
+        kind: 'prompt',
+        stepId: 'p1',
+        label: 'Completed',
+        offsetMs: 0,
+        thinking: { kind: 'unavailable', reason: 'The model\'s reasoning for this step is provider-encrypted and cannot be read.' },
+      }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    expect(container.querySelector('.session-tape__thinking')).toBeNull()
+  })
+
+  it('renders no extra row for a prompt step carrying no thinking at all', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'prompt', stepId: 'p1', label: 'Completed', offsetMs: 0 }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    expect(container.querySelector('.session-tape__thinking')).toBeNull()
+  })
+
+  it('renders no extra row for a non-prompt step, even if it somehow carried a present thinking', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({
+        kind: 'toolCall',
+        stepId: 't1',
+        label: 'view',
+        offsetMs: 0,
+        thinking: { kind: 'present', text: 'Should never be read for a tool call.' },
+      }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    expect(container.querySelector('.session-tape__thinking')).toBeNull()
+  })
+
+  it('is not a click target and never counts as a listitem', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({
+        kind: 'prompt',
+        stepId: 'p1',
+        label: 'Completed',
+        offsetMs: 0,
+        thinking: { kind: 'present', text: 'I should check the failing test first.' },
+      }),
+    ]
+    let selected: SessionTapeStep | null = null
+    const { container } = render(<Tape steps={steps} onSelectStep={(step) => { selected = step }} />)
+
+    const thinkingRow = container.querySelector('.session-tape__thinking')
+    expect(thinkingRow).not.toBeNull()
+    expect(thinkingRow!.querySelector('button')).toBeNull()
+
+    fireEvent.click(thinkingRow!)
+    expect(selected).toBeNull()
+
+    // 1 real step (the prompt) — if the thinking row counted as a listitem this would be 2.
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  })
+})

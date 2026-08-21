@@ -108,10 +108,24 @@ function formatOffset(offsetMs: number): string {
  * never reorders `steps`. Any leading steps before the tape's first `'prompt'` (not expected from a
  * real session, which always opens on the user's own prompt, but not structurally ruled out) render
  * with no header above them, rather than inventing an unlabelled zeroth turn.
+ *
+ * Mockup parity item #13 ("Prose in transcript"): a `'thinking'` row is inserted immediately after a
+ * `'prompt'` step's own row, but only when that step's `thinking` is the `'present'` shape — real,
+ * readable reasoning text, not a stated-absence reason. The mockup's own prose blocks render full,
+ * unclamped text; this row instead stays exactly one fixed `ROW_HEIGHT_PX` tall and clamps its text
+ * with CSS ellipsis, a deliberate divergence: `Tape`'s absolute-positioning windowing math (see the
+ * class doc comment below) depends on every row being the identical fixed height, so a variable-height
+ * block would misposition every row beneath it. The Thinking tab (unchanged by this item) is still
+ * where the full text reads; this row is a readable-at-a-glance preview, not a replacement for it. The
+ * `'unavailable'` shape (encrypted or simply not recorded) adds no row at all — on the live reference
+ * corpus a single session's own 195 turns split 35 present / 105 unavailable / 55 with no reasoning
+ * recorded, so inlining the unavailable reason on every one of those rows would have made the tape
+ * mostly repeated boilerplate rather than a readability win.
  */
 type TapeRow =
   | { kind: 'header'; key: string; turnNumber: number; label: string }
   | { kind: 'step'; key: string; step: SessionTapeStep; stepIndex: number }
+  | { kind: 'thinking'; key: string; text: string }
 
 function buildRows(steps: SessionTapeStep[]): { rows: TapeRow[]; rowIndexByStep: number[] } {
   const rows: TapeRow[] = []
@@ -126,6 +140,10 @@ function buildRows(steps: SessionTapeStep[]): { rows: TapeRow[]; rowIndexByStep:
 
     rowIndexByStep[stepIndex] = rows.length
     rows.push({ kind: 'step', key: step.stepId, step, stepIndex })
+
+    if (step.kind === 'prompt' && step.thinking?.kind === 'present') {
+      rows.push({ kind: 'thinking', key: `thinking-${step.stepId}`, text: step.thinking.text })
+    }
   })
 
   return { rows, rowIndexByStep }
@@ -331,6 +349,17 @@ export function Tape({
           return (
             <li key={row.key} role="presentation" className="session-tape__turn-header" style={{ top }}>
               <span className="session-tape__turn-header-text">{`Turn ${row.turnNumber} — ${row.label}`}</span>
+            </li>
+          )
+        }
+
+        if (row.kind === 'thinking') {
+          // Mockup parity item #13: never a tab stop and never a click target, the same
+          // `role="presentation"` treatment the turn header above already gets, and for the same
+          // reason — this is a section-local annotation, not a selectable step.
+          return (
+            <li key={row.key} role="presentation" className="session-tape__thinking" style={{ top }}>
+              <span className="session-tape__thinking-text">{row.text}</span>
             </li>
           )
         }

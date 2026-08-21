@@ -880,7 +880,21 @@ public static class ApiHost
             .Select(agent => SessionAgentLaneEnvelope.From(agent, SubagentOutputLookup.Find(rawEvents, agent)))
             .ToList();
 
-        return SessionEnvelope.From(recording, findings, FindingEnvelope.From, lanes);
+        // Mockup parity item #13 ("Prose in transcript"): every prompt step's own readable
+        // reasoning, resolved once here rather than waiting for a per-step click
+        // (`GetStepEvidence`'s own `StepEvidenceLookup.Find` path stays exactly as it was, still the
+        // only source for a step's Raw tab). Bounded by this session's own turn count
+        // (`recording.Masthead.TurnCount`, a measured 84 at this project's largest scale, 195 on a
+        // real session in the live reference corpus), not the whole tape's step count — the same
+        // `rawEvents` this method already reads for `SessionRecording.Build`/`SpawnResolutionCheck`
+        // above, no second RAW read.
+        var promptStepIds = recording.Tape.Steps
+            .Where(step => step.Kind == SessionTapeStepKind.Prompt)
+            .Select(step => step.StepId)
+            .ToList();
+        var thinkingByPromptStepId = StepEvidenceLookup.FindThinkingForPromptSteps(rawEvents, promptStepIds);
+
+        return SessionEnvelope.From(recording, findings, FindingEnvelope.From, lanes, thinkingByPromptStepId);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using AecoPostMortem.Findings;
 using AecoPostMortem.Rules;
 
 namespace AecoPostMortem.Api;
@@ -135,6 +136,44 @@ public sealed record RuleSetVersionEnvelope
     }
 }
 
+/// <summary>
+/// Mockup parity item #7 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, Part 3
+/// "Violations" column): a <see cref="RuleStatementStatus.WatchedStatus"/> row's own violation count,
+/// sourced from whichever of the four piece-3 checks that actually produce one
+/// (<see cref="BannedToolFinding"/>, <see cref="NeverReadPathFinding"/>, <see cref="UseAAfterBFinding"/>,
+/// <see cref="AlwaysPassParamFinding"/>) matches this row's own matched shape, run over the exact
+/// corpus-wide matches/invocations <c>RulesInventoryClassifier</c> already resolved this row's Watched
+/// status against — never a second, differently-scoped read (<c>ApiHost.GetRulesInventory</c>'s own
+/// remarks).
+///
+/// A closed two-shape union, the same mechanism <see cref="SuggestionEnvelope"/> uses for "no
+/// suggestion": <see cref="CountedViolations"/> states a real number — including a real zero, a check
+/// that ran over this statement and genuinely found nothing — and <see cref="NoBuiltCheck"/> states
+/// plainly that the matched shape (<see cref="RuleShapeKind.PreferAOverB"/> is the one Watchable shape
+/// with no Finding-producing orchestrator today) has no check to draw a count from. Never a fabricated
+/// or zero-by-default number for that second case.
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(CountedViolations), "counted")]
+[JsonDerivedType(typeof(NoBuiltCheck), "notAvailable")]
+public abstract record RuleViolationCountEnvelope
+{
+    private RuleViolationCountEnvelope()
+    {
+    }
+
+    public static RuleViolationCountEnvelope Counted(int count) => new CountedViolations { Count = count };
+
+    public static RuleViolationCountEnvelope NotAvailable { get; } = new NoBuiltCheck();
+
+    public sealed record CountedViolations : RuleViolationCountEnvelope
+    {
+        public required int Count { get; init; }
+    }
+
+    public sealed record NoBuiltCheck : RuleViolationCountEnvelope;
+}
+
 /// <summary>One inventory row on the wire: FR-40's origin, reach, window, status and retirement.</summary>
 public sealed record RulesInventoryRowEnvelope
 {
@@ -158,9 +197,17 @@ public sealed record RulesInventoryRowEnvelope
     /// disagree.</summary>
     public required string? AdherenceFrozenAt { get; init; }
 
-    public static RulesInventoryRowEnvelope From(RulesInventoryRow row)
+    /// <summary>Mockup parity item #7: <see langword="null"/> for every status but
+    /// <see cref="RuleStatementStatus.WatchedStatus"/> — a row that is not Watched has no check
+    /// running against it at all, a different fact from a Watched row whose shape has no built check
+    /// (<see cref="RuleViolationCountEnvelope.NoBuiltCheck"/>).</summary>
+    public required RuleViolationCountEnvelope? ViolationCount { get; init; }
+
+    public static RulesInventoryRowEnvelope From(
+        RulesInventoryRow row, IReadOnlyDictionary<RuleStatement, RuleViolationCountEnvelope> violationCounts)
     {
         ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(violationCounts);
 
         return new RulesInventoryRowEnvelope
         {
@@ -172,6 +219,9 @@ public sealed record RulesInventoryRowEnvelope
             InForceUntil = row.InForceUntil,
             Retirement = RuleRetirementEnvelope.Of(row.Retirement),
             AdherenceFrozenAt = row.AdherenceFrozenAt,
+            ViolationCount = row.Status is RuleStatementStatus.WatchedStatus
+                ? violationCounts.GetValueOrDefault(row.Statement, RuleViolationCountEnvelope.NotAvailable)
+                : null,
         };
     }
 }
@@ -230,10 +280,19 @@ public sealed record RulesInventoryEnvelope
 
     public required RulesInventoryStatusCountsEnvelope StatusCounts { get; init; }
 
-    public static RulesInventoryEnvelope From(RulesInventory inventory)
+    /// <summary><paramref name="violationCounts"/> defaults to empty — every existing call site that
+    /// supplies only <paramref name="inventory"/> still compiles, the same "existing call sites still
+    /// compile" precedent <c>SessionEnvelope.From</c>'s own optional <c>lanes</c> parameter set
+    /// (<c>Api/CLAUDE.md</c>) — and every row still serves a well-formed <see cref="RuleViolationCountEnvelope"/>:
+    /// a Watched row with nothing in the (empty) dictionary reads <see cref="RuleViolationCountEnvelope.NotAvailable"/>,
+    /// not a missing field.</summary>
+    public static RulesInventoryEnvelope From(
+        RulesInventory inventory,
+        IReadOnlyDictionary<RuleStatement, RuleViolationCountEnvelope>? violationCounts = null)
     {
         ArgumentNullException.ThrowIfNull(inventory);
 
+        var counts = violationCounts ?? EmptyViolationCounts;
         var available = inventory.AvailableVersions;
 
         // Build only produces an inventory for a version the corpus actually carried, so the selected
@@ -247,8 +306,11 @@ public sealed record RulesInventoryEnvelope
             SelectedVersion = RuleSetVersionEnvelope.From(selected),
             AvailableVersions = available.Select(RuleSetVersionEnvelope.From).ToList(),
             State = inventory.State,
-            Rows = inventory.Rows.Select(RulesInventoryRowEnvelope.From).ToList(),
+            Rows = inventory.Rows.Select(row => RulesInventoryRowEnvelope.From(row, counts)).ToList(),
             StatusCounts = RulesInventoryStatusCountsEnvelope.From(inventory.StatusCounts),
         };
     }
+
+    static readonly IReadOnlyDictionary<RuleStatement, RuleViolationCountEnvelope> EmptyViolationCounts =
+        new Dictionary<RuleStatement, RuleViolationCountEnvelope>();
 }

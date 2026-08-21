@@ -40,6 +40,7 @@ describe('App routing', () => {
         inForceUntil: '2026-05-21T09:00:00Z',
         retirement: { state: 'inForce' },
         adherenceFrozenAt: null,
+        violationCount: { kind: 'notAvailable' },
       },
     ],
     statusCounts: { watched: 1, checkableNotYetBuilt: 0, notCheckable: 0, notARule: 0, total: 1 },

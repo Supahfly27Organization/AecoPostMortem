@@ -115,3 +115,23 @@
   color: var(--ink-2);
   max-width: 22rem;
 }
+
+/* Mockup parity item #7: a per-rule violation count. `not-applicable` (every non-Watched row) and
+   `no-built-check` (a Watched row whose shape has no orchestrator, e.g. PreferAOverB) both read as
+   muted, unemphasised text — neither is a problem count the way `counted` can be. `counted` is never
+   styled as an accusation on its own: it is a plain fact sitting beside the status this table already
+   states, not a second severity signal. */
+.rules-inventory__violation-count {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.rules-inventory__violation-count[data-violation='not-applicable'],
+.rules-inventory__violation-count[data-violation='no-built-check'] {
+  color: var(--ink-3);
+}
+
+.rules-inventory__violation-count[data-violation='counted'] {
+  color: var(--ink);
+  font-family: var(--mono);
+}

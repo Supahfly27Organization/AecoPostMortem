@@ -34,6 +34,7 @@ function row(overrides: Partial<RulesInventoryRowEnvelope> = {}): RulesInventory
     inForceUntil: '2026-05-21T09:00:00Z',
     retirement: { state: 'inForce' },
     adherenceFrozenAt: null,
+    violationCount: { kind: 'counted', count: 3 },
     ...overrides,
   }
 }
@@ -261,6 +262,60 @@ describe('Rules Inventory (FR-40, S-22)', () => {
     for (const tile of within(breakdown).getAllByTestId(/^status-count-/)) {
       expect(tile).toHaveAttribute('data-emphasis', 'neutral')
     }
+  })
+
+  // Mockup parity item #7: a per-rule violation count sits directly in this table.
+  it('shows a watched rows real violation count', async () => {
+    respondWith(
+      inventoryWith({ rows: [row({ violationCount: { kind: 'counted', count: 5 } })] }),
+    )
+
+    render(<RulesInventoryPage />)
+
+    const statement = await screen.findByRole('row', { name: /statement/i })
+    const cell = within(statement).getByText(/5 violations/)
+    expect(cell).toHaveAttribute('data-violation', 'counted')
+  })
+
+  it('renders a real zero as a real number, not an absence', async () => {
+    respondWith(
+      inventoryWith({ rows: [row({ violationCount: { kind: 'counted', count: 0 } })] }),
+    )
+
+    render(<RulesInventoryPage />)
+
+    const statement = await screen.findByRole('row', { name: /statement/i })
+    const cell = within(statement).getByText(/0 violations/)
+    expect(cell).toHaveAttribute('data-violation', 'counted')
+  })
+
+  it('states plainly when a watched rows shape has no built check, never a fabricated number', async () => {
+    respondWith(inventoryWith({ rows: [row({ violationCount: { kind: 'notAvailable' } })] }))
+
+    render(<RulesInventoryPage />)
+
+    const statement = await screen.findByRole('row', { name: /statement/i })
+    const cell = within(statement).getByText(/no check built/i)
+    expect(cell).toHaveAttribute('data-violation', 'no-built-check')
+  })
+
+  it('shows no violation count at all for a row that is not watched', async () => {
+    respondWith(
+      inventoryWith({
+        rows: [
+          row({
+            status: { status: 'checkableNotYetBuilt', label: 'Checkable — not yet built' },
+            violationCount: null,
+          }),
+        ],
+      }),
+    )
+
+    render(<RulesInventoryPage />)
+
+    const statement = await screen.findByRole('row', { name: /statement/i })
+    const cell = within(statement).getByText('—')
+    expect(cell).toHaveAttribute('data-violation', 'not-applicable')
   })
 
   it('renders its own message when the API cannot be reached', async () => {

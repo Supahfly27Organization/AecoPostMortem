@@ -3,6 +3,7 @@ import { useRulesInventory } from '../api/useRulesInventory'
 import type {
   RuleSetVersionEnvelope,
   RuleStatementStatusEnvelope,
+  RuleViolationCountEnvelope,
   RulesInventoryRowEnvelope,
   RulesInventoryStatusCountsEnvelope,
 } from '../api/rulesInventory'
@@ -160,6 +161,7 @@ function StatementTable({ rows }: { rows: RulesInventoryRowEnvelope[] }) {
           <th scope="col">Rule</th>
           <th scope="col">Source file</th>
           <th scope="col">Status</th>
+          <th scope="col">Violations</th>
           <th scope="col">Sessions carrying it</th>
           {/* "In force in this version", not "In force": the window is the selected version's own,
               so on an older version it closes in the past while the Retirement column may still say
@@ -191,6 +193,9 @@ function StatementRow({ row }: { row: RulesInventoryRowEnvelope }) {
       <td>
         <StatusCell status={row.status} />
       </td>
+      <td>
+        <ViolationCountCell violationCount={row.violationCount} />
+      </td>
       {/* One text node, not one element per session: the sessions carrying a statement are its
           reach (Scenario 2), stated in full rather than as a count. */}
       <td className="rules-inventory__sessions">{row.sessionIds.join(', ')}</td>
@@ -218,5 +223,38 @@ function StatusCell({ status }: { status: RuleStatementStatusEnvelope }) {
         <p className="rules-inventory__reason">{status.reason}</p>
       )}
     </>
+  )
+}
+
+/**
+ * Mockup parity item #7: a per-rule violation count sits directly in this table, rather than one hop
+ * away on the Digest. `null` (every status but Watched) renders a plain dash — no check runs against
+ * a row that is not Watched at all. A Watched row with `notAvailable` (the matched shape has no
+ * Finding-producing orchestrator, e.g. `PreferAOverB`) renders a stated "No check built" instead of a
+ * dash, so the two absences — "not applicable" and "not yet built" — never read the same way. `0` is
+ * rendered as a real number, never mistaken for either kind of absence: a check that ran over this
+ * statement and genuinely found nothing is a different fact from one that never ran at all.
+ */
+function ViolationCountCell({ violationCount }: { violationCount: RuleViolationCountEnvelope | null }) {
+  if (violationCount === null) {
+    return (
+      <span className="rules-inventory__violation-count" data-violation="not-applicable">
+        —
+      </span>
+    )
+  }
+
+  if (violationCount.kind === 'notAvailable') {
+    return (
+      <span className="rules-inventory__violation-count" data-violation="no-built-check">
+        No check built
+      </span>
+    )
+  }
+
+  return (
+    <span className="rules-inventory__violation-count" data-violation="counted">
+      {violationCount.count} {violationCount.count === 1 ? 'violation' : 'violations'}
+    </span>
   )
 }

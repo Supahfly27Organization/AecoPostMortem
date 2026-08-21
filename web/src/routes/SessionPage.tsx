@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import type { ModelReasoningReadability, RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
 import { useStepEvidence } from '../api/useStepEvidence'
+import { MethodologyFooter } from '../session/MethodologyFooter'
 import { Tape } from '../session/Tape'
 import './SessionPage.css'
 
@@ -428,6 +429,7 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
       ) : (
         <NonFinalState status={envelope.status} />
       )}
+      <MethodologyFooter masthead={envelope.masthead} />
     </div>
   )
 }

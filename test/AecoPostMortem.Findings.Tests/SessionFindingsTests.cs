@@ -13,6 +13,7 @@ public sealed class SessionFindingsTests
     {
         Class = FindingClass.Waste,
         Provenance = Provenance.Derived,
+        Headline = $"{key} was touched",
         Evidence = [],
         Recurrence = new Recurrence
         {

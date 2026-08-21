@@ -9,6 +9,7 @@ function waste(overrides: Partial<FindingEnvelope> = {}): FindingEnvelope {
     kind: 'general',
     class: 'waste',
     provenance: 'derived',
+    headline: 'src/hot.cs was read 4 times across 1 session.',
     evidence: [
       { field: 'data.path', value: 'src/hot.cs' },
       { field: 'read_count:session-1', value: '4' },
@@ -245,7 +246,10 @@ describe('FindingRow', () => {
 
     const summary = screen.getByRole('button', { expanded: false })
     expect(summary.querySelector('[data-rank-metric="sessions-affected"]')).not.toBeInTheDocument()
-    expect(summary).toHaveTextContent('src/hot.cs')
+    // Mockup parity item #5: the visible label is `finding.headline` — a full written sentence
+    // naming the problem — never the bare `recurrence.key` ('src/hot.cs' alone, with no sentence
+    // around it); the extra words here are only reachable through the headline field.
+    expect(summary).toHaveTextContent('src/hot.cs was read 4 times across 1 session.')
   })
 
   it('the default variant still shows the rank metric, unchanged from before this prop existed', () => {

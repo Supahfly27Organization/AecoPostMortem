@@ -127,6 +127,7 @@ public static class InterruptionLoadFinding
         {
             Class = FindingClass.Waste,
             Provenance = Provenance.Observed,
+            Headline = BuildHeadline(load, sessionIds.Length),
             Evidence = evidence,
             Recurrence = new Recurrence
             {
@@ -138,6 +139,20 @@ public static class InterruptionLoadFinding
             Suggestion = BuildSuggestion(load),
         };
     }
+
+    /// <summary>Mockup parity item #5: grounded in the same two counts <see cref="BuildSuggestion"/>
+    /// already states, plus the distinct session count this method's own caller already computed
+    /// (the identical union of permission- and question-carrying sessions <c>Run</c>'s own
+    /// <c>population</c> counts).</summary>
+    static string BuildHeadline(InterruptionLoad load, int sessionCount) => string.Format(
+        CultureInfo.InvariantCulture,
+        "{0} permission {1} and {2} {3} interrupted the operator across {4} {5}.",
+        load.PermissionPromptCount,
+        HeadlineText.Pluralize(load.PermissionPromptCount, "prompt"),
+        load.QuestionCount,
+        HeadlineText.Pluralize(load.QuestionCount, "question"),
+        sessionCount,
+        HeadlineText.Pluralize(sessionCount, "session"));
 
     /// <summary>
     /// Groups permission prompts by whatever <c>ResultKind</c> literally says, quoting it verbatim

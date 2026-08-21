@@ -98,6 +98,10 @@ export type SuggestionEnvelope = { state: 'present'; text: string } | { state: '
 interface FindingEnvelopeBase {
   class: FindingClass
   provenance: Provenance
+  /** Mockup parity item #5 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`):
+   * a full written sentence naming the problem — the mockup's own `t` field. Replaces
+   * `recurrence.key` (a raw tool name or a rule's own text) as `FindingRow`'s visible headline. */
+  headline: string
   evidence: EvidenceItem[]
   recurrence: Recurrence
   /** FR-41 (S-36): the distinct-session count `ProcessDigest.Build` ranked `rankedFindings` by.

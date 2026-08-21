@@ -46,6 +46,7 @@ public sealed class UseAAfterBFindingTests
         Assert.Contains(finding.Evidence, item => item.Field == "later_tool" && item.Value == "rg");
         Assert.Contains(finding.Evidence, item => item.Field == "earlier_tool" && item.Value == "glob");
         Assert.Contains(finding.Evidence, item => item.Field == "violation_count" && item.Value == "1");
+        Assert.Equal("rg was called without glob first, 1 time.", finding.Headline);
         Assert.Single(finding.Recurrence.Occurrences);
         Assert.Equal("session-1", finding.Recurrence.Occurrences[0].SessionId);
         Assert.Equal(1, result.RegistryEntry.FindingCount);

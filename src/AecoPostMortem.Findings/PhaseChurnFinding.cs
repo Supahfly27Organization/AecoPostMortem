@@ -79,6 +79,7 @@ public static class PhaseChurnFinding
             // drift on this data, so the finding says so rather than claiming certainty it does
             // not have.
             Provenance = Provenance.Derived,
+            Headline = BuildHeadline(result),
             Evidence = evidence,
             Recurrence = new Recurrence
             {
@@ -87,6 +88,17 @@ public static class PhaseChurnFinding
             },
         };
     }
+
+    /// <summary>Mockup parity item #5: grounded in the same returns/totalIntents pair
+    /// <see cref="Evidence"/> already carries for this session.</summary>
+    static string BuildHeadline(PhaseChurnResult result) => string.Format(
+        CultureInfo.InvariantCulture,
+        "Session {0} churned through phases {1} {2} across {3} declared {4}.",
+        result.SessionId,
+        result.Returns,
+        HeadlineText.Pluralize(result.Returns, "time"),
+        result.TotalIntents,
+        HeadlineText.Pluralize(result.TotalIntents, "intent"));
 
     /// <summary>One run's output: the findings this check produced, and the registry entry that
     /// records the run happened whether or not it found anything (issue #23, Scenario 4).</summary>

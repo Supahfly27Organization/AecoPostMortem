@@ -29,6 +29,7 @@ public sealed class HookFailureFindingTests
         // there is no code path that renders one figure without the other.
         Assert.Contains("34 of 35", finding.Suggestion!.Text);
         Assert.Contains("32 of the 33", finding.Suggestion!.Text);
+        Assert.Equal("The pre-commit-guard hook failed in 34 of 35 sessions.", finding.Headline);
         Assert.Equal(35, registry.Population);
         Assert.Equal(1, registry.FindingCount);
     }

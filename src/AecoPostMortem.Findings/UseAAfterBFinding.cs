@@ -80,6 +80,7 @@ public static class UseAAfterBFinding
         // step over the raw call log — the same reasoning NeverReadPathFinding gives for its own
         // segment-boundary match.
         Provenance = Provenance.Derived,
+        Headline = BuildHeadline(violation),
         Evidence =
         [
             new EvidenceItem { Field = "later_tool", Value = violation.LaterToolText },
@@ -92,4 +93,14 @@ public static class UseAAfterBFinding
             Occurrences = violation.SessionIds.Select(id => new RecurrenceOccurrence { SessionId = id }).ToArray(),
         },
     };
+
+    /// <summary>Mockup parity item #5: grounded in the same later/earlier tool pair and violation
+    /// count <see cref="Evidence"/> already carries.</summary>
+    static string BuildHeadline(UseAAfterBViolation violation) => string.Format(
+        CultureInfo.InvariantCulture,
+        "{0} was called without {1} first, {2} {3}.",
+        violation.LaterToolText,
+        violation.EarlierToolText,
+        violation.ViolationCount,
+        HeadlineText.Pluralize(violation.ViolationCount, "time"));
 }

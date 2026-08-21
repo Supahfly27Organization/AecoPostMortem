@@ -46,6 +46,9 @@ public sealed class ToolFailureClusterFindingTests
         Assert.Contains(finding.Evidence, item => item.Field == "calls" && item.Value == "4");
         Assert.Contains(finding.Evidence, item => item.Field == "percentage" && item.Value == "50");
         Assert.Contains(finding.Evidence, item => item.Field == "sessionCount" && item.Value == "2");
+        Assert.Equal(
+            "flaky-tool fails 2 of 4 calls (50%) — possibly a missing capability, not a rule violation.",
+            finding.Headline);
     }
 
     /// <summary>FR-46: "match tool names exactly, and state the convention on the table" — a

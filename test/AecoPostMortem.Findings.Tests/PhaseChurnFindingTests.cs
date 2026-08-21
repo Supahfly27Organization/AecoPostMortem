@@ -68,6 +68,7 @@ public sealed class PhaseChurnFindingTests
         var finding = Assert.Single(result.Findings);
         Assert.Contains(finding.Evidence, item => item.Field == "returns" && item.Value == "1");
         Assert.Contains(finding.Evidence, item => item.Field == "totalIntents" && item.Value == "4");
+        Assert.Equal("Session s1 churned through phases 1 time across 4 declared intents.", finding.Headline);
     }
 
     [Fact]

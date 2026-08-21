@@ -123,6 +123,7 @@ public sealed class OperatorResponseLogTests
         {
             Class = FindingClass.Waste,
             Provenance = Provenance.Derived,
+            Headline = "src/foo.cs was read repeatedly",
             Evidence = [new EvidenceItem { Field = "data.path", Value = "src/foo.cs" }],
             Recurrence = new Recurrence
             {
@@ -150,6 +151,7 @@ public sealed class OperatorResponseLogTests
         {
             Class = FindingClass.Waste,
             Provenance = Provenance.Derived,
+            Headline = "src/foo.cs was read repeatedly",
             Evidence = [new EvidenceItem { Field = "data.path", Value = "src/foo.cs" }],
             Recurrence = new Recurrence
             {

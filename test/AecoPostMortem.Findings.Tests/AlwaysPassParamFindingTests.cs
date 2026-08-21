@@ -43,6 +43,7 @@ public sealed class AlwaysPassParamFindingTests
         Assert.Equal(Provenance.Derived, finding.Provenance);
         Assert.Contains(finding.Evidence, item => item.Field == "param_name" && item.Value == "model");
         Assert.Contains(finding.Evidence, item => item.Field == "violation_count" && item.Value == "1");
+        Assert.Equal("The `model` parameter was omitted on 1 call that should have carried it.", finding.Headline);
         Assert.Single(finding.Recurrence.Occurrences);
         Assert.Equal("session-1", finding.Recurrence.Occurrences[0].SessionId);
         Assert.Equal(1, result.RegistryEntry.FindingCount);

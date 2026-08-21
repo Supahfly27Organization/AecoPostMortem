@@ -78,6 +78,7 @@ public sealed class RepeatedFileReadFindingCheckTests
         Assert.Contains(
             finding.Evidence,
             item => item.Field == "read_count:session-2" && item.Value == "5");
+        Assert.Equal("src/Foo.cs was read 9 times across 2 sessions.", finding.Headline);
     }
 
     /// <summary>Scenario 3 (issue #25): a session where no path was read more than three times

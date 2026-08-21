@@ -48,10 +48,12 @@
   color: var(--ink-2);
 }
 
-.finding-row__key {
+.finding-row__headline {
   flex: 1 1 auto;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 0.9rem;
+  font-weight: 560;
+  letter-spacing: -0.005em;
 }
 
 .finding-row__detail {

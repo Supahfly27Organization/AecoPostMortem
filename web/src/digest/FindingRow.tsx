@@ -30,7 +30,13 @@ import './FindingRow.css'
  * make that number the most visually prominent thing on the row (S-36's edge case) — showing it at
  * the same prominence on a hypothesis would visually contradict the guarantee the server went out
  * of its way to build. Nothing is lost by omitting it: `RecurrenceStrip`, rendered on expand either
- * way, already names every session the finding touched. */
+ * way, already names every session the finding touched.
+ *
+ * Mockup parity item #5: the collapsed summary's headline is `finding.headline` — a full written
+ * sentence naming the problem (the mockup's own `t` field) — never `finding.recurrence.key`, a raw
+ * tool name or a rule's own text with no sentence around it. `finding-row__headline` (renamed from
+ * `finding-row__key`, `FindingRow.css`) renders it in the app's sans font rather than the mono font
+ * a bare key used, matching the mockup's own `.ttl .t` styling for a title. */
 export function FindingRow({
   finding,
   sessionIds,
@@ -58,7 +64,7 @@ export function FindingRow({
             </span>
           </span>
         )}
-        <span className="finding-row__key">{finding.recurrence.key}</span>
+        <span className="finding-row__headline">{finding.headline}</span>
         <SessionStrip sessionIds={sessionIds} occurrences={finding.recurrence.occurrences} />
         <ProvenanceBadge provenance={finding.provenance} />
       </button>

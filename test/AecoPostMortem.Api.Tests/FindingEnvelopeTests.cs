@@ -19,6 +19,7 @@ public sealed class FindingEnvelopeTests
     {
         Class = FindingClass.Waste,
         Provenance = Provenance.Derived,
+        Headline = "src/foo.cs was read repeatedly",
         Evidence = [new EvidenceItem { Field = "data.path", Value = "src/foo.cs" }],
         Recurrence = new Recurrence
         {
@@ -31,6 +32,7 @@ public sealed class FindingEnvelopeTests
     {
         Class = FindingClass.RuleAdherenceToolChoice,
         Provenance = Provenance.Derived,
+        Headline = "grep was called instead of the preferred tool",
         Evidence = [new EvidenceItem { Field = "data.toolName", Value = "grep" }],
         Recurrence = new Recurrence
         {
@@ -72,6 +74,7 @@ public sealed class FindingEnvelopeTests
     {
         Class = FindingClass.RuleAdherenceToolChoice,
         Provenance = Provenance.Inferred,
+        Headline = "Tool calls were issued one at a time despite the parallel-calling rule",
         Evidence =
         [
             new EvidenceItem { Field = "single_call_messages", Value = "3249" },
@@ -97,6 +100,30 @@ public sealed class FindingEnvelopeTests
 
         Assert.NotNull(property);
         Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    /// <summary>Mockup parity item #5: the same structural guarantee <see cref="Provenance"/> already
+    /// gets on every shape, extended to the headline field this story adds.</summary>
+    [Theory]
+    [InlineData(typeof(FindingEnvelope.General))]
+    [InlineData(typeof(FindingEnvelope.Adherence))]
+    [InlineData(typeof(FindingEnvelope.BaseRate))]
+    public void Headline_is_a_required_member_on_every_shape(Type envelopeType)
+    {
+        var property = envelopeType.GetProperty(nameof(FindingEnvelope.Headline));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
+    }
+
+    /// <summary>Mockup parity item #5: the served headline is the finding's own, passed straight
+    /// through — this project computes nothing new.</summary>
+    [Fact]
+    public void The_headline_is_passed_through_from_the_finding_unchanged()
+    {
+        var envelope = FindingEnvelope.From(SampleWasteFinding());
+
+        Assert.Equal(SampleWasteFinding().Headline, envelope.Headline);
     }
 
     [Fact]

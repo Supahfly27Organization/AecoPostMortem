@@ -70,6 +70,7 @@ public static class AbortedTurnFinding
         // the session, not read from a single event's own field — the same reasoning
         // RepeatedFileReadFindingCheck gives for its own repeat count.
         Provenance = Provenance.Derived,
+        Headline = BuildHeadline(occurrence),
         Evidence =
         [
             new EvidenceItem { Field = "data.reason", Value = occurrence.Reason },
@@ -90,6 +91,16 @@ public static class AbortedTurnFinding
         },
         Suggestion = BuildSuggestion(occurrence),
     };
+
+    /// <summary>Mockup parity item #5: grounded in the same reason, position and session-turn-count
+    /// data <see cref="Evidence"/> already carries for this turn.</summary>
+    static string BuildHeadline(AbortedTurnOccurrence occurrence) => string.Format(
+        CultureInfo.InvariantCulture,
+        "A turn aborted (\"{0}\") at turn {1} of {2} in session {3}.",
+        occurrence.Reason,
+        occurrence.Position,
+        occurrence.SessionTurnCount,
+        occurrence.SessionId);
 
     /// <summary>
     /// Scenario 2 of issue #28: states the unknown outright rather than leaving it implicit —

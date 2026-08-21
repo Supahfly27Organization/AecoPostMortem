@@ -60,6 +60,7 @@ public static class AlwaysPassParamFinding
         // call log — the same reasoning BannedToolFinding/NeverReadPathFinding give for their own
         // matches.
         Provenance = Provenance.Derived,
+        Headline = BuildHeadline(violation),
         Evidence =
         [
             new EvidenceItem { Field = "param_name", Value = violation.ParamName },
@@ -71,4 +72,13 @@ public static class AlwaysPassParamFinding
             Occurrences = violation.SessionIds.Select(id => new RecurrenceOccurrence { SessionId = id }).ToArray(),
         },
     };
+
+    /// <summary>Mockup parity item #5: grounded in the same param-name/violation-count pair
+    /// <see cref="Evidence"/> already carries.</summary>
+    static string BuildHeadline(AlwaysPassParamViolation violation) => string.Format(
+        CultureInfo.InvariantCulture,
+        "The `{0}` parameter was omitted on {1} {2} that should have carried it.",
+        violation.ParamName,
+        violation.ViolationCount,
+        HeadlineText.Pluralize(violation.ViolationCount, "call"));
 }

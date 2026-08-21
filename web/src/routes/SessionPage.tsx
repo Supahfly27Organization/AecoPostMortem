@@ -22,6 +22,51 @@ function formatOffset(offsetMs: number): string {
   return `${(offsetMs / 1000).toFixed(1)}s`
 }
 
+const wallClockDateTimeFormat = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZone: 'UTC',
+})
+
+const wallClockTimeFormat = new Intl.DateTimeFormat('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZone: 'UTC',
+})
+
+const wallClockDateFormat = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'UTC',
+})
+
+/** Mockup parity item #14: the masthead's real wall-clock start→end range, alongside
+ * `formatElapsed`'s own duration figure — a single session is typically minutes to hours, so
+ * (unlike the Digest's own `Masthead.tsx`/`formatSpan`, which shows dates only because a corpus
+ * spans months) this needs real time-of-day, not just a date. `endedAt === null` is a real state
+ * (an ingest-incomplete session, per `SessionRecordingStatusEnvelope` — the masthead still renders
+ * for one), stated honestly rather than left blank or shown as a dash. The end time is shown as a
+ * bare time-of-day when it falls on the same UTC day as the start (the common case), and as a full
+ * date and time otherwise, so a session that happens to cross midnight still reads unambiguously. */
+function formatWallClockRange(startedAt: string, endedAt: string | null): string {
+  const start = new Date(startedAt)
+  const startText = wallClockDateTimeFormat.format(start)
+
+  if (endedAt === null) {
+    return `${startText} – still running`
+  }
+
+  const end = new Date(endedAt)
+  const sameDay = wallClockDateFormat.format(start) === wallClockDateFormat.format(end)
+  const endText = sameDay ? wallClockTimeFormat.format(end) : wallClockDateTimeFormat.format(end)
+
+  return `${startText} – ${endText}`
+}
+
 function formatElapsed(elapsedMs: number | null): string {
   if (elapsedMs === null) {
     return 'unknown'
@@ -43,7 +88,9 @@ function formatContextSize(contextSize: SessionEnvelope['masthead']['contextSize
 }
 
 /** FR-21 Scenario 1: session identity, repository, branch, CLI version, elapsed time, turns, tool
- * calls, subagents, skills, models and context size at end — all in one place, above the tape. */
+ * calls, subagents, skills, models and context size at end — all in one place, above the tape.
+ * Mockup parity item #14 added the real wall-clock start→end range (`formatWallClockRange`),
+ * alongside — not instead of — `Elapsed`'s own duration figure. */
 function Masthead({ masthead }: { masthead: SessionEnvelope['masthead'] }) {
   return (
     <section className="session-masthead" role="region" aria-label="Masthead">
@@ -63,6 +110,10 @@ function Masthead({ masthead }: { masthead: SessionEnvelope['masthead'] }) {
         <div className="session-masthead__field">
           <dt>CLI version</dt>
           <dd>{masthead.copilotVersion}</dd>
+        </div>
+        <div className="session-masthead__field">
+          <dt>Wall clock</dt>
+          <dd>{formatWallClockRange(masthead.startedAt, masthead.endedAt)}</dd>
         </div>
         <div className="session-masthead__field">
           <dt>Elapsed</dt>

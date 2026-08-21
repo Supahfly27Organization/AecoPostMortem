@@ -45,6 +45,8 @@ describe('The masthead states what this session was', () => {
         repository: 'Supahfly27Organization/AecoPostMortem',
         branch: 'main',
         copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: '2026-08-16T10:30:00Z',
         elapsedMs: 30 * 60 * 1000,
         turnCount: 4,
         toolCallCount: 12,
@@ -76,6 +78,17 @@ describe('The masthead states what this session was', () => {
     expect(masthead).toHaveTextContent('12,345')
     expect(masthead).toHaveTextContent('6,789')
   })
+
+  /** Mockup parity item #14: the masthead shows the real wall-clock start→end range, not only the
+   * elapsed duration — real time-of-day (not just a date), since a session's own start and end
+   * commonly fall on the same day. */
+  it('shows the real wall-clock start and end time, alongside the elapsed duration', async () => {
+    renderAtSession('session-1')
+
+    const masthead = await screen.findByRole('region', { name: 'Masthead' })
+    expect(masthead).toHaveTextContent('Aug 16, 2026, 10:00 AM')
+    expect(masthead).toHaveTextContent('10:30 AM')
+  })
 })
 
 /** Scenario 2: steps appear in wall-clock order with their offset from session start. */
@@ -87,6 +100,8 @@ describe('The tape is ordered by real time', () => {
         repository: null,
         branch: null,
         copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: null,
         elapsedMs: null,
         turnCount: 1,
         toolCallCount: 2,
@@ -137,6 +152,8 @@ describe('A session with no tool calls still renders', () => {
         repository: null,
         branch: null,
         copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: '2026-08-16T10:01:00Z',
         elapsedMs: 60_000,
         turnCount: 0,
         toolCallCount: 0,
@@ -162,6 +179,44 @@ describe('A session with no tool calls still renders', () => {
   })
 })
 
+/** Mockup parity item #14, the `endedAt === null` edge case: an ingest-incomplete session (per
+ * `SessionRecordingStatusEnvelope`) still renders a masthead — this state is real, not
+ * hypothetical — and the wall-clock range says plainly that the session has not ended, rather than
+ * rendering a blank or a misleading dash. */
+describe('A session that has not ended yet states that honestly', () => {
+  beforeEach(() => {
+    respondWith({
+      masthead: {
+        sessionId: 'session-running',
+        repository: null,
+        branch: null,
+        copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: null,
+        elapsedMs: null,
+        turnCount: 1,
+        toolCallCount: 1,
+        subagentCount: 0,
+        skillCount: 0,
+        modelCount: null,
+        contextSize: { kind: 'notRecorded' },
+      },
+      steps: [],
+      status: { kind: 'ingestIncomplete' },
+      findings: [],
+      lanes: [],
+    })
+  })
+
+  it('shows the real start time and says the session is still running, never a blank or a dash', async () => {
+    renderAtSession('session-running')
+
+    const masthead = await screen.findByRole('region', { name: 'Masthead' })
+    expect(masthead).toHaveTextContent('Aug 16, 2026, 10:00 AM')
+    expect(masthead).toHaveTextContent(/still running/i)
+  })
+})
+
 /** S-12, Scenario 1 (FR-25, issue #21): a skill invocation appears as its own step carrying its
  * name, plugin and plugin version. */
 describe('A skill invocation is its own step', () => {
@@ -172,6 +227,8 @@ describe('A skill invocation is its own step', () => {
         repository: null,
         branch: null,
         copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: null,
         elapsedMs: null,
         turnCount: 0,
         toolCallCount: 0,
@@ -241,6 +298,8 @@ describe('A session still ingesting says so', () => {
         repository: null,
         branch: null,
         copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: null,
         elapsedMs: null,
         turnCount: 3,
         toolCallCount: 5,
@@ -275,6 +334,8 @@ describe('A session that failed to reconstruct says why', () => {
         repository: null,
         branch: null,
         copilotVersion: '0.0.339',
+        startedAt: '2026-08-16T10:00:00Z',
+        endedAt: '2026-08-16T10:10:00Z',
         elapsedMs: 600_000,
         turnCount: 3,
         toolCallCount: 5,
@@ -307,6 +368,8 @@ const ONE_STEP_ENVELOPE: SessionEnvelope = {
     repository: null,
     branch: null,
     copilotVersion: '0.0.339',
+    startedAt: '2026-08-16T10:00:00Z',
+    endedAt: null,
     elapsedMs: null,
     turnCount: 0,
     toolCallCount: 1,
@@ -485,6 +548,8 @@ function envelopeWithLanes(lanes: SessionAgentLane[]): SessionEnvelope {
       repository: null,
       branch: null,
       copilotVersion: '0.0.339',
+      startedAt: '2026-08-16T10:00:00Z',
+      endedAt: null,
       elapsedMs: null,
       turnCount: 0,
       toolCallCount: 0,

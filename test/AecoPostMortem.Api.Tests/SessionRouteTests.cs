@@ -69,11 +69,55 @@ public sealed class SessionRouteTests
             Assert.NotNull(envelope);
             Assert.Equal("s1", envelope!.Masthead.SessionId);
             Assert.Equal("org/repo", envelope.Masthead.Repository);
+            Assert.Equal(DateTimeOffset.Parse("2026-08-16T10:00:00Z"), envelope.Masthead.StartedAt);
+            Assert.Equal(DateTimeOffset.Parse("2026-08-16T10:10:00Z"), envelope.Masthead.EndedAt);
             var step = Assert.Single(envelope.Steps);
             Assert.Equal("tc1", step.StepId);
             // Mockup parity item #4: a session with no real violation gets an honestly empty chip
             // row, not a placeholder — proves the real wiring below doesn't spuriously fire.
             Assert.Empty(envelope.Findings);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>Mockup parity item #14: a session still ingesting (no recorded <c>session.
+    /// shutdown</c>) states <c>StartedAt</c> for real but never zero-fills or defaults
+    /// <c>EndedAt</c> to "now" — the same discipline <c>ElapsedMs</c> already carries, proved again
+    /// for the new field.</summary>
+    [Fact]
+    public async Task A_session_still_ingesting_serves_a_started_time_but_no_ended_time()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s14",
+                StartedAt = "2026-08-16T10:00:00Z",
+                EndedAt = null,
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s14/events.jsonl",
+                Cwd = @"C:\repo",
+                Repository = "org/repo",
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<SessionEnvelope>(
+                ApiHost.SessionRoute("s14"), ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal(DateTimeOffset.Parse("2026-08-16T10:00:00Z"), envelope!.Masthead.StartedAt);
+            Assert.Null(envelope.Masthead.EndedAt);
         }
         finally
         {

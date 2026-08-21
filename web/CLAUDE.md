@@ -14,8 +14,8 @@ passing `--prefix`, for the same reason.
 
 | File | What it holds |
 |---|---|
-| `src/App.tsx` | the routes (`/`, `/sessions`, `/sessions/:sessionId`, `/rules`), all under `AppShell`. Router-agnostic on purpose — `main.tsx` supplies `BrowserRouter`, tests supply `MemoryRouter` |
-| `src/AppShell.tsx` | the nav to all three surfaces (always reachable, S-48 Scenario 1) plus `AppStateBanner`, above whichever route's `<Outlet />` content is showing |
+| `src/App.tsx` | the routes (`/`, `/sessions/:sessionId`, `/rules`), all under `AppShell`. Router-agnostic on purpose — `main.tsx` supplies `BrowserRouter`, tests supply `MemoryRouter` |
+| `src/AppShell.tsx` | the nav to the Digest and Rules Inventory (always reachable, S-48 Scenario 1); the session view is reachable only via session id links from the digest, plus `AppStateBanner`, above whichever route's `<Outlet />` content is showing |
 | `src/AppStateBanner.tsx` | S-48 Scenarios 2 and 3: fetches `/api/app-state` and renders its diagnosis, distinctly per state — no-source-found, empty-store, and a fourth state (unreachable API) neither Gherkin scenario names but a real machine can hit |
 | `src/api/appState.ts` | the `AppStateReport`/`AppStateKind` shapes and `fetchAppState`, hand-kept in sync with `AecoPostMortem.Api.AppStateReport` (`src/AecoPostMortem.Api/AppStateReport.cs`) — no generated client exists yet |
 | `src/api/useAppState.ts` | the fetch-once-on-mount hook `AppStateBanner` reads; loading renders nothing rather than a message that might not apply a moment later |
@@ -67,14 +67,13 @@ diagnosis. `AppStateBanner` renders a distinct `role="alert"` message for it
 it into `EmptyStore` (wrong diagnosis: the store might not be empty at all) or showing nothing
 (silent from the operator's side, which is the exact failure PRD §3.1 opens this story to prevent).
 
-### `/sessions/:sessionId` is additive; bare `/sessions` states "no session selected"
+### Session entry point is always a session id; bare `/sessions` was removed
 
-`App.tsx` registers `sessions` and `sessions/:sessionId` as two separate routes onto the same
-`SessionPage` component rather than one route with an optional segment — `SessionPage` branches on
-whether `useParams().sessionId` is present. Nothing yet lets an operator pick a session from a list
-(the digest's finding chips are a later story), so the bare route is real, deliberate UI — "select a
-session first" — not a leftover placeholder; only `/sessions/:sessionId` renders the masthead and
-tape.
+`App.tsx` registers only `sessions/:sessionId` — the bare route was removed because the digest
+now provides real, clickable entry points to sessions (PR #120: every session id on the Digest is a
+`<Link to="/sessions/:id">`). The bare `/sessions` route had no session id and thus nothing to show,
+making it unreachable once the nav link was removed. Session selection via a list picker is a later
+story, not a gap; only `/sessions/:sessionId` renders the masthead and tape.
 
 ### A step's offset and elapsed time are plain numbers, not a serialised duration
 

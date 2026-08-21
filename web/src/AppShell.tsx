@@ -13,7 +13,6 @@ export function AppShell() {
           <NavLink to="/" end>
             Digest
           </NavLink>
-          <NavLink to="/sessions">Session view</NavLink>
           <NavLink to="/rules">Rules Inventory</NavLink>
         </nav>
       </header>

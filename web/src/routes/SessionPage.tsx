@@ -448,19 +448,10 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
 /** The Session Flight Recorder (FR-21: part 1 of 3 — S-08 — part 2 of 3 — S-52 — and part 3 of 3
  * — S-53): the masthead, the finding chips, the virtualised and keyboard-navigable tape and the
  * inspector, or one of two non-final states in place of the tape and chips (`NonFinalState`).
- * `sessionId` comes from the route (`/sessions/:sessionId`); the bare `/sessions` route carries
- * none, since picking a session from a list is a later story's job no part of FR-21 builds. */
+ * `sessionId` comes from the route (`/sessions/:sessionId`). The bare `/sessions` route was
+ * removed as a dead end — the digest now provides real, clickable entry points to sessions. */
 export function SessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
-
-  if (!sessionId) {
-    return (
-      <div className="session-page__no-selection">
-        <h2>Session Flight Recorder</h2>
-        <p>No session selected. Choose a session from the digest to open its Flight Recorder.</p>
-      </div>
-    )
-  }
 
   return <LoadedSession sessionId={sessionId} />
 }

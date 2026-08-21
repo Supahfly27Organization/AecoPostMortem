@@ -445,4 +445,74 @@ public sealed class SessionEnvelopeTests
         var step = Assert.Single(envelope.Steps);
         Assert.Null(step.Thinking);
     }
+
+    /// <summary>A caller that supplies no <c>promptTextByStepId</c> argument still serialises every
+    /// step's <c>PromptText</c> as <see langword="null"/>, the same "additive, existing call sites
+    /// unaffected" discipline <see cref="No_thinking_argument_leaves_every_steps_thinking_null"/>
+    /// already proves for <c>thinkingByPromptStepId</c>.</summary>
+    [Fact]
+    public void No_prompt_text_argument_leaves_every_steps_prompt_text_null()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Null(step.PromptText);
+    }
+
+    /// <summary>A prompt step's own resolved real text is carried onto its step, joined by
+    /// <c>StepId</c> (the turn's own <c>TurnId</c>) — <c>Label</c> stays the turn's own
+    /// <c>Outcome</c>, unchanged.</summary>
+    [Fact]
+    public void A_prompt_steps_resolved_prompt_text_is_carried_onto_its_own_step_without_changing_its_label()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var turns = new[]
+        {
+            new Turn
+            {
+                SessionId = "s1",
+                EventId = "e1",
+                TurnId = "t1",
+                Outcome = TurnOutcome.Completed,
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            },
+        };
+        var recording = SessionRecording.Build(session, turns, [], [], [], []);
+        var promptText = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["t1"] = "run ef database update for both auth and regular projects",
+        };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, promptTextByStepId: promptText);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Equal("run ef database update for both auth and regular projects", step.PromptText);
+        Assert.Equal("Completed", step.Label);
+    }
+
+    /// <summary>A non-prompt step's own <c>PromptText</c> stays <see langword="null"/> even when the
+    /// caller supplies a lookup — the same kind-gated join
+    /// <see cref="A_tool_call_steps_thinking_stays_null_even_with_a_supplied_lookup"/> already proves
+    /// for <c>Thinking</c>.</summary>
+    [Fact]
+    public void A_tool_call_steps_prompt_text_stays_null_even_with_a_supplied_lookup()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+        var promptText = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["tc1"] = "Should never be read for a tool call.",
+        };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, promptTextByStepId: promptText);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Null(step.PromptText);
+    }
 }

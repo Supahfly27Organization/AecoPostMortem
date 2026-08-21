@@ -24,6 +24,7 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SessionTapeStepFindingLookup.cs` | Mockup parity item #17: attaches a finding to the specific tape step(s) it is unambiguously about, for the narrow set of finding shapes whose own `Finding.Evidence` names an identity (a tool name, a hook name) a session's own `ToolCall`/`Hook` rows can be matched against exactly — `Build(sessionFindings, toolCalls, hooks)` returns a `(SessionTapeStepKind, StepId)`-keyed map. Covers exactly two shapes today, matched by the marker `EvidenceItem.Field` name(s) each orchestrator already writes (the same technique `RulesInventoryEnvelope.cs`'s own `BuildViolationCounts` already uses to join a served count back to its source check, applied here to a new question): a `toolIdentity` field (`FailedToolCallsFinding`/`ToolFailureClusterFinding`) matches every failed `ToolCall` of that exact tool identity in the session — every failing call, not a guessed "first" or "most recent" one, since the finding's own evidence is an aggregate rate over all of them; a `data.success`/`data.error` field pair (`HookFailureFinding`) matches every failed `Hook` row whose `Name` equals the finding's own `Recurrence.Key`. Every other finding-producing check (`RepeatedFileReadFindingCheck`, `AbortedTurnFinding`, `InterruptionLoadFinding`, `PhaseChurnFinding`, `BannedToolFinding`, `NeverReadPathFinding`, `UseAAfterBFinding`, `AlwaysPassParamFinding`) is deliberately left uncovered — see the non-obvious decision below for why each one doesn't fit |
 | `StepEvidenceEnvelope.cs` | FR-21 part 2 of 3 (S-52, issue #16): `ThinkingEnvelope` (`Present`/`Unavailable`), `RawStepEventEnvelope` (`Present`/`Skipped`), `StepEvidenceEnvelope` — the inspector's Thinking and Raw tab contracts. No Detail contract exists here: every field the Detail tab needs already travels on `SessionTapeStepEnvelope`. FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.ReadabilityByModel` — the session's own measured readable-reasoning share, one entry per model, populated only for the provider-encryption reason |
 | `StepEvidenceLookup.cs` | FR-21 part 2 of 3 (S-52, issue #16): `StepEvidenceLookup.Find` — resolves a step's raw event and (for a prompt step) its readable reasoning straight from a session's own `RawEvent`s, reading envelopes the same way `AecoPostMortem.Ingestion.ExecutionRecordBuilder` does. FR-23 (S-10, issue #19) added `StepEvidenceLookup.ReasoningReadabilityByModel`, scanning the whole session's own main-thread `assistant.message` events (not just the current turn) to build the per-model readable share |
+| `PromptTextLookup.cs` | A real gap in a stale doc comment, closed: `Findings.SessionTapeStep.Label` for a `Prompt` step is the turn's own `Outcome`, because `Findings.SessionRecording.cs`'s own comment claimed Copilot's event log "carries no separate prompt entity" — verified wrong against the live corpus, `user.message.data.content` is the literal prompt text, joined by `interactionId` to the same `assistant.turn_start` event a `Prompt` step's `StepId` (`Turn.TurnId`) already resolves from. `FindForPromptSteps` mirrors `StepEvidenceLookup.FindThinkingForPromptSteps`'s exact batch shape and inherits its identical, pre-existing `StepId` ambiguity (see the non-obvious decision below) rather than fixing it — deliberately out of this file's own scope |
 | `SubagentOutputEnvelope.cs` | FR-22 (S-09, issue #18): the inspector's lane-output contract — `Present`/`NotRecorded`/`Failed`, a closed three-shape union so "a real report", "nothing recorded" and "the subagent failed" are each a stated value, never inferred |
 | `SubagentOutputLookup.cs` | FR-22 (S-09, issue #18): `SubagentOutputLookup.Find` — resolves one subagent's real report from the last `assistant.message` carrying its own `agentId`, reading envelopes the same way `StepEvidenceLookup` does. Never reads a `tool.execution_complete` result at all, so the parent's truncated `read_agent` stub cannot surface as a lane's output by construction |
 | `MonitorComparisonEnvelope.cs` | FR-39's served comparison (S-35, issue #43): `MonitorComparisonEnvelope` — `BeforeVersion`/`AfterVersion` reuse `RuleSetVersionEnvelope` (S-22), `Before`/`After` carry `Findings.AdherenceFigure` directly, no separate figure envelope — and `MonitorComparisonEnvelope.From(Findings.MonitorComparison)` |
@@ -728,6 +729,36 @@ step's source: a turn's `assistant.turn_start.data.turnId`, a tool call's
 `tool.execution_start.data.toolCallId`, or a skill/hook's own envelope `id`. This is a lookup by an
 identity that already exists, not a second scheme invented for this story.
 
+### `PromptText` inherits `StepEvidenceLookup`'s own `StepId` ambiguity on purpose, and it is a real, measured problem — not a hypothetical one
+
+`SessionTapeStep.StepId` for a `Prompt` step is `Turn.TurnId` — the very display counter
+`AecoPostMortem.Data/CLAUDE.md`'s own "`Turn` is keyed by its own event id, not `TurnId`" entry
+already proved is not unique within a session (`Data.Execution.Turn` itself was re-keyed to
+`EventId` for exactly this reason). Neither `StepEvidenceLookup.FindThinkingForPromptSteps` nor
+`PromptTextLookup.FindForPromptSteps` fixes this — both key their result by `StepId`, so two
+genuinely different turns that happen to share a recycled `TurnId` resolve to whichever turn's own
+`interactionId` was seen first, and every tape row rendered under that `StepId` shows the same
+resolved text regardless of which turn it actually is.
+
+Measured against the live 35-session reference corpus, not assumed: **20 of 25 sessions** in the
+dominant repository (`supahfly27/UpFront`) have at least one repeated `TurnId`, and the worst case
+(a real session) collapses 310 real `Prompt` steps onto only 73 distinct `StepId`s — the majority of
+that session's own prompt rows would render text belonging to an earlier, unrelated turn. This was
+found during real-corpus verification of `PromptTextLookup` (below), not assumed from reading the
+code — `Thinking` has carried the identical exposure since S-52, just less visibly (two turns'
+readable reasoning summaries colliding reads as mildly odd; two turns' prompt *text* colliding reads
+as flatly wrong).
+
+**Deliberately shipped as-is, not fixed here**: the real fix is giving a `Prompt` step a real,
+collision-free `StepId` (`Turn.EventId`, the same field `Data.Execution.Turn` was already re-keyed
+to) — but that touches `Findings.SessionRecording.cs` (where `StepId` is built), every consumer that
+currently matches on `TurnId` (`StepEvidenceLookup.FindByDataField`, this file), the wire route
+(`GET /api/sessions/{sessionId}/steps/{stepId}?kind=`), and every frontend DOM id built from it
+(`tape-step-${stepId}`) — a materially larger blast radius than either lookup's own scope. Flagged to
+the user via `AskUserQuestion` before shipping `PromptText`; the recommended and chosen option was to
+ship the additive field now (strictly better than the bare outcome label it sits beside, and no
+worse than `Thinking`'s own pre-existing exposure) and scope the `StepId` fix as its own follow-up.
+
 ### A step's Raw tab answers 200 with `Skipped`, never a 404 — the edge case's own words
 
 `StepEvidenceLookup.Find` cannot fail to find *a* result — when no raw event matches, it returns
@@ -1117,3 +1148,20 @@ against the live 35-session reference corpus via a real `GET /api/sessions/{sess
 completed session serves a real `startedAt`/`endedAt` pair matching its own `elapsedMs`, and a
 still-recording session serves a real `startedAt` with `endedAt` honestly `null`.
 `web/src/routes/SessionPage.tsx`'s `Masthead` renders it as a new "Wall clock" field.
+
+`PromptTextLookup.cs` closed a real gap `Findings.SessionRecording.cs`'s own stale doc comment
+claimed was structural ("Copilot's event log carries no separate prompt entity"): a real
+`user.message` event carries the literal prompt text (`data.content`), verified against the live
+corpus, joined to a `Prompt` step by `interactionId`. `SessionTapeStepEnvelope.PromptText` (new,
+nullable) carries it — `Label` stays the turn's own `Outcome`, unchanged. `GetSession` calls
+`PromptTextLookup.FindForPromptSteps` alongside `StepEvidenceLookup.FindThinkingForPromptSteps`,
+reusing the identical `rawEvents`/`promptStepIds` already resolved for that call — no new store read.
+`web/src/session/Tape.tsx` renders `promptText` as a `Prompt` row's own label when present, falling
+back to the outcome label otherwise. **Real, measured limitation, shipped deliberately rather than
+blocking on a fix**: `PromptText` inherits `Thinking`'s own pre-existing `StepId` (`Turn.TurnId`)
+collision exposure — see "`PromptText` inherits `StepEvidenceLookup`'s own `StepId` ambiguity on
+purpose" above for the measured 20-of-25-sessions real-corpus impact and the follow-up this opens
+(a real, collision-free `StepId` for a `Prompt` step). Verified against the live 35-session reference
+corpus via a real `GET /api/sessions/{sessionId}` request and a real browser: a real session's tape
+renders real prompt text ("run ef database update for both auth and regular projects") in place of
+the bare outcome label it showed before.

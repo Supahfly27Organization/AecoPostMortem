@@ -450,7 +450,9 @@ export function Tape({
                 <StepGlyph kind={step.kind} />
                 {KIND_LABEL[step.kind]}
               </span>
-              <span className="session-tape__label">{step.label}</span>
+              <span className="session-tape__label">
+                {step.kind === 'prompt' && step.promptText ? step.promptText : step.label}
+              </span>
               {plugin !== null && <span className="session-tape__plugin">{plugin}</span>}
               <StepFlag findings={step.findings} />
             </button>

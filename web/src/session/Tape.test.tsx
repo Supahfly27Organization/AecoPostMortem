@@ -552,3 +552,46 @@ describe('Mockup parity item #13: readable reasoning inlines under its own promp
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
   })
 })
+
+describe('a prompt step\'s own real text (promptText)', () => {
+  it('renders promptText as the row\'s own label when present, instead of the outcome label', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({
+        kind: 'prompt',
+        stepId: 'p1',
+        label: 'Completed',
+        offsetMs: 0,
+        promptText: 'run ef database update for both auth and regular projects',
+      }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    expect(container.querySelector('.session-tape__label')?.textContent).toBe(
+      'run ef database update for both auth and regular projects',
+    )
+  })
+
+  it('falls back to the outcome label when a prompt step has no resolved promptText', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({ kind: 'prompt', stepId: 'p1', label: 'Aborted', offsetMs: 0 }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    expect(container.querySelector('.session-tape__label')?.textContent).toBe('Aborted')
+  })
+
+  it('never reads promptText for a non-prompt step, even if it somehow carried one', () => {
+    const steps: SessionTapeStep[] = [
+      buildStep({
+        kind: 'toolCall',
+        stepId: 't1',
+        label: 'view',
+        offsetMs: 0,
+        promptText: 'Should never be read for a tool call.',
+      }),
+    ]
+    const { container } = render(<Tape steps={steps} />)
+
+    expect(container.querySelector('.session-tape__label')?.textContent).toBe('view')
+  })
+})

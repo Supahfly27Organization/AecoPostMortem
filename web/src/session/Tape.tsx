@@ -11,6 +11,68 @@ const KIND_LABEL: Record<SessionTapeStep['kind'], string> = {
   mcpCall: 'MCP call',
 }
 
+/** Mockup parity item #10: a small glyph per step kind, a second, faster-to-scan signal alongside —
+ * never instead of — `KIND_LABEL`'s own text, the same "colour/icon on top of the word, never the
+ * only signal" discipline `ProvenanceBadge.tsx` established for provenance. Purely decorative
+ * (`aria-hidden`, `focusable={false}`): `KIND_LABEL`'s text stays the row's one accessible name for
+ * its kind. Each shape is a static inline SVG path using `stroke="currentColor"`/`fill="currentColor"`
+ * only — no hardcoded colour — so it inherits `.session-tape__kind`'s own `--ink-3` token and needs
+ * no separate rule for dark mode. Static markup only, computed from nothing per row (no measurement,
+ * no per-row work beyond the `KIND_LABEL` lookup this file already does), keeping it as cheap as the
+ * virtualised tape's own performance budget requires. */
+function StepGlyph({ kind }: { kind: SessionTapeStep['kind'] }) {
+  const common = {
+    className: 'session-tape__glyph',
+    viewBox: '0 0 24 24',
+    width: 12,
+    height: 12,
+    'aria-hidden': true as const,
+    focusable: false as const,
+    'data-glyph': kind,
+  }
+
+  switch (kind) {
+    case 'prompt':
+      // A speech bubble: the operator's own words starting the step.
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      )
+    case 'hook':
+      // A shepherd's-crook curve: a lifecycle hook catching the flow.
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 2v11a4 4 0 0 0 8 0V8" />
+        </svg>
+      )
+    case 'skill':
+      // A spark: a packaged skill firing.
+      return (
+        <svg {...common} fill="currentColor" stroke="none">
+          <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      )
+    case 'toolCall':
+      // A wrench: the operator's own tools.
+      return (
+        <svg {...common} fill="currentColor" stroke="none">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      )
+    case 'mcpCall':
+      // A link: reaching out to an external MCP server.
+      return (
+        <svg {...common} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3" />
+          <line x1="8" y1="12" x2="16" y2="12" />
+        </svg>
+      )
+    default:
+      return null
+  }
+}
+
 /** Fixed, never measured from the real DOM — jsdom (and this component's own tests) report zero
  * for every element's real layout size, so windowing math here is driven entirely by these two
  * constants and the scroll position, never by `getBoundingClientRect`. `Tape.css`'s own
@@ -221,7 +283,10 @@ export function Tape({
              * reasoning; `aria-activedescendant` is what names this row current, not focus. */}
             <button type="button" className="session-tape__step-button" tabIndex={-1} onClick={() => selectRow(index)}>
               <span className="session-tape__offset">{formatOffset(step.offsetMs)}</span>
-              <span className="session-tape__kind">{KIND_LABEL[step.kind]}</span>
+              <span className="session-tape__kind">
+                <StepGlyph kind={step.kind} />
+                {KIND_LABEL[step.kind]}
+              </span>
               <span className="session-tape__label">{step.label}</span>
               {plugin !== null && <span className="session-tape__plugin">{plugin}</span>}
             </button>

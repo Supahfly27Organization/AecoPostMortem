@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { FindingRow } from './FindingRow'
 import type { FindingEnvelope } from '../api/digest'
@@ -56,9 +57,11 @@ function adherence(): FindingEnvelope {
 describe('FindingRow', () => {
   it('is collapsed by default, showing no evidence or suggestion yet', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument()
@@ -72,9 +75,11 @@ describe('FindingRow', () => {
   // after expanding the row cannot do that job, so it belongs in the always-visible summary.
   it('shows how many sessions it touched without needing to be expanded first', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste({ sessionsAffected: 30 })} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     const summary = screen.getByRole('button', { expanded: false })
@@ -86,9 +91,11 @@ describe('FindingRow', () => {
 
   it('reads a single-session finding as one session, not as "1 sessions"', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste({ sessionsAffected: 1 })} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     const metric = screen
@@ -101,9 +108,11 @@ describe('FindingRow', () => {
   it('expanding the row reveals the quoted evidence, the provenance badge, and the suggestion', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     await user.click(screen.getByRole('button', { expanded: false }))
@@ -117,9 +126,11 @@ describe('FindingRow', () => {
   it('an expanded row also shows the recurrence strip naming the sessions it touched', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     await user.click(screen.getByRole('button', { expanded: false }))
@@ -133,9 +144,11 @@ describe('FindingRow', () => {
   it('a finding with no suggestion template still expands, stating that none is offered', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste({ suggestion: { state: 'absent' } })} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     await user.click(screen.getByRole('button', { expanded: false }))
@@ -151,9 +164,11 @@ describe('FindingRow', () => {
   it('an adherence row shows the figure with the layer and call count for every operand', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={adherence()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     await user.click(screen.getByRole('button', { expanded: false }))
@@ -172,9 +187,11 @@ describe('FindingRow', () => {
   it('a non-adherence row shows no figure and no resolution table', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     await user.click(screen.getByRole('button', { expanded: false }))
@@ -187,9 +204,11 @@ describe('FindingRow', () => {
   // the exact reading FR-33 exists to prevent.
   it('does not show the percentage until the row is expanded, so it never appears without its resolution', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={adherence()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     expect(screen.queryByText('75%')).not.toBeInTheDocument()
@@ -199,9 +218,11 @@ describe('FindingRow', () => {
   it('collapses again on a second click', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste()} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     const toggle = screen.getByRole('button', { expanded: false })
@@ -217,9 +238,11 @@ describe('FindingRow', () => {
   // once without opening any of them.
   it('shows the session strip on the collapsed row', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste()} sessionIds={['session-1', 'session-2', 'session-3']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     const summary = screen.getByRole('button', { expanded: false })
@@ -235,13 +258,15 @@ describe('FindingRow', () => {
   // this row not to render the same leading rank-metric column a ranked finding gets.
   it('an unranked-variant row omits the leading sessions-affected rank metric', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow
           finding={waste({ provenance: 'inferred', sessionsAffected: 12 })}
           sessionIds={['session-1', 'session-2']}
           variant="unranked"
         />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     const summary = screen.getByRole('button', { expanded: false })
@@ -254,9 +279,11 @@ describe('FindingRow', () => {
 
   it('the default variant still shows the rank metric, unchanged from before this prop existed', () => {
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow finding={waste({ sessionsAffected: 12 })} sessionIds={['session-1', 'session-2']} />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     const summary = screen.getByRole('button', { expanded: false })
@@ -268,13 +295,15 @@ describe('FindingRow', () => {
   it('an unranked row still names every session it touched once expanded', async () => {
     const user = userEvent.setup()
     render(
-      <ul>
+      <MemoryRouter>
+        <ul>
         <FindingRow
           finding={waste({ provenance: 'inferred' })}
           sessionIds={['session-1', 'session-2']}
           variant="unranked"
         />
-      </ul>,
+      </ul>
+      </MemoryRouter>,
     )
 
     await user.click(screen.getByRole('button', { expanded: false }))

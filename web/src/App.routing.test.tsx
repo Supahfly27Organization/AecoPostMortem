@@ -114,6 +114,8 @@ describe('App routing', () => {
               repository: null,
               branch: null,
               copilotVersion: '0.0.339',
+              startedAt: '2026-08-16T10:00:00Z',
+              endedAt: null,
               elapsedMs: null,
               turnCount: 0,
               toolCallCount: 0,

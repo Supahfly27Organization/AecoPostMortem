@@ -42,6 +42,11 @@ export interface SessionMasthead {
   repository: string | null
   branch: string | null
   copilotVersion: string
+  // Mockup parity item #14: the session's own wall-clock start/end, alongside `elapsedMs`'s
+  // duration. `endedAt` is null under the identical condition `elapsedMs` is — this session never
+  // recorded `session.shutdown`.
+  startedAt: string
+  endedAt: string | null
   elapsedMs: number | null
   turnCount: number
   toolCallCount: number

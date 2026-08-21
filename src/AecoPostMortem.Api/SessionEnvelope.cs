@@ -76,6 +76,17 @@ public sealed record SessionMastheadEnvelope
 
     public required string CopilotVersion { get; init; }
 
+    /// <summary>Mockup parity item #14: the session's own wall-clock start/end, so a client can
+    /// render a real start→end range alongside <see cref="ElapsedMs"/>'s duration.
+    /// <see cref="DateTimeOffset"/> is left as-is, the same precedent
+    /// <see cref="SessionTapeStepEnvelope.Timestamp"/>'s own remark states — it serialises
+    /// losslessly and needs no format agreement of its own, unlike <see cref="ElapsedMs"/>.</summary>
+    public required DateTimeOffset StartedAt { get; init; }
+
+    /// <summary><see langword="null"/> under the identical condition <see cref="ElapsedMs"/> is —
+    /// this session never recorded <c>session.shutdown</c>.</summary>
+    public DateTimeOffset? EndedAt { get; init; }
+
     public long? ElapsedMs { get; init; }
 
     public required int TurnCount { get; init; }
@@ -100,6 +111,8 @@ public sealed record SessionMastheadEnvelope
             Repository = masthead.Repository,
             Branch = masthead.Branch,
             CopilotVersion = masthead.CopilotVersion,
+            StartedAt = masthead.StartedAt,
+            EndedAt = masthead.EndedAt,
             ElapsedMs = masthead.Elapsed is { } elapsed ? (long)elapsed.TotalMilliseconds : null,
             TurnCount = masthead.TurnCount,
             ToolCallCount = masthead.ToolCallCount,

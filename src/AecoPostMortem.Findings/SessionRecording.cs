@@ -94,6 +94,18 @@ public sealed record SessionMasthead
 
     public required string CopilotVersion { get; init; }
 
+    /// <summary>Mockup parity item #14: the session's own wall-clock start, so a masthead can show
+    /// a real start→end range alongside <see cref="Elapsed"/>'s duration — <see cref="Session.
+    /// StartedAt"/> parsed the same way <see cref="Elapsed"/> already is, never a second source of
+    /// truth.</summary>
+    public required DateTimeOffset StartedAt { get; init; }
+
+    /// <summary><see langword="null"/> under the identical condition <see cref="Elapsed"/> is —
+    /// <see cref="Session.EndedAt"/> was never recorded (no <c>session.shutdown</c>) — never
+    /// zero-filled or defaulted to "now", the same "a zero is a number a surface would print"
+    /// discipline this record's own doc comment already states for <see cref="Elapsed"/>.</summary>
+    public DateTimeOffset? EndedAt { get; init; }
+
     public TimeSpan? Elapsed { get; init; }
 
     public required int TurnCount { get; init; }
@@ -200,6 +212,8 @@ public sealed record SessionRecording
             Repository = session.Repository,
             Branch = session.Branch,
             CopilotVersion = session.CopilotVersion,
+            StartedAt = start,
+            EndedAt = session.EndedAt is { } endedAtForMasthead ? ParseTimestamp(endedAtForMasthead) : null,
             Elapsed = session.EndedAt is { } endedAt ? ParseTimestamp(endedAt) - start : null,
             TurnCount = turns.Count,
             ToolCallCount = toolCalls.Count,

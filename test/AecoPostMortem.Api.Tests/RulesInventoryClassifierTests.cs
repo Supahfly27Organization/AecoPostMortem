@@ -188,4 +188,67 @@ public sealed class RulesInventoryClassifierTests
 
         Assert.Equal(RuleStatementStatus.Watched, classify(statement));
     }
+
+    /// <summary>
+    /// Mockup parity item #18: the first statement this classifier ever constructs
+    /// <see cref="RuleStatementStatus.NotCheckable"/> for. This exact text is real — the live local
+    /// store's own corpus-wide dump (against this repository's own root <c>CLAUDE.md</c>, run via a
+    /// throwaway console tool during this story's investigation, not a fixture) classifies it
+    /// <see cref="UnmatchedStatementDisposition.CheckableNotBuilt"/> (a directive — "only" — that no
+    /// catalogue shape matches). Its obligation turns on whether a read was truly <i>needed for the
+    /// task</i> — Copilot's own event logs (`Data/CLAUDE.md`) record which tool was called with which
+    /// path, never why, so no future extension of tool-name/path/parameter/ordering checking could
+    /// ever verify task relevance. This is a structurally different gap from
+    /// "Do not re-read files already in context" (recurrence — a real path read twice is directly
+    /// observable) or "Never explore the codebase broadly before starting" (volume — a call count is
+    /// directly observable), both real neighbours in the same corpus that correctly stay
+    /// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>, below.
+    /// </summary>
+    [Fact]
+    public void An_unmatched_directive_gated_on_the_read_s_relevance_to_the_task_is_not_checkable()
+    {
+        var statement = Statement("Read ONLY files directly needed for the current task");
+
+        var classify = Classify(statement);
+
+        var notCheckable = Assert.IsType<RuleStatementStatus.NotCheckableStatus>(classify(statement));
+        Assert.Contains("why", notCheckable.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The real corpus's own nearest neighbours to the statement above — both genuinely observable
+    /// from event-log shape alone (a repeated path, a call count), unlike task relevance — must not be
+    /// swept into <see cref="RuleStatementStatus.NotCheckable"/> by too broad a pattern.
+    /// </summary>
+    [Theory]
+    [InlineData("Do not re-read files already in context")]
+    [InlineData("Never explore the codebase broadly before starting")]
+    [InlineData("Use sub-guides (listed above) for context — avoid re-reading entire codebases.")]
+    [InlineData("Fall back to Grep tool only for raw text/config values not in the graph")]
+    public void An_unmatched_directive_not_gated_on_task_relevance_stays_checkable_not_yet_built(string text)
+    {
+        var statement = Statement(text);
+
+        var classify = Classify(statement);
+
+        Assert.Equal(RuleStatementStatus.CheckableNotYetBuilt, classify(statement));
+    }
+
+    /// <summary>
+    /// A real, adjacent corpus statement whose own word is "relevance", not "relevant to the task" —
+    /// proves the pattern is narrow enough not to fire on every appearance of a relevance-flavoured
+    /// word.
+    /// </summary>
+    [Fact]
+    public void A_statement_naming_relevance_without_gating_on_the_task_stays_checkable_not_yet_built()
+    {
+        var statement = Statement(
+            "Only invoke Superpowers / Product Superpowers skills when explicitly named "
+            + "(slash command or direct request). Do not speculatively invoke skills based on "
+            + "topical relevance.");
+
+        var classify = Classify(statement);
+
+        Assert.Equal(RuleStatementStatus.CheckableNotYetBuilt, classify(statement));
+    }
 }

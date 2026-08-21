@@ -62,6 +62,13 @@ the `Turn`/`ToolCall`/`Agent` rows that same call also returns, which stay unuse
 read does not reopen the "duplicate reconstruction path" question the paragraph above already
 settled against.
 
+Mockup parity item #4 widens `GetSession` a third way: alongside the two reads above, it now also
+reads every `Session`/`RawEvent`/`ToolCall`/`Turn`/`Permission`/`Agent` row belonging to this
+session's own repository (mirroring `GetDigest`'s own corpus-wide-then-filter shape, just scoped to
+one repository already known rather than a selected one) and calls the same ten check orchestrators
+`GetDigest` calls, through the new shared `BuildFindingsForScope` helper — see `SessionEnvelope.cs`'s
+own remarks below for how the combined result is filtered down to one session.
+
 `ApiHost.GetStepEvidence` (S-52, issue #16) reads `Data.RawEvent` directly instead — the inspector's
 Raw and Thinking tabs are provenance over the *event*, not the derived row, and neither `Turn` nor
 `ToolCall` carries a foreign key back to the `RawEvent` that produced it
@@ -786,10 +793,19 @@ second real endpoint: FR-21's masthead and tape, read through `Data.Execution` a
 `Findings.SessionRecording.Build`. `web/src/routes/SessionPage.tsx` is the client. Returns 404 for a
 session id the store carries no `Session` row for; a session with rows but no steps still serves its
 masthead with an empty `Steps` list. It now also serves `SessionEnvelope.Findings` — FR-21 part 2 of
-3's chip row (S-52, issue #16), assembled from `Findings.SessionFindings.For` — though
-`ApiHost.GetSession` still passes an empty `Finding` list to it today, the same "not yet wired to a
-live corpus" gap `/api/digest` documents above: a chip row is real, but a real browser sees an empty
-one until a later story runs every check orchestrator against the live store.
+3's chip row (S-52, issue #16), assembled from `Findings.SessionFindings.For`.
+
+Mockup parity item #4 closed the "empty chip row" gap named just above: `GetSession` now reads every
+session sharing this session's own `Session.Repository` and runs the identical ten check
+orchestrators `GetDigest` runs for a whole repository — factored into a new private helper,
+`ApiHost.BuildFindingsForScope`, so the two callers share one orchestration sequence rather than
+each re-typing the same ten calls — then filters the combined result down to this one session via
+`Findings.SessionFindings.For`. A session with a `null` `Repository` scopes to every other session
+that also carries none, the same equality-based grouping `BuildRepositoryScope`'s own fallback uses
+when no repository is recorded anywhere in the store. `SessionRouteTests` proves both the positive
+case (a real hook-failure violation in this session's own repository serves a non-empty chip) and the
+negative one (a violation in a different repository never leaks into this session's chip row), the
+same real-filter guarantee `DigestRouteTests` already proves for `GetDigest`.
 
 FR-21 part 3 of 3 (S-53, issue #17) added `Status` (`SessionRecordingStatusEnvelope`) to the same
 envelope: `GetSession` now also runs the session's own RAW events through `Ingestion.

@@ -12,7 +12,7 @@ function counters(overrides: Partial<MastheadEnvelope> = {}): MastheadEnvelope {
     eventCount: 56_138,
     toolCallCount: 12_345,
     subagentCount: 470,
-    ruleCoverage: 'NotYetAnalyzed',
+    ruleCoverage: { state: 'notYetAnalyzed' },
     repositoryScope: {
       selectedRepository: 'aeco/AecoPostMortem',
       availableRepositories: ['aeco/AecoPostMortem'],
@@ -60,6 +60,44 @@ describe('Masthead', () => {
     expect(screen.getByRole('group', { name: /corpus scope/i })).not.toHaveTextContent(
       /0 violations|no violations/i,
     )
+  })
+
+  // Mockup parity item #15: once a real four-way breakdown is served, the cell renders a real
+  // proportional bar with a legend naming every count — never the "not yet analysed" text.
+  it('renders a proportional four-color bar and legend once rule coverage is analyzed', () => {
+    renderMasthead(
+      counters({
+        ruleCoverage: {
+          state: 'analyzed',
+          counts: { watched: 4, checkableNotYetBuilt: 9, notCheckable: 9, notARule: 21, total: 43 },
+        },
+      }),
+    )
+
+    const coverage = figure('Rule coverage') as HTMLElement
+    expect(coverage).not.toHaveTextContent(/rules not yet analysed/i)
+    expect(coverage).toHaveTextContent(/4.*watched/i)
+    expect(coverage).toHaveTextContent(/9.*checkable, not built/i)
+    expect(coverage).toHaveTextContent(/9.*normative but unobservable/i)
+    expect(coverage).toHaveTextContent(/21.*not a rule/i)
+
+    const bar = screen.getByRole('img', { name: /43 extracted rule statements/i })
+    expect(bar).toBeInTheDocument()
+  })
+
+  // A rule-set version can genuinely carry zero extracted statements — an honest empty sentence,
+  // never an invisible zero-width bar.
+  it('states an honest empty sentence for a version with zero extracted statements', () => {
+    renderMasthead(
+      counters({
+        ruleCoverage: {
+          state: 'analyzed',
+          counts: { watched: 0, checkableNotYetBuilt: 0, notCheckable: 0, notARule: 0, total: 0 },
+        },
+      }),
+    )
+
+    expect(figure('Rule coverage')).toHaveTextContent(/no rule statements were extracted/i)
   })
 
   // Scenario 4: a session still being ingested is a designed state — the counts are real, but they

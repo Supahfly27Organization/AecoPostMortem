@@ -447,6 +447,83 @@ public sealed class DigestRouteTests
         }
     }
 
+    /// <summary>Mockup parity item #15: the masthead's rule-coverage figure is real, and agrees with
+    /// what <c>/api/rules-inventory</c> independently serves for the same (default) rule-set
+    /// version — the "one served figure, never recounted differently on a second surface" guarantee,
+    /// checked end to end rather than only at the unit level.</summary>
+    [Fact]
+    public async Task The_masthead_serves_a_real_analyzed_coverage_figure_matching_the_rules_inventory()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1"));
+            context.RawEvents.Add(SystemMessage("s1", BannedToolPrompt));
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "s1",
+                ToolCallId = "tc1",
+                ToolName = "grep",
+                StartedAt = "2026-08-16T10:00:01Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var digestEnvelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                ApiHost.DigestRoute, ClientOptions, Cancellation);
+            var inventoryEnvelope = await client.GetFromJsonAsync<RulesInventoryEnvelope>(
+                ApiHost.RulesInventoryRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(digestEnvelope);
+            Assert.NotNull(inventoryEnvelope);
+
+            var coverage = Assert.IsType<RuleCoverageStatusEnvelope.AnalyzedCoverage>(
+                digestEnvelope!.Masthead.RuleCoverage);
+            Assert.Equal(1, coverage.Counts.Watched);
+            Assert.Equal(1, coverage.Counts.Total);
+
+            Assert.Equal(inventoryEnvelope!.StatusCounts.Watched, coverage.Counts.Watched);
+            Assert.Equal(inventoryEnvelope.StatusCounts.CheckableNotYetBuilt, coverage.Counts.CheckableNotYetBuilt);
+            Assert.Equal(inventoryEnvelope.StatusCounts.NotCheckable, coverage.Counts.NotCheckable);
+            Assert.Equal(inventoryEnvelope.StatusCounts.NotARule, coverage.Counts.NotARule);
+            Assert.Equal(inventoryEnvelope.StatusCounts.Total, coverage.Counts.Total);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The Release-1 "not yet" state still holds for a store with no rule-set version to
+    /// select at all — an empty store never fabricates a zero-of-everything analyzed figure.</summary>
+    [Fact]
+    public async Task An_empty_store_serves_not_yet_analyzed_rule_coverage()
+    {
+        using var temporary = new TemporaryStore();
+        temporary.Store.Open().Dispose();
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal(RuleCoverageStatusEnvelope.NotYetAnalyzed, envelope!.Masthead.RuleCoverage);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     const string UseAAfterBPrompt = """
         <custom_instruction>
         CLAUDE.md

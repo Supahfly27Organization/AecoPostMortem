@@ -229,10 +229,60 @@ public static class ApiHost
             scopedSessions, scopedRawEvents, scopedToolCalls, scopedTurns, scopedPermissions, scopedAgents,
             scopedSessionIds);
 
+        var ruleCoverage = BuildRuleCoverageStatus(sessions, rawEvents, toolCalls, agents, repositoryScope);
+
         var digest = ProcessDigest.Build(
-            BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings, repositoryScope);
+            BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings,
+            repositoryScope, ruleCoverage);
 
         return DigestEnvelope.From(digest, FindingEnvelope.From);
+    }
+
+    /// <summary>
+    /// Mockup parity item #15: the Digest masthead's own rule-coverage figure. Two candidate scopes
+    /// were considered — (a) the selected repository's own most recent rule-set version
+    /// (<see cref="RulesInventory.MostRecentVersion"/>, the exact default <see cref="GetRulesInventory"/>
+    /// already opens on), or (b) something scoped differently. (a) was chosen: the Digest is already
+    /// repository-scoped for every ranked finding (<see cref="Findings.RepositoryScope"/>'s own
+    /// remarks), and mirroring the Rules Inventory's own default keeps this a corpus-wide,
+    /// deterministic figure with no new selection UI needed — the same "one served figure, never
+    /// recounted differently on a second surface" discipline <c>RulesInventoryEnvelope.cs</c>'s own
+    /// remarks state, now extended across two endpoints instead of one. Reuses
+    /// <see cref="BuildRulesInventoryInputs"/>, the identical <see cref="SessionRuleSetLookup"/>/
+    /// <see cref="ToolInvocationShapeLookup"/>/<see cref="RuleShapeCatalogue.MatchAll"/>/
+    /// <see cref="RulesInventoryClassifier"/> pipeline <see cref="GetRulesInventory"/> runs, corpus-wide
+    /// — not the repository-scoped corpus <see cref="BuildFindingsForScope"/>'s own piece-3 checks use
+    /// — so this figure and <c>/api/rules-inventory</c>'s own served counts, for the same version, can
+    /// never disagree. <see cref="RuleCoverageStatus.NotYetAnalyzed"/> when there is no version to
+    /// select at all — an empty store, or no session in the selected repository ever carrying a rule
+    /// set — the same "there is no version to select" case <see cref="GetRulesInventory"/> answers 404
+    /// for.
+    /// </summary>
+    static RuleCoverageStatus BuildRuleCoverageStatus(
+        IReadOnlyList<Session> sessions,
+        IReadOnlyList<RawEvent> rawEvents,
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents,
+        RepositoryScope repositoryScope)
+    {
+        var inputs = BuildRulesInventoryInputs(sessions, rawEvents, toolCalls, agents);
+        var selectedVersion = RulesInventory.MostRecentVersion(
+            inputs.RuleSets, repositoryScope.SelectedRepository);
+
+        if (selectedVersion is null)
+        {
+            return RuleCoverageStatus.NotYetAnalyzed;
+        }
+
+        try
+        {
+            var inventory = RulesInventory.Build(inputs.RuleSets, selectedVersion, inputs.Classify);
+            return RuleCoverageStatus.Analyzed(inventory.StatusCounts);
+        }
+        catch (UnknownRuleSetVersionException)
+        {
+            return RuleCoverageStatus.NotYetAnalyzed;
+        }
     }
 
     /// <summary>
@@ -462,15 +512,11 @@ public static class ApiHost
         var toolCalls = context.ToolCalls.ToList();
         var agents = context.Agents.ToList();
 
-        var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
-        // Shared once, the same reuse GetDigest already established for these two lookups, so this
-        // method's own violation-count checks (below) parse no tool.execution_start payload twice.
-        var argumentsByCall = RawToolArguments.ByCall(rawEvents);
-        var invocations = ToolInvocationShapeLookup.BuildAll(toolCalls, agents, argumentsByCall);
+        var inputs = BuildRulesInventoryInputs(sessions, rawEvents, toolCalls, agents);
         var repositoryScope = BuildRepositoryScope(sessions);
 
         var selectedVersion = versionHash is null
-            ? RulesInventory.MostRecentVersion(ruleSets, repositoryScope.SelectedRepository)
+            ? RulesInventory.MostRecentVersion(inputs.RuleSets, repositoryScope.SelectedRepository)
             : new RuleSetVersionId { Repository = repositoryScope.SelectedRepository, Hash = versionHash };
 
         if (selectedVersion is null)
@@ -478,6 +524,54 @@ public static class ApiHost
             return null;
         }
 
+        // Mockup parity item #7: a Watched row's own violation count. Run the same four piece-3
+        // checks GetDigest runs, but over this method's own corpus-wide matches/invocations/toolCalls
+        // — the exact inputs RulesInventoryClassifier just resolved Watched status against, never a
+        // second, differently (repository-)scoped read (ApiHost/CLAUDE.md's own remarks on why
+        // GetRulesInventory stays corpus-wide where GetDigest does not).
+        var paramCarryingCalls = ParamCarryingCallLookup.BuildAll(toolCalls, agents, inputs.ArgumentsByCall);
+        var violationCounts = BuildViolationCounts(
+            inputs.Matching.Matches,
+            BannedToolFinding.Run(inputs.Matching.Matches, inputs.Invocations, toolCalls),
+            NeverReadPathFinding.Run(inputs.Matching.Matches, toolCalls),
+            UseAAfterBFinding.Run(inputs.Matching.Matches, inputs.Invocations, toolCalls),
+            AlwaysPassParamFinding.Run(inputs.Matching.Matches, paramCarryingCalls));
+
+        try
+        {
+            return RulesInventoryEnvelope.From(
+                RulesInventory.Build(inputs.RuleSets, selectedVersion, inputs.Classify), violationCounts);
+        }
+        catch (UnknownRuleSetVersionException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Mockup parity item #15's shared pipeline: the identical <see cref="SessionRuleSetLookup"/>/
+    /// <see cref="ToolInvocationShapeLookup"/>/<see cref="RuleShapeCatalogue.MatchAll"/>/
+    /// <see cref="RulesInventoryClassifier"/> sequence both <see cref="GetRulesInventory"/> and
+    /// <see cref="GetDigest"/>'s own rule-coverage figure (<see cref="BuildRuleCoverageStatus"/>) need,
+    /// factored out of what used to be <see cref="GetRulesInventory"/>'s own inline sequence — the same
+    /// "one served figure, never recounted differently on a second surface" discipline
+    /// <c>RulesInventoryEnvelope.cs</c>'s own remarks state for <c>RulesInventoryStatusCountsEnvelope</c>,
+    /// now extended so the Digest masthead's bar and the Rules Inventory's own status counts, for the
+    /// same rule-set version, can never be computed two different ways. Every parameter is already read
+    /// corpus-wide by the caller — this method issues no query of its own.
+    /// </summary>
+    static RulesInventoryInputs BuildRulesInventoryInputs(
+        IReadOnlyList<Session> sessions,
+        IReadOnlyList<RawEvent> rawEvents,
+        IReadOnlyList<ToolCall> toolCalls,
+        IReadOnlyList<Agent> agents)
+    {
+        var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
+        // Shared once, the same reuse GetDigest already established for ToolInvocationShapeLookup and
+        // ParamCarryingCallLookup, so no caller of this method parses the same tool.execution_start
+        // payloads twice.
+        var argumentsByCall = RawToolArguments.ByCall(rawEvents);
+        var invocations = ToolInvocationShapeLookup.BuildAll(toolCalls, agents, argumentsByCall);
         var statements = ruleSets
             .SelectMany(set => set.Blocks)
             .SelectMany(block => block.Statements)
@@ -486,29 +580,18 @@ public static class ApiHost
         var matching = RuleShapeCatalogue.MatchAll(statements);
         var classify = RulesInventoryClassifier.BuildClassifier(matching, invocations);
 
-        // Mockup parity item #7: a Watched row's own violation count. Run the same four piece-3
-        // checks GetDigest runs, but over this method's own corpus-wide matches/invocations/toolCalls
-        // — the exact inputs RulesInventoryClassifier just resolved Watched status against, never a
-        // second, differently (repository-)scoped read (ApiHost/CLAUDE.md's own remarks on why
-        // GetRulesInventory stays corpus-wide where GetDigest does not).
-        var paramCarryingCalls = ParamCarryingCallLookup.BuildAll(toolCalls, agents, argumentsByCall);
-        var violationCounts = BuildViolationCounts(
-            matching.Matches,
-            BannedToolFinding.Run(matching.Matches, invocations, toolCalls),
-            NeverReadPathFinding.Run(matching.Matches, toolCalls),
-            UseAAfterBFinding.Run(matching.Matches, invocations, toolCalls),
-            AlwaysPassParamFinding.Run(matching.Matches, paramCarryingCalls));
-
-        try
-        {
-            return RulesInventoryEnvelope.From(
-                RulesInventory.Build(ruleSets, selectedVersion, classify), violationCounts);
-        }
-        catch (UnknownRuleSetVersionException)
-        {
-            return null;
-        }
+        return new RulesInventoryInputs(ruleSets, argumentsByCall, matching, invocations, classify);
     }
+
+    /// <summary>The plain tuple <see cref="BuildRulesInventoryInputs"/> returns — everything both
+    /// <see cref="GetRulesInventory"/> and <see cref="BuildRuleCoverageStatus"/> need from one shared
+    /// RAW-parsing and classification pass.</summary>
+    sealed record RulesInventoryInputs(
+        IReadOnlyList<SessionRuleSet> RuleSets,
+        Dictionary<(string SessionId, string ToolCallId), ToolArguments> ArgumentsByCall,
+        RuleShapeMatching Matching,
+        IReadOnlyList<ToolInvocationShape> Invocations,
+        Func<RuleStatement, RuleStatementStatus> Classify);
 
     /// <summary>
     /// Mockup parity item #7's join: one entry per matched statement whose shape has a real

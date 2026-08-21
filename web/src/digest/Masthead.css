@@ -44,3 +44,15 @@
   font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* Mockup parity item #15: the coverage cell holds a bar plus a wrapping legend rather than a single
+   number, so it needs more room to breathe than the other five figures' fixed-width columns. */
+.masthead__figure--coverage {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.masthead__figure--coverage .masthead__value {
+  font-size: 0.9rem;
+  font-weight: 400;
+}

@@ -35,6 +35,57 @@ public sealed record RepositoryScopeEnvelope
 }
 
 /// <summary>
+/// Mockup parity item #15's served rule-coverage figure — the wire shape for
+/// <see cref="Findings.RuleCoverageStatus"/>. A closed two-shape union behind a private constructor,
+/// the same <c>[JsonPolymorphic]</c>/<c>[JsonDerivedType]</c> mechanism <see cref="SuggestionEnvelope"/>
+/// uses: only <see cref="AnalyzedCoverage"/> carries <see cref="AnalyzedCoverage.Counts"/>, so "not yet
+/// analysed" and "analysed with zero of everything" can never collide into the same shape.
+/// <see cref="AnalyzedCoverage.Counts"/> reuses <see cref="RulesInventoryStatusCountsEnvelope"/>
+/// verbatim — the identical wire shape <c>/api/rules-inventory</c> already serves for the same
+/// rule-set version — rather than a second, parallel four-int shape: one served figure, never
+/// recounted differently on a second surface (<c>RulesInventoryEnvelope.cs</c>'s own remarks on why
+/// <c>RulesInventoryStatusCountsEnvelope</c> exists in the first place).
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "state")]
+[JsonDerivedType(typeof(NotYetAnalyzedCoverage), "notYetAnalyzed")]
+[JsonDerivedType(typeof(AnalyzedCoverage), "analyzed")]
+public abstract record RuleCoverageStatusEnvelope
+{
+    private RuleCoverageStatusEnvelope()
+    {
+    }
+
+    public static RuleCoverageStatusEnvelope NotYetAnalyzed { get; } = new NotYetAnalyzedCoverage();
+
+    /// <summary>Maps the domain's own closed two-shape union onto this contract's two. No default arm:
+    /// a third domain shape would fail to compile here rather than serialise as something plausible —
+    /// the same discipline <see cref="RuleStatementStatusEnvelope.Of"/> follows for its own four
+    /// shapes.</summary>
+    public static RuleCoverageStatusEnvelope Of(RuleCoverageStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+
+        return status switch
+        {
+            RuleCoverageStatus.NotYetAnalyzedStatus => NotYetAnalyzed,
+            RuleCoverageStatus.AnalyzedStatus analyzed => new AnalyzedCoverage
+            {
+                Counts = RulesInventoryStatusCountsEnvelope.From(analyzed.Counts),
+            },
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(status), status, "Unknown rule coverage status."),
+        };
+    }
+
+    public sealed record NotYetAnalyzedCoverage : RuleCoverageStatusEnvelope;
+
+    public sealed record AnalyzedCoverage : RuleCoverageStatusEnvelope
+    {
+        public required RulesInventoryStatusCountsEnvelope Counts { get; init; }
+    }
+}
+
+/// <summary>
 /// FR-41's served masthead — the wire shape for <see cref="Findings.Masthead"/>. Enum members
 /// serialise as their name (<see cref="JsonStringEnumConverter"/>) so a client reads
 /// <c>"NotYetAnalyzed"</c> rather than an opaque ordinal for a state whose entire point is to be
@@ -59,8 +110,7 @@ public sealed record MastheadEnvelope
     /// verbatim.</summary>
     public required int SubagentCount { get; init; }
 
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required RuleCoverageStatus RuleCoverage { get; init; }
+    public required RuleCoverageStatusEnvelope RuleCoverage { get; init; }
 
     public required RepositoryScopeEnvelope RepositoryScope { get; init; }
 
@@ -77,7 +127,7 @@ public sealed record MastheadEnvelope
             EventCount = masthead.Counters.EventCount,
             ToolCallCount = masthead.Counters.ToolCallCount,
             SubagentCount = masthead.Counters.SubagentCount,
-            RuleCoverage = masthead.RuleCoverage,
+            RuleCoverage = RuleCoverageStatusEnvelope.Of(masthead.RuleCoverage),
             RepositoryScope = RepositoryScopeEnvelope.From(masthead.RepositoryScope),
         };
     }

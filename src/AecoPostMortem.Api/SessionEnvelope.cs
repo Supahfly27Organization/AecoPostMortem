@@ -151,10 +151,13 @@ public sealed record SessionTapeStepEnvelope
     /// eagerly, for every <c>Prompt</c> step, keyed by <see cref="StepId"/>. <see cref="Label"/> stays
     /// the turn's own <c>Outcome</c> unchanged; this is a second, additive fact, <see langword="null"/>
     /// for every other step kind and for a prompt step whose own text could not be resolved (no
-    /// matching <c>user.message</c>) — never a placeholder string. Known limitation, shared with
-    /// <see cref="Thinking"/>: <see cref="StepId"/> for a <c>Prompt</c> step is <c>Turn.TurnId</c>, a
-    /// display counter that can repeat within one session (measured on 20 of 25 real sessions) — see
-    /// <see cref="PromptTextLookup"/>'s own remarks.</summary>
+    /// matching <c>user.message</c>) — never a placeholder string, and never a neighbouring turn's
+    /// text: <see cref="StepId"/> for a <c>Prompt</c> step is <c>Turn.EventId</c>, its
+    /// <c>turn_start</c> event's own envelope id, so the join is collision-free within a session.
+    /// A measured 497 of the reference corpus's own <c>turn_start</c> events carry an
+    /// <c>interactionId</c> no <c>user.message</c> covers — Copilot opens several turns under one
+    /// interaction — and those honestly serve <see langword="null"/> here
+    /// (<see cref="PromptTextLookup"/>'s own remarks).</summary>
     public string? PromptText { get; init; }
 
     public required DateTimeOffset Timestamp { get; init; }

@@ -50,11 +50,21 @@ public static class AbortedTurnFinding
     }
 
     /// <summary>
-    /// One finding per aborted turn, keyed by <c>(SessionId, TurnId)</c> — <see cref="Turn"/>'s own
-    /// natural key (<c>PostMortemContext.MapTurn</c>), not <see cref="AbortedTurnOccurrence.TurnId"/>
-    /// alone, because a bare `TurnId` is not guaranteed unique across sessions and colliding two
-    /// unrelated aborts into one key would violate what <c>Recurrence.cs</c> documents as
-    /// impossible: "no constructor that could produce a second `Finding` for the same key." Unlike
+    /// One finding per aborted turn, keyed by <c>(SessionId, TurnId)</c> rather than by
+    /// <see cref="AbortedTurnOccurrence.TurnId"/> alone, because a bare <c>TurnId</c> is not unique
+    /// across sessions and colliding two unrelated aborts into one key would violate what
+    /// <c>Recurrence.cs</c> documents as impossible: "no constructor that could produce a second
+    /// `Finding` for the same key."
+    /// <para><b>Known, still-open weakness:</b> this composite is <em>not</em> <see cref="Turn"/>'s
+    /// own key. <c>PostMortemContext.MapTurn</c> keys <c>Turn</c> on <c>(SessionId, EventId)</c>,
+    /// because <c>data.turnId</c> is a cycling display counter that also repeats <em>within</em> one
+    /// session (<c>AecoPostMortem.Data/CLAUDE.md</c>) — so two aborts in the same session that share
+    /// a counter would still collide here. Measured against the live 35-session reference corpus this
+    /// does not currently happen (6 aborted-turn findings, 6 distinct recurrence keys), which is why
+    /// it is recorded rather than fixed in passing: moving this key to <c>Turn.EventId</c> means
+    /// widening <c>Rules.AbortedTurnCheck</c>'s own <c>TurnRecord</c>/<c>AbortedTurnOccurrence</c>
+    /// shapes and changing an established FR-57 finding identity, which is its own scoped change.</para>
+    /// Unlike
     /// a hook name or a tool identity, an abort also has no recurring *cause* to group by: two
     /// aborts sharing the same reason text in different sessions are still two independent
     /// abandonments, so grouping on the reason would let a measured 9-across-8 volume read as

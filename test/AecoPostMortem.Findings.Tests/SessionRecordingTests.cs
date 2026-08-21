@@ -339,15 +339,52 @@ public sealed class SessionRecordingTests
         OutputTokens = outputTokens,
     };
 
-    static Turn BuildTurn(string sessionId, string turnId, string startedAt) => new()
+    static Turn BuildTurn(string sessionId, string turnId, string startedAt, string? eventId = null) => new()
     {
         SessionId = sessionId,
-        EventId = $"e-{turnId}",
+        EventId = eventId ?? $"e-{turnId}",
         TurnId = turnId,
         StartedAt = startedAt,
         Outcome = TurnOutcome.Completed,
         OwnerKind = OwnerKind.Main,
     };
+
+    /// <summary>A <c>Prompt</c> step's own identity is <c>Turn.EventId</c> — the <c>turn_start</c>
+    /// event's own envelope id, the identity <c>Data.Execution.Turn</c> itself is keyed by — never
+    /// <c>Turn.TurnId</c>, the cycling display counter (<c>AecoPostMortem.Data/CLAUDE.md</c>'s own
+    /// "`Turn` is keyed by its own event id" entry).</summary>
+    [Fact]
+    public void A_prompt_steps_step_id_is_the_turns_own_event_id_not_its_display_turn_id()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: "2026-08-16T10:30:00Z");
+        var turns = new[] { BuildTurn("s1", "3", "2026-08-16T10:00:01Z", eventId: "evt-abc") };
+
+        var recording = SessionRecording.Build(session, turns, [], [], [], []);
+
+        var step = Assert.Single(recording.Tape.Steps);
+        Assert.Equal(SessionTapeStepKind.Prompt, step.Kind);
+        Assert.Equal("evt-abc", step.StepId);
+    }
+
+    /// <summary>The real defect this identity closes, measured against the live 35-session reference
+    /// corpus: 20 of 25 sessions in the dominant repository repeat a <c>TurnId</c>, and the worst
+    /// case collapsed 310 real prompt steps onto 73 distinct step ids. Two turns sharing one display
+    /// counter must stay two distinct, separately addressable tape steps.</summary>
+    [Fact]
+    public void Two_turns_sharing_one_display_turn_id_keep_two_distinct_step_ids()
+    {
+        var session = SessionWith(startedAt: "2026-08-16T10:00:00Z", endedAt: "2026-08-16T10:30:00Z");
+        var turns = new[]
+        {
+            BuildTurn("s1", "1", "2026-08-16T10:00:01Z", eventId: "evt-first"),
+            BuildTurn("s1", "1", "2026-08-16T10:00:02Z", eventId: "evt-second"),
+        };
+
+        var recording = SessionRecording.Build(session, turns, [], [], [], []);
+
+        var stepIds = recording.Tape.Steps.Select(step => step.StepId).ToArray();
+        Assert.Equal(["evt-first", "evt-second"], stepIds);
+    }
 
     static ToolCall BuildToolCall(
         string sessionId,

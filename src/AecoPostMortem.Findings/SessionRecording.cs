@@ -6,9 +6,11 @@ namespace AecoPostMortem.Findings;
 /// <summary>
 /// FR-21, part 1 of 3 (S-08, issue #15): one step on the Flight Recorder's tape. The five kinds
 /// name every step shape the story's own Gherkin names — "hooks, prompts, skills, tool calls and
-/// MCP calls" — with <see cref="Prompt"/> standing for one assistant turn (Copilot's event log
-/// carries no separate "prompt" entity; a turn is the closest bounded shape a prompt/response cycle
-/// has) and <see cref="McpCall"/> a <see cref="ToolCall"/> that names an MCP server, kept distinct
+/// MCP calls" — with <see cref="Prompt"/> standing for one assistant turn (Copilot writes no
+/// <c>Turn</c>-shaped "prompt" entity of its own; a turn is the bounded shape a prompt/response
+/// cycle has, and the operator's own prompt text is a separate <c>user.message</c> event this layer
+/// has no RAW access to — resolved at the <c>Api</c> layer by <c>PromptTextLookup</c>) and
+/// <see cref="McpCall"/> a <see cref="ToolCall"/> that names an MCP server, kept distinct
 /// from a plain <see cref="ToolCall"/> rather than folded into it.
 /// </summary>
 public enum SessionTapeStepKind
@@ -21,12 +23,21 @@ public enum SessionTapeStepKind
 }
 
 /// <summary>
-/// One tape entry. <see cref="StepId"/> is the underlying entity's own natural key within its
-/// session (a <see cref="Turn.TurnId"/>, <see cref="ToolCall.ToolCallId"/> or event-scoped
-/// <c>EventId</c>) — stable across a re-render and the natural target a later story's finding chip
-/// (S-52/S-53) would attach to. <see cref="Label"/> has no message text on it: <c>Turn</c> carries
-/// none (<c>AecoPostMortem.Data/CLAUDE.md</c> — "messages are read from RAW"), so a prompt step is
-/// labelled by its outcome instead of a transcript excerpt this layer cannot see.
+/// One tape entry. <see cref="StepId"/> is the underlying entity's own key within its session — a
+/// <see cref="Turn.EventId"/>, a <see cref="ToolCall.ToolCallId"/>, or an event-scoped
+/// <c>EventId</c> — never a display field. For a <see cref="SessionTapeStepKind.Prompt"/> step that
+/// distinction is load-bearing rather than pedantic: <see cref="Turn.TurnId"/> is Copilot's own
+/// cycling display counter and repeats within a single session (measured on 20 of 25 real sessions
+/// in the dominant repository of the live reference corpus; the worst case collapsed 310 real prompt
+/// steps onto 73 distinct ids), which is exactly why <c>Data.Execution.Turn</c> is itself keyed by
+/// <see cref="Turn.EventId"/> (<c>AecoPostMortem.Data/CLAUDE.md</c>). Every consumer that resolves a
+/// step back to its own RAW event — <c>Api.StepEvidenceLookup</c>, <c>Api.PromptTextLookup</c> — and
+/// every client that addresses one (<c>GET /api/sessions/{id}/steps/{stepId}</c>, the tape's own DOM
+/// ids) depends on this being collision-free within a session.
+/// <see cref="Label"/> has no message text on it: <c>Turn</c> carries none
+/// (<c>AecoPostMortem.Data/CLAUDE.md</c> — "messages are read from RAW"), so a prompt step is
+/// labelled by its outcome; the operator's real prompt text is resolved one layer out, where RAW is
+/// reachable (<c>Api.PromptTextLookup</c>).
 /// </summary>
 public sealed record SessionTapeStep
 {
@@ -227,8 +238,11 @@ public sealed record SessionRecording
 
         foreach (var turn in turns)
         {
+            // `Turn.EventId`, never `Turn.TurnId`: the latter is Copilot's own cycling display
+            // counter, not an identity (`AecoPostMortem.Data/CLAUDE.md`, "`Turn` is keyed by its own
+            // event id"). See this type's own remarks on `StepId` for the measured collision.
             steps.Add(BuildStep(
-                SessionTapeStepKind.Prompt, turn.TurnId, turn.Outcome.ToString(), turn.StartedAt,
+                SessionTapeStepKind.Prompt, turn.EventId, turn.Outcome.ToString(), turn.StartedAt,
                 start, turn.OwnerKind, turn.AgentId));
         }
 

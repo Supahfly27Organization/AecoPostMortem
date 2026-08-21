@@ -776,6 +776,79 @@ public sealed class SessionRouteTests
         }
     }
 
+    /// <summary>The wire route carries a <c>Prompt</c> step's own <c>StepId</c> — a
+    /// <c>Turn.EventId</c>, an opaque envelope id rather than the small display counter it used to be
+    /// — through to the right turn, with two turns in this session sharing one <c>data.turnId</c>.
+    /// Every other step-evidence route test uses a <c>ToolCall</c> step, so nothing exercised the
+    /// prompt path end to end through <c>Uri.EscapeDataString</c> and back.</summary>
+    [Fact]
+    public async Task A_prompt_steps_route_resolves_its_own_turn_when_two_turns_share_a_display_counter()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(new Session
+            {
+                SessionId = "s1",
+                StartedAt = "2026-08-16T10:00:00Z",
+                CopilotVersion = "0.0.339",
+                EventSchemaVersion = "1",
+                SourceFile = @"~/.copilot/session-state/s1/events.jsonl",
+                Cwd = @"C:\repo",
+            });
+            context.RawEvents.Add(new RawEvent(
+                "s1", 1, "assistant.turn_start", "2026-08-16T10:00:01Z", "0.0.339",
+                "events.jsonl", 0, "hash-1",
+                """{"id":"5f0e6b1c-1f34-4d0b-9d8f-1a2b3c4d5e6f","data":{"turnId":"1"}}"""));
+            context.RawEvents.Add(new RawEvent(
+                "s1", 2, "assistant.message", "2026-08-16T10:00:02Z", "0.0.339",
+                "events.jsonl", 100, "hash-2",
+                """{"id":"e2","data":{"reasoningText":"The first turn's reasoning."}}"""));
+            context.RawEvents.Add(new RawEvent(
+                "s1", 3, "assistant.turn_start", "2026-08-16T10:00:03Z", "0.0.339",
+                "events.jsonl", 200, "hash-3",
+                """{"id":"9a7d2e58-0c11-4a6e-8f22-7b3c9d1e4f50","data":{"turnId":"1"}}"""));
+            context.RawEvents.Add(new RawEvent(
+                "s1", 4, "assistant.message", "2026-08-16T10:00:04Z", "0.0.339",
+                "events.jsonl", 300, "hash-4",
+                """{"id":"e4","data":{"reasoningText":"The second turn's reasoning."}}"""));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+
+            var second = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "9a7d2e58-0c11-4a6e-8f22-7b3c9d1e4f50", SessionTapeStepKind.Prompt),
+                ClientOptions,
+                Cancellation);
+
+            Assert.NotNull(second);
+            var secondRaw = Assert.IsType<RawStepEventEnvelope.Present>(second!.Raw);
+            Assert.Equal("assistant.turn_start", secondRaw.EventType);
+            var secondThinking = Assert.IsType<ThinkingEnvelope.Present>(second.Thinking);
+            Assert.Equal("The second turn's reasoning.", secondThinking.Text);
+
+            // The first turn still resolves its own window, so this is a real per-turn lookup, not
+            // one that happens to have landed on the last turn.
+            var first = await client.GetFromJsonAsync<StepEvidenceEnvelope>(
+                ApiHost.StepEvidenceRoute("s1", "5f0e6b1c-1f34-4d0b-9d8f-1a2b3c4d5e6f", SessionTapeStepKind.Prompt),
+                ClientOptions,
+                Cancellation);
+
+            Assert.NotNull(first);
+            var firstThinking = Assert.IsType<ThinkingEnvelope.Present>(first!.Thinking);
+            Assert.Equal("The first turn's reasoning.", firstThinking.Text);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     [Fact]
     public async Task A_step_with_no_matching_raw_event_reports_skipped_not_a_404()
     {

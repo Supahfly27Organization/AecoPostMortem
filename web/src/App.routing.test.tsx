@@ -7,8 +7,8 @@ import { DigestRoute } from './api/digest'
 import { RulesInventoryRoute, type RulesInventoryEnvelope } from './api/rulesInventory'
 
 /** S-48, Scenario 1: "The three surfaces are routable." Every route resolves under a shared
- * shell. All three now have real content — the digest (S-36/S-54), the session view (S-08) and the
- * Rules Inventory (S-22). */
+ * shell. The Digest (S-36/S-54) and Rules Inventory (S-22) are reachable from the nav; the session
+ * view (S-08) is reachable only from the digest, via a finding's session id or chip. */
 describe('App routing', () => {
   const ready: AppStateReport = { kind: 'ready', message: 'Ready.', fixCommand: null }
 
@@ -87,15 +87,20 @@ describe('App routing', () => {
     expect(screen.getByRole('heading', { name: 'Process Digest' })).toBeInTheDocument()
   })
 
-  it('reaches the session view with no session selected', () => {
+  it('states a dead end, with the navigation still present, for an unrouted URL such as the retired bare /sessions', () => {
     render(
       <MemoryRouter initialEntries={['/sessions']}>
         <App />
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('heading', { name: 'Session Flight Recorder' })).toBeInTheDocument()
-    expect(screen.getByText(/no session selected/i)).toBeInTheDocument()
+    // The bare `/sessions` route was removed with the "Session view" nav link. An unmatched URL
+    // must still say so — React Router matches no route at all for one, so without the catch-all
+    // even `AppShell`'s own navigation is absent and the operator gets a blank page with no way back.
+    expect(screen.getByRole('alert')).toHaveTextContent('There is no page at this address.')
+    expect(screen.getByRole('link', { name: 'Go to the Process Digest' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Digest' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Rules Inventory' })).toBeInTheDocument()
   })
 
   it('reaches one session\'s Flight Recorder at /sessions/:sessionId (S-08)', async () => {
@@ -154,7 +159,7 @@ describe('App routing', () => {
     expect(await screen.findByRole('region', { name: /rule-set version/i })).toHaveTextContent('hash-1')
   })
 
-  it('exposes navigation to all three surfaces from every route', () => {
+  it('exposes navigation to the Digest and Rules Inventory from every route', () => {
     render(
       <MemoryRouter initialEntries={['/rules']}>
         <App />
@@ -163,7 +168,7 @@ describe('App routing', () => {
 
     const nav = screen.getByRole('navigation', { name: 'Surfaces' })
     expect(nav).toHaveTextContent('Digest')
-    expect(nav).toHaveTextContent('Session view')
     expect(nav).toHaveTextContent('Rules Inventory')
+    expect(nav).not.toHaveTextContent('Session view')
   })
 })

@@ -18,9 +18,9 @@ namespace AecoPostMortem.Api;
 /// system-injected <c>&lt;current_datetime&gt;</c>/<c>&lt;system_reminder&gt;</c> text, <c>content</c>
 /// is exactly what the operator typed. It is joined to a <c>Prompt</c> step by <c>interactionId</c>:
 /// <c>user.message.data.interactionId</c> matches the same session's <c>assistant.turn_start.data
-/// .interactionId</c> — the event a <c>Prompt</c> step's own <c>StepId</c> (<c>Turn.TurnId</c>) is
-/// already resolved from by <see cref="StepEvidenceLookup.Find"/>'s <c>"turnId"</c> match, reused here
-/// rather than a second identity scheme.
+/// .interactionId</c> — the event a <c>Prompt</c> step's own <c>StepId</c> (<c>Turn.EventId</c>, that
+/// event's own envelope <c>id</c>) is already resolved from by <see cref="StepEvidenceLookup.Find"/>,
+/// reused here rather than a second identity scheme.
 /// </summary>
 public static class PromptTextLookup
 {
@@ -42,7 +42,14 @@ public static class PromptTextLookup
 
         var ordered = sessionEvents.OrderBy(e => e.Sequence).ToList();
 
-        var interactionIdByTurnId = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Keyed by the turn_start event's own envelope id — a Prompt step's own StepId — never by
+        // data.turnId, Copilot's cycling display counter: that repeats within one session on a
+        // measured 20 of 25 real sessions in the dominant repository, so a turnId-keyed dictionary
+        // silently collapsed several unrelated turns onto whichever one Copilot numbered first, and
+        // every one of them rendered that first turn's prompt text. `Findings.SessionTapeStep.StepId`
+        // carries `Turn.EventId` (the identity `Data.Execution.Turn` itself is keyed by), which makes
+        // this a straight, collision-free lookup.
+        var interactionIdByStepId = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var raw in ordered.Where(e => e.EventType == "assistant.turn_start"))
         {
             if (!EventEnvelopeReader.TryRead(raw, out var envelope))
@@ -50,26 +57,11 @@ public static class PromptTextLookup
                 continue;
             }
 
-            var turnId = GetString(envelope.Data, "turnId");
             var interactionId = GetString(envelope.Data, "interactionId");
 
-            // A repeated turnId within one session (a real, documented corpus finding —
-            // AecoPostMortem.Data/CLAUDE.md's "Turn is keyed by its own event id" entry) keeps its
-            // first occurrence's interactionId, matching StepEvidenceLookup.FindByDataField's own
-            // first-match behaviour for the identical field — this lookup does not attempt to fix
-            // that pre-existing identity ambiguity, only to stay consistent with it. Measured against
-            // the live 35-session reference corpus: 20 of 25 sessions in the dominant repository have
-            // at least one repeated turnId, and the worst case collapses 310 real prompt steps onto
-            // only 73 distinct StepIds — several unrelated turns therefore share one resolved
-            // PromptText. This is Findings.SessionTapeStep's own pre-existing StepId choice
-            // (Turn.TurnId, a display counter, rather than Turn.EventId — the identity Data.Execution
-            // .Turn itself was re-keyed to for the identical reason), not something introduced here;
-            // fixing it means widening SessionTapeStep.StepId itself, a larger change than this
-            // lookup's own scope (it would also touch StepEvidenceLookup and every StepId consumer,
-            // including the wire route and the frontend's own DOM ids) — left as a follow-up.
-            if (turnId is not null && interactionId is not null)
+            if (envelope.Id is { Length: > 0 } eventId && interactionId is not null)
             {
-                interactionIdByTurnId.TryAdd(turnId, interactionId);
+                interactionIdByStepId.TryAdd(eventId, interactionId);
             }
         }
 
@@ -93,7 +85,7 @@ public static class PromptTextLookup
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var stepId in promptStepIds)
         {
-            if (interactionIdByTurnId.TryGetValue(stepId, out var interactionId)
+            if (interactionIdByStepId.TryGetValue(stepId, out var interactionId)
                 && contentByInteractionId.TryGetValue(interactionId, out var content))
             {
                 result[stepId] = content;

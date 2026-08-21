@@ -448,18 +448,19 @@ function LoadedSession({ sessionId }: { sessionId: string }) {
 /** The Session Flight Recorder (FR-21: part 1 of 3 — S-08 — part 2 of 3 — S-52 — and part 3 of 3
  * — S-53): the masthead, the finding chips, the virtualised and keyboard-navigable tape and the
  * inspector, or one of two non-final states in place of the tape and chips (`NonFinalState`).
- * `sessionId` comes from the route (`/sessions/:sessionId`); the bare `/sessions` route carries
- * none, since picking a session from a list is a later story's job no part of FR-21 builds. */
+ * `sessionId` comes from the route (`/sessions/:sessionId`). The bare `/sessions` route was
+ * removed as a dead end — the digest now provides real, clickable entry points to sessions. */
 export function SessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
 
+  // `/sessions/:sessionId` is now the only route that mounts this page, so the param is always
+  // present at runtime — but `useParams` still types every param optional, and there is no way to
+  // tell React Router otherwise. This guard is the type narrowing, not a designed UI state: it is
+  // unreachable through the router as registered, and says so rather than asserting non-null with
+  // `!`, so a future route registration that forgets the param fails visibly instead of rendering
+  // a session view against `undefined`.
   if (!sessionId) {
-    return (
-      <div className="session-page__no-selection">
-        <h2>Session Flight Recorder</h2>
-        <p>No session selected. Choose a session from the digest to open its Flight Recorder.</p>
-      </div>
-    )
+    return <p role="alert">This page needs a session id in its URL.</p>
   }
 
   return <LoadedSession sessionId={sessionId} />

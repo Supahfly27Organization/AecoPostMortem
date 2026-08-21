@@ -35,6 +35,34 @@
   outline-offset: -1px;
 }
 
+/* Mockup parity item #12: a turn-section divider, ported from the mockup's own `.turn-hd` (bottom
+   rule, mono accent numeral) but collapsed onto one 32px row to fit this file's fixed-row-height
+   virtualisation rather than the mockup's own auto-height `<div>`. Never a click target and never
+   `aria-selected` — `role="presentation"` in Tape.tsx already keeps it out of `listitem` semantics;
+   this file's own job is only to make it read as a section boundary rather than a step. */
+.session-tape__turn-header {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem;
+  background: var(--sunk);
+  border-bottom: 1px solid var(--rule-2);
+}
+
+.session-tape__turn-header-text {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* FR-22 (S-09, issue #18), Scenario 5: each subagent gets its own coloured lane marker
    (`--session-tape-lane`, set per row in Tape.tsx from a deterministic hash of its `agentId`), and
    the main thread carries none — "the main thread is distinguishable from all of them" holds for a

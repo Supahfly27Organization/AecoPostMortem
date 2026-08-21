@@ -13,6 +13,14 @@ import type { RulesInventoryStatusCountsEnvelope } from './rulesInventory'
 
 export const DigestRoute = '/api/digest'
 
+/** The date-range filter's two query parameters — matches `ApiHost.FromParameter`/`ToParameter`
+ * (`src/AecoPostMortem.Api/ApiHost.cs`). Both plain `yyyy-MM-dd` calendar dates, the same value
+ * format `<input type="date">` already produces, so `DateRangeFilter` needs no conversion before
+ * handing its values to `fetchDigest`. */
+export const FromParameter = 'from'
+
+export const ToParameter = 'to'
+
 /** Wire values for `AecoPostMortem.Findings.FindingClass` — camelCase because they carry no
  * per-property `JsonConverter` of their own, so they pick up `ApiHost`'s global
  * `JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` once a real endpoint serves them. */
@@ -191,13 +199,33 @@ export interface DigestEnvelope {
   silentChecks: SilentCheckEnvelope[]
 }
 
+/** The date-range filter's own optional bounds — both `null` (the default) fetches exactly the same
+ * corpus-wide-then-repository-scoped digest this app served before the filter existed. Mirrors
+ * `ApiHost.GetDigest(store, from, to)`'s own two optional parameters. */
+export interface DateRange {
+  from: string | null
+  to: string | null
+}
+
 /** Throws on a non-2xx response or a network failure; callers (see `useDigest`) turn that into a
  * state a component can render rather than an unhandled rejection. */
-export async function fetchDigest(signal?: AbortSignal): Promise<DigestEnvelope> {
-  const response = await fetch(DigestRoute, { signal })
+export async function fetchDigest(
+  range: DateRange = { from: null, to: null },
+  signal?: AbortSignal,
+): Promise<DigestEnvelope> {
+  const query = new URLSearchParams()
+  if (range.from !== null) {
+    query.set(FromParameter, range.from)
+  }
+  if (range.to !== null) {
+    query.set(ToParameter, range.to)
+  }
+  const url = query.size === 0 ? DigestRoute : `${DigestRoute}?${query.toString()}`
+
+  const response = await fetch(url, { signal })
 
   if (!response.ok) {
-    throw new Error(`GET ${DigestRoute} failed with status ${response.status}`)
+    throw new Error(`GET ${url} failed with status ${response.status}`)
   }
 
   return (await response.json()) as DigestEnvelope

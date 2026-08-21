@@ -1,11 +1,21 @@
 import { useState } from 'react'
+import type { DateRange } from '../api/digest'
 import { useDigest } from '../api/useDigest'
 import { CleanChecks } from '../digest/CleanChecks'
+import { DateRangeFilter } from '../digest/DateRangeFilter'
 import { FindingRow } from '../digest/FindingRow'
 import { Masthead } from '../digest/Masthead'
 import { MethodologyFooter } from '../digest/MethodologyFooter'
+import { Pager } from '../digest/Pager'
 import { RepositorySelector } from '../digest/RepositorySelector'
 import './DigestPage.css'
+
+/** How many ranked findings render per page — client-side, over the already-served list. The live
+ * corpus serves 297 ranked findings for its dominant repository, well within a single fetch's own
+ * payload size (this page already fetches the whole digest in one shot); a server-side offset/limit
+ * contract is deliberately deferred until a corpus's real scale justifies one — see the "The pager is
+ * client-side" non-obvious decision in `web/CLAUDE.md`. */
+const PAGE_SIZE = 25
 
 /**
  * The front door (PRD §3.1: "Getting started ... Open the Process Digest"). FR-41's masthead and
@@ -25,8 +35,17 @@ import './DigestPage.css'
  * `AppStateBanner`'s pattern for "the API host is unreachable".
  */
 export function DigestPage() {
-  const query = useDigest()
+  const [range, setRange] = useState<DateRange>({ from: null, to: null })
+  const query = useDigest(range)
   const [pendingRepository, setPendingRepository] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+
+  // A new range re-scopes the whole analysis server-side (see `useDigest`'s own remarks), so the
+  // previous range's page position has no meaning against the new list — always back to page 1.
+  function applyRange(from: string | null, to: string | null) {
+    setRange({ from, to })
+    setPage(1)
+  }
 
   if (query.status === 'loading') {
     return (
@@ -54,6 +73,15 @@ export function DigestPage() {
   // this story implements the default and keeps the control itself real and selectable.
   const displayedScope = { ...scope, selectedRepository: pendingRepository ?? scope.selectedRepository }
 
+  // Clamped rather than trusted outright: a stale `page` (e.g. a shrinking list under a new range,
+  // even though `applyRange` already resets to 1) never indexes past the end of what is actually
+  // being served — the same "never serve a number the data doesn't support" discipline this app
+  // follows for every other figure.
+  const pageCount = Math.max(1, Math.ceil(digest.rankedFindings.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const pageStart = (currentPage - 1) * PAGE_SIZE
+  const pagedFindings = digest.rankedFindings.slice(pageStart, pageStart + PAGE_SIZE)
+
   return (
     <div className="digest-page">
       <h2>Process Digest</h2>
@@ -61,6 +89,8 @@ export function DigestPage() {
       <Masthead masthead={digest.masthead} state={digest.state} />
 
       <RepositorySelector scope={displayedScope} onSelect={setPendingRepository} />
+
+      <DateRangeFilter from={range.from} to={range.to} onApply={applyRange} />
 
       {/* The three designed states, each said in its own words rather than all collapsing into an
           unexplained empty list. "Nothing analysed yet" and "found nothing" are different facts
@@ -83,7 +113,7 @@ export function DigestPage() {
         )}
 
       <ul className="digest-page__findings">
-        {digest.rankedFindings.map((finding) => (
+        {pagedFindings.map((finding) => (
           <FindingRow
             key={`${finding.class}:${finding.recurrence.key}`}
             finding={finding}
@@ -92,6 +122,8 @@ export function DigestPage() {
           />
         ))}
       </ul>
+
+      <Pager page={currentPage} pageCount={pageCount} onChange={setPage} />
 
       {/* FR-48 (issue #52, S-42): `inferredFindings` is real, served data
           (`DigestEnvelope.InferredFindings`) — never interleaved by rank with the list above (see

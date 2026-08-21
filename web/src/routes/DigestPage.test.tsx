@@ -319,4 +319,81 @@ describe('DigestPage', () => {
 
     expect(screen.queryByText(/checks that found nothing/i)).not.toBeInTheDocument()
   })
+
+  // The date-range filter task's own design decision (`AecoPostMortem.Api/CLAUDE.md`'s "A date-range
+  // filter re-scopes the whole analysis"): applying a range asks the server for a re-scoped digest,
+  // it never merely hides rows from the response already in hand.
+  it('re-fetches the digest with the applied date range as query parameters', async () => {
+    const user = userEvent.setup()
+    const requestedUrls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        requestedUrls.push(url)
+        return new Response(JSON.stringify(digestWith()), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('src/hot.cs was read repeatedly')
+    expect(requestedUrls).toHaveLength(1)
+    expect(requestedUrls[0]).not.toContain('from=')
+
+    await user.type(screen.getByLabelText('From'), '2026-06-01')
+    await user.type(screen.getByLabelText('To'), '2026-06-30')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await vi.waitFor(() => expect(requestedUrls).toHaveLength(2))
+    expect(requestedUrls[1]).toContain('from=2026-06-01')
+    expect(requestedUrls[1]).toContain('to=2026-06-30')
+  })
+
+  // Real corpus check: the dominant repository serves 297 ranked findings, well past one page —
+  // the pager slices the already-served list rather than the server sending only one page's worth.
+  it('paginates the ranked findings list once it exceeds one page', async () => {
+    const user = userEvent.setup()
+    const template = digestWith().rankedFindings[0]
+    const manyFindings = Array.from({ length: 30 }, (_, index) => ({
+      ...template,
+      headline: `Finding number ${index + 1}`,
+      recurrence: { key: `key-${index + 1}`, occurrences: [] },
+    }))
+    respondWith(digestWith({ rankedFindings: manyFindings }))
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Finding number 1')
+    expect(screen.getByText('Finding number 25')).toBeInTheDocument()
+    expect(screen.queryByText('Finding number 26')).not.toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+
+    expect(await screen.findByText('Finding number 26')).toBeInTheDocument()
+    expect(screen.queryByText('Finding number 1')).not.toBeInTheDocument()
+  })
+
+  it('shows no pager at all when everything fits on one page', async () => {
+    respondWith(digestWith())
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('src/hot.cs was read repeatedly')
+
+    expect(screen.queryByRole('group', { name: 'Findings pages' })).not.toBeInTheDocument()
+  })
 })

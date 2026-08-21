@@ -1,0 +1,40 @@
+.date-range-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+
+.date-range-filter__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.date-range-filter__field input {
+  font: inherit;
+  color: inherit;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--rule-2);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.date-range-filter button {
+  font: inherit;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--rule-2);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.date-range-filter button[type='submit'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}

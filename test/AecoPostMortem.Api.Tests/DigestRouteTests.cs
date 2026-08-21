@@ -373,6 +373,254 @@ public sealed class DigestRouteTests
         }
     }
 
+    /// <summary>The date-range filter (mirroring the pager task's own design decision, recorded in
+    /// <c>Api/CLAUDE.md</c>): a <c>from</c>/<c>to</c> query pair re-scopes the whole analysis to
+    /// sessions whose own <see cref="Session.StartedAt"/> falls in range — never a display filter
+    /// over findings already computed against every session. A finding whose only occurrence is
+    /// outside the window must not appear at all, the same way a finding outside the selected
+    /// repository never appears (<see cref="A_finding_in_the_non_selected_repository_never_appears_in_the_ranked_list"/>).</summary>
+    [Fact]
+    public async Task A_date_range_filter_excludes_findings_whose_only_occurrence_is_outside_it()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("in-range", "org/majority", "2026-06-15T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("out-of-range", "org/majority", "2026-01-01T10:00:00Z"));
+
+            for (var i = 0; i < 4; i++)
+            {
+                context.ToolCalls.Add(new ToolCall
+                {
+                    SessionId = "in-range",
+                    ToolCallId = $"in-tc{i}",
+                    ToolName = "view",
+                    Path = "/in-range.cs",
+                    StartedAt = "2026-06-15T10:00:01Z",
+                    OwnerKind = OwnerKind.Main,
+                });
+                context.ToolCalls.Add(new ToolCall
+                {
+                    SessionId = "out-of-range",
+                    ToolCallId = $"out-tc{i}",
+                    ToolName = "view",
+                    Path = "/out-of-range.cs",
+                    StartedAt = "2026-01-01T10:00:01Z",
+                    OwnerKind = OwnerKind.Main,
+                });
+            }
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?{ApiHost.FromParameter}=2026-06-01&{ApiHost.ToParameter}=2026-06-30",
+                ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var finding = Assert.Single(envelope!.RankedFindings);
+            Assert.Contains(finding.Evidence, item => item.Field == "data.path" && item.Value == "/in-range.cs");
+            Assert.DoesNotContain(finding.Evidence, item => item.Value == "/out-of-range.cs");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The date filter's boundaries are inclusive of the whole named day — a session
+    /// starting anywhere within <c>to</c>'s own calendar day is still in range, not excluded because
+    /// its timestamp carries a time-of-day later than midnight.</summary>
+    [Fact]
+    public async Task A_session_starting_late_on_the_to_boundarys_own_day_is_still_in_range()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("late-on-boundary", "org/majority", "2026-06-30T23:59:00Z"));
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "late-on-boundary",
+                ToolCallId = "tc0",
+                ToolName = "view",
+                Path = "/late.cs",
+                StartedAt = "2026-06-30T23:59:01Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "late-on-boundary",
+                ToolCallId = "tc1",
+                ToolName = "view",
+                Path = "/late.cs",
+                StartedAt = "2026-06-30T23:59:02Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "late-on-boundary",
+                ToolCallId = "tc2",
+                ToolName = "view",
+                Path = "/late.cs",
+                StartedAt = "2026-06-30T23:59:03Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.ToolCalls.Add(new ToolCall
+            {
+                SessionId = "late-on-boundary",
+                ToolCallId = "tc3",
+                ToolName = "view",
+                Path = "/late.cs",
+                StartedAt = "2026-06-30T23:59:04Z",
+                OwnerKind = OwnerKind.Main,
+            });
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?{ApiHost.FromParameter}=2026-06-01&{ApiHost.ToParameter}=2026-06-30",
+                ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Single(envelope!.RankedFindings);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>Mirrors <see cref="MastheadCounters"/>'s own established rule that it ignores
+    /// repository selection (<c>Api/CLAUDE.md</c>'s "corpus-wide regardless of repository" remark) —
+    /// a date filter is the same kind of ranking-scope lens, not a corpus-wide fact, so the masthead's
+    /// session count must not shrink under it.</summary>
+    [Fact]
+    public async Task Masthead_counters_stay_corpus_wide_when_a_date_filter_is_applied()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("in-range", "org/majority", "2026-06-15T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("out-of-range", "org/majority", "2026-01-01T10:00:00Z"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?{ApiHost.FromParameter}=2026-06-01&{ApiHost.ToParameter}=2026-06-30",
+                ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal(2, envelope!.Masthead.SessionCount);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The per-finding session strip (<c>RepositoryScope.SessionIds</c>) is documented as
+    /// "the exact set every check ran over" — under a date filter that set is narrower than the
+    /// repository selection alone, so this field must follow the filter rather than stay at the
+    /// repository-wide list, or the strip would show positions for sessions no check considered.</summary>
+    [Fact]
+    public async Task RepositoryScope_session_ids_follow_the_date_filter()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("in-range", "org/majority", "2026-06-15T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("out-of-range", "org/majority", "2026-01-01T10:00:00Z"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?{ApiHost.FromParameter}=2026-06-01&{ApiHost.ToParameter}=2026-06-30",
+                ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal(new[] { "in-range" }, envelope!.Masthead.RepositoryScope.SessionIds);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>An inverted range is a real, honest refusal (matching this project's other
+    /// caller-error responses, e.g. <see cref="ApiHost.MonitorComparisonRoute"/>'s missing-parameter
+    /// 400) rather than a silently empty digest that reads as "no findings" instead of "bad request".</summary>
+    [Fact]
+    public async Task An_inverted_date_range_answers_400()
+    {
+        using var temporary = new TemporaryStore();
+        temporary.Store.Open().Dispose();
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var response = await client.GetAsync(
+                $"{ApiHost.DigestRoute}?{ApiHost.FromParameter}=2026-06-30&{ApiHost.ToParameter}=2026-06-01",
+                Cancellation);
+
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>No <c>from</c>/<c>to</c> supplied at all must behave exactly as before this feature —
+    /// the pre-existing regression every other test in this file already proves implicitly, stated
+    /// explicitly here for the date-filter code path in particular.</summary>
+    [Fact]
+    public async Task No_date_filter_supplied_serves_every_session_in_the_selected_repository()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("s1", "org/majority", "2026-06-15T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("s2", "org/majority", "2026-01-01T10:00:00Z"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal(2, envelope!.Masthead.RepositoryScope.SessionIds.Count);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
     static Session ASessionStartedAt(string sessionId, string repository, string startedAt) => new()
     {
         SessionId = sessionId,

@@ -26,6 +26,16 @@ public static class ApiHost
     /// <summary>FR-41's digest route (S-36, issue #44), first served for real here.</summary>
     public const string DigestRoute = "/api/digest";
 
+    /// <summary>The optional date-range filter's two query parameters — both plain calendar dates
+    /// (<c>yyyy-MM-dd</c>), inclusive of the whole named day (<see cref="StartOfDayUtc"/>/
+    /// <see cref="EndOfDayUtc"/>). Omitted, <see cref="GetDigest"/> behaves exactly as it did before
+    /// this filter existed. See the "A date-range filter re-scopes the whole analysis" non-obvious
+    /// decision in <c>Api/CLAUDE.md</c> for why this narrows <em>which sessions every check runs
+    /// over</em> rather than merely which already-computed findings are displayed.</summary>
+    public const string FromParameter = "from";
+
+    public const string ToParameter = "to";
+
     /// <summary>FR-40's Rules Inventory route (S-22, issue #35), first served for real here.</summary>
     public const string RulesInventoryRoute = "/api/rules-inventory";
 
@@ -101,7 +111,16 @@ public static class ApiHost
 
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
 
-        app.MapGet(DigestRoute, () => Results.Ok(GetDigest(store)));
+        app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to) =>
+        {
+            if (from is not null && to is not null && from > to)
+            {
+                return Results.BadRequest(
+                    $"'{FromParameter}' ({from}) must not be after '{ToParameter}' ({to}).");
+            }
+
+            return Results.Ok(GetDigest(store, from, to));
+        });
 
         app.MapGet(RulesInventoryRoute, (string? version) =>
         {
@@ -198,9 +217,13 @@ public static class ApiHost
     /// opens the store, so there is no live "still ingesting" signal for a separate <c>serve</c>
     /// process to read.
     /// </summary>
-    public static DigestEnvelope GetDigest(LocalStore store)
+    public static DigestEnvelope GetDigest(LocalStore store, DateOnly? from = null, DateOnly? to = null)
     {
         ArgumentNullException.ThrowIfNull(store);
+        if (from is not null && to is not null && from > to)
+        {
+            throw new ArgumentException($"'{nameof(from)}' ({from}) must not be after '{nameof(to)}' ({to}).");
+        }
 
         using var context = store.Open();
 
@@ -216,7 +239,18 @@ public static class ApiHost
         // computes both from the same selected-repository filter) — reusing it here, rather than
         // re-filtering sessions a second time, is what guarantees the served session-strip positions
         // and the sessions every check below runs over can never disagree.
-        var scopedSessionIds = repositoryScope.SessionIds.ToHashSet(StringComparer.Ordinal);
+        var repositorySessionIds = repositoryScope.SessionIds.ToHashSet(StringComparer.Ordinal);
+
+        // The date-range filter narrows the repository scope further — see the "A date-range filter
+        // re-scopes the whole analysis" non-obvious decision in Api/CLAUDE.md. When neither bound is
+        // supplied this is exactly repositorySessionIds, unchanged from before this filter existed.
+        var scopedSessionIds = from is null && to is null
+            ? repositorySessionIds
+            : sessions
+                .Where(session => repositorySessionIds.Contains(session.SessionId))
+                .Where(session => IsWithinDateRange(ParseTimestamp(session.StartedAt), from, to))
+                .Select(session => session.SessionId)
+                .ToHashSet(StringComparer.Ordinal);
         var scopedSessions = sessions.Where(session => scopedSessionIds.Contains(session.SessionId)).ToList();
 
         var scopedToolCalls = toolCalls.Where(call => scopedSessionIds.Contains(call.SessionId)).ToList();
@@ -229,11 +263,29 @@ public static class ApiHost
             scopedSessions, scopedRawEvents, scopedToolCalls, scopedTurns, scopedPermissions, scopedAgents,
             scopedSessionIds);
 
+        // Rule coverage stays scoped to the repository selection alone, the same "corpus-wide fact,
+        // not a ranking-scope lens" treatment MastheadCounters below already gets — a date filter
+        // narrows which sessions the findings ranking runs over, not which rule-set version's
+        // coverage figure is shown.
         var ruleCoverage = BuildRuleCoverageStatus(sessions, rawEvents, toolCalls, agents, repositoryScope);
+
+        // The served RepositoryScope.SessionIds follows the date filter: its own contract
+        // (Findings.RepositoryScope.SessionIds) is "the same session set every check ran over", which
+        // must stay true whether or not a date filter narrowed that set further.
+        var servedRepositoryScope = scopedSessionIds.SetEquals(repositorySessionIds)
+            ? repositoryScope
+            : repositoryScope with
+            {
+                SessionIds = scopedSessions
+                    .OrderBy(session => session.StartedAt, StringComparer.Ordinal)
+                    .ThenBy(session => session.SessionId, StringComparer.Ordinal)
+                    .Select(session => session.SessionId)
+                    .ToList(),
+            };
 
         var digest = ProcessDigest.Build(
             BuildMastheadCounters(sessions, rawEvents, toolCalls, agents), checkRegistry, findings,
-            repositoryScope, ruleCoverage);
+            servedRepositoryScope, ruleCoverage);
 
         // Digest session-naming, Slice 2: a session's own display label, resolved over the identical
         // scopedRawEvents already grouped by session for HookFailureEventLookup/DeclaredIntentLookup
@@ -442,6 +494,29 @@ public static class ApiHost
     /// result regardless of the machine it runs on.</summary>
     static DateTimeOffset ParseTimestamp(string timestamp) =>
         DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    /// <summary>The date-range filter's own inclusive-of-the-whole-day comparison — a session
+    /// starting at any time on <paramref name="to"/>'s own calendar day is still in range, not
+    /// excluded for carrying a time-of-day later than midnight. Both bounds are optional and
+    /// independent: a caller may supply only one.</summary>
+    static bool IsWithinDateRange(DateTimeOffset startedAt, DateOnly? from, DateOnly? to)
+    {
+        if (from is not null && startedAt < StartOfDayUtc(from.Value))
+        {
+            return false;
+        }
+
+        if (to is not null && startedAt > EndOfDayUtc(to.Value))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    static DateTimeOffset StartOfDayUtc(DateOnly date) => new(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+    static DateTimeOffset EndOfDayUtc(DateOnly date) => new(date.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
 
     /// <summary>
     /// FR-41 part 2 (S-54)'s default: the repository carrying the most sessions, ties broken

@@ -93,7 +93,7 @@ public sealed class MonitorComparisonRouteTests
     }
 
     [Fact]
-    public async Task An_empty_store_answers_404_there_is_no_repository_to_select()
+    public async Task An_empty_store_serves_a_stated_no_repository_reason()
     {
         using var temporary = new TemporaryStore();
         temporary.Store.Open().Dispose();
@@ -107,7 +107,8 @@ public sealed class MonitorComparisonRouteTests
                 $"{ApiHost.MonitorComparisonRoute}?{ApiHost.BeforeParameter}=h1&{ApiHost.AfterParameter}=h2",
                 Cancellation);
 
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("noRepository", await KindOf(response));
         }
         finally
         {
@@ -115,6 +116,10 @@ public sealed class MonitorComparisonRouteTests
         }
     }
 
+    /// <summary>Still a 404: a hash no session in this repository ever carried names a resource that
+    /// does not exist, unlike the three refusals here — all real, designed states about a pair that
+    /// does exist. The same split <c>GetRulesInventory</c> already draws for a missing version.
+    /// </summary>
     [Fact]
     public async Task An_unknown_hash_answers_404()
     {
@@ -145,7 +150,7 @@ public sealed class MonitorComparisonRouteTests
     }
 
     [Fact]
-    public async Task Non_adjacent_versions_answer_404()
+    public async Task Non_adjacent_versions_serve_a_stated_reason_naming_what_lies_between_them()
     {
         using var temporary = new TemporaryStore();
         string hashV1, hashV3;
@@ -192,7 +197,14 @@ public sealed class MonitorComparisonRouteTests
                 + $"&{ApiHost.AfterParameter}={hashV3}",
                 Cancellation);
 
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
+            Assert.Equal("notAdjacent", document.RootElement.GetProperty("kind").GetString());
+
+            // The versions between the pair — already computed by the server for its own exception,
+            // now served, so a client can say *why* a pair is not adjacent rather than only that it
+            // is not.
+            Assert.Equal(1, document.RootElement.GetProperty("intervening").GetArrayLength());
         }
         finally
         {
@@ -201,7 +213,7 @@ public sealed class MonitorComparisonRouteTests
     }
 
     [Fact]
-    public async Task After_version_with_no_PreferAOverB_statement_answers_404()
+    public async Task After_version_with_no_PreferAOverB_statement_serves_a_stated_reason()
     {
         using var temporary = new TemporaryStore();
         string hashV1, hashV2;
@@ -236,12 +248,20 @@ public sealed class MonitorComparisonRouteTests
                 + $"&{ApiHost.AfterParameter}={hashV2}",
                 Cancellation);
 
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("noComparableRule", await KindOf(response));
         }
         finally
         {
             await app.StopAsync(Cancellation);
         }
+    }
+
+    static async Task<string?> KindOf(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        return document.RootElement.GetProperty("kind").GetString();
     }
 
     const string PreferRgOverGrepPlusNeverReadPrompt = """
@@ -291,14 +311,18 @@ public sealed class MonitorComparisonRouteTests
         try
         {
             using var client = HttpClientFor(app);
-            var envelope = await client.GetFromJsonAsync<MonitorComparisonEnvelope>(
+            // The comparison payload is unchanged; it is now nested under the union's own
+            // `comparison` arm rather than being the whole body — see
+            // `MonitorComparisonResultEnvelope`'s remarks for why the three refusals are served as
+            // stated reasons instead of one bodyless 404.
+            var result = await client.GetFromJsonAsync<MonitorComparisonResultEnvelope>(
                 $"{ApiHost.MonitorComparisonRoute}?{ApiHost.BeforeParameter}={hashV1}"
                 + $"&{ApiHost.AfterParameter}={hashV2}",
                 ClientOptions,
                 Cancellation);
 
-            Assert.NotNull(envelope);
-            Assert.Equal(hashV1, envelope!.BeforeVersion.Hash);
+            var envelope = Assert.IsType<MonitorComparisonResultEnvelope.ComparisonResult>(result).Comparison;
+            Assert.Equal(hashV1, envelope.BeforeVersion.Hash);
             Assert.Equal(1, envelope.BeforeVersion.SessionCount);
             Assert.Equal(hashV2, envelope.AfterVersion.Hash);
             Assert.Equal(1, envelope.AfterVersion.SessionCount);

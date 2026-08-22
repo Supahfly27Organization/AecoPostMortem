@@ -32,13 +32,28 @@ export interface MonitorComparisonEnvelope {
   after: AdherenceFigure
 }
 
+/**
+ * Mirrors `AecoPostMortem.Api.MonitorComparisonResultEnvelope`'s four arms. Every one is served
+ * `200`: a refusal here is a designed state about a pair that genuinely exists, not a missing
+ * resource. `intervening` names the versions that were in force between a non-adjacent pair, so a
+ * client can say *why* rather than only that.
+ *
+ * A version hash no session ever carried is still a 404, which `fetchMonitorComparison` throws on
+ * like any other non-2xx -- that names something that does not exist, unlike these three.
+ */
+export type MonitorComparisonResult =
+  | { kind: 'comparison'; comparison: MonitorComparisonEnvelope }
+  | { kind: 'notAdjacent'; intervening: RuleSetVersionEnvelope[] }
+  | { kind: 'noComparableRule' }
+  | { kind: 'noRepository' }
+
 /** Throws on a non-2xx response or a network failure; `api/useMonitorComparison.ts`'s hook turns
  * that into a state a component can render, the same shape `useDigest`/`useRulesInventory` use. */
 export async function fetchMonitorComparison(
   before: string,
   after: string,
   signal?: AbortSignal,
-): Promise<MonitorComparisonEnvelope> {
+): Promise<MonitorComparisonResult> {
   const url = `${MonitorComparisonRoute}?before=${encodeURIComponent(before)}&after=${encodeURIComponent(after)}`
   const response = await fetch(url, { signal })
 
@@ -46,5 +61,5 @@ export async function fetchMonitorComparison(
     throw new Error(`GET ${url} failed with status ${response.status}`)
   }
 
-  return (await response.json()) as MonitorComparisonEnvelope
+  return (await response.json()) as MonitorComparisonResult
 }

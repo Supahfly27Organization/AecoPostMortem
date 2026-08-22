@@ -18,18 +18,15 @@ import './MonitorPage.css'
  * `RulesInventoryPage` uses, called with no version -- the default fetch already carries the full,
  * chronologically ordered list) as the source of version identities, per the task's own framing.
  * The operator picks *both* sides freely from two independent selects, defaulting to the two most
- * recent versions (the newest edit). `useMonitorComparison` resolves adjacency locally before ever
- * calling the server -- see its own doc comment for why that is what lets this page state two
- * honest, distinct refusals rather than one bare 404 collapsing both.
+ * recent versions (the newest edit). Every refusal is served by the endpoint itself
+ * (`MonitorComparisonResultEnvelope`), so this page renders one message per served `kind` and
+ * derives nothing.
  *
- * Code review (round 2) caught a third, real 404 cause this page has to rule out itself before
- * trusting `useMonitorComparison`'s `'noComparableRule'` label: `ApiHost.GetMonitorComparison`
- * refuses unconditionally, before checking adjacency or any rule, when the whole store resolves no
- * repository at all (`repositoryScope.SelectedRepository is null`) -- a real, if rare, scope
- * `GetRulesInventory` happily serves (`RuleSetVersionEnvelope.repository: null`, "no recorded
- * repository" in `RulesInventoryPage`), which would otherwise reach this page's version picker and
- * mislabel every pair's refusal as "no comparable rule" when the real reason is this repository-less
- * scope. See `repositoryIsUnrecorded` below.
+ * Two workarounds are gone with that change, both of which existed only because the endpoint used to
+ * answer one bodyless 404 for three different reasons: `useMonitorComparison` re-implementing the
+ * server's own adjacency rule in TypeScript, and this page refusing to reach the hook at all when no
+ * repository resolved (so the remaining 404 could be labelled unambiguously). The repository-less
+ * scope is now just another served reason, stated in the same place as the other two.
  */
 export function MonitorPage() {
   const inventoryQuery = useRulesInventory(null)
@@ -49,7 +46,7 @@ export function MonitorPage() {
   const effectiveBeforeHash = beforeHash ?? defaultBeforeHash
   const effectiveAfterHash = afterHash ?? defaultAfterHash
 
-  const comparisonQuery = useMonitorComparison(versions, effectiveBeforeHash, effectiveAfterHash)
+  const comparisonQuery = useMonitorComparison(effectiveBeforeHash, effectiveAfterHash)
 
   if (inventoryQuery.status === 'loading') {
     return (
@@ -82,23 +79,6 @@ export function MonitorPage() {
     )
   }
 
-  // `repository: null` means no session anywhere in the store resolved a repository name at all
-  // (`ApiHost.BuildRepositoryScope`'s own fallback) -- `GetMonitorComparison` refuses unconditionally
-  // for that scope, before ever checking adjacency or a comparable rule, so stating that plainly here
-  // is the honest state; letting the page fall through to a real request would only ever produce a
-  // 404 this page would otherwise mislabel as "no comparable rule" (code review, round 2).
-  if (inventoryQuery.inventory.selectedVersion.repository === null) {
-    return (
-      <div className="monitor-page">
-        <h2>Monitor</h2>
-        <p className="monitor-page__empty">
-          No repository is recorded for any session in this store, so the Monitor has nothing to
-          scope a comparison to.
-        </p>
-      </div>
-    )
-  }
-
   return (
     <div className="monitor-page">
       <h2>Monitor</h2>
@@ -113,9 +93,21 @@ export function MonitorPage() {
 
       {comparisonQuery.status === 'notAdjacent' && (
         <p className="monitor-page__refusal" role="status">
-          These two versions are not adjacent. The Monitor only compares a rule-set edit directly
-          against the version immediately before it — pick two versions next to each other in the
-          lists above (the numbering states each one's own chronological position).
+          These two versions are not adjacent
+          {comparisonQuery.intervening.length > 0 &&
+            ` — ${comparisonQuery.intervening.length} other rule-set ${
+              comparisonQuery.intervening.length === 1 ? 'version was' : 'versions were'
+            } in force between them`}
+          . The Monitor only compares a rule-set edit directly against the version immediately before
+          it — pick two versions next to each other in the lists above (the numbering states each
+          one's own chronological position).
+        </p>
+      )}
+
+      {comparisonQuery.status === 'noRepository' && (
+        <p className="monitor-page__refusal" role="status">
+          No repository is recorded for any session in this store, so the Monitor has nothing to
+          scope a comparison to.
         </p>
       )}
 

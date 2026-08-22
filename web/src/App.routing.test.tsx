@@ -98,7 +98,8 @@ describe('App routing', () => {
 
         if (url.includes(MonitorComparisonRoute)) {
           // Routing only cares that MonitorPage renders its own content for a real comparison.
-          return new Response(JSON.stringify(comparison), { status: 200 })
+          // The payload is nested under the served union's `comparison` arm (`api/monitor.ts`).
+          return new Response(JSON.stringify({ kind: 'comparison', comparison }), { status: 200 })
         }
 
         if (url.includes(RulesInventoryRoute)) {

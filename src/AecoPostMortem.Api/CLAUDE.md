@@ -1577,6 +1577,44 @@ BY — skill" on the Detail tab and the full "TRIGGER — skill — `{"skill":"u
 real 18,574-character `toolResult`⟩" on the Raw tab, scrolling inside its own bounded block rather
 than pushing the page down. `web/CLAUDE.md`'s matching Status entry names the same real check.
 
+### The Monitor's refusals are served, not re-derived — and a pre-existing concurrency defect this uncovered
+
+`GET /api/monitor-comparison` used to answer one bare, bodyless `404` for three structurally
+different refusals. `web/CLAUDE.md`'s "The Monitor's two refusals are resolved on the client" recorded
+the consequence and named the alternative as deferred: the one client that needed to tell them apart
+re-implemented `Rules.RuleSetVersionAdjacency.RequireAdjacentPair`'s own sort-and-index logic in
+TypeScript, with nothing pinning the two together, plus a second workaround in `MonitorPage.tsx` for
+the third cause. `MonitorComparisonResultEnvelope` is that deferred fix: a closed union
+(`comparison`/`notAdjacent`/`noComparableRule`/`noRepository`), all served `200`, and both client-side
+workarounds are deleted.
+
+**The ordering became a real decision the moment the reasons were told apart.** This method used to
+look for a comparable rule *before* adjacency was ever checked (`Compare` checked it internally,
+after). Both collapsed to the same 404, so the order was unobservable. It now checks adjacency first,
+matching `Findings.MonitorComparison.Compare`'s own documented discipline ("the comparison refuses
+before it resolves anything"): a non-adjacent pair whose `after` version also carries no comparable
+rule is *primarily* not adjacent, since that is true regardless of any rule.
+
+A version hash no session ever carried is still a `404` — that names something that does not exist,
+the same split `GetRulesInventory` already draws. `notAdjacent` carries the intervening versions the
+server already computes for `NonAdjacentRuleSetVersionsException`, so a client can say *why*.
+
+**A real, pre-existing defect this task's own real-browser pass uncovered, and did not fix: this host
+answers `500` for concurrent requests.** Chasing a "Could not reach the local API" message in a real
+browser (reproducible 3 of 3 by changing both version selects rapidly) led to a measurement against
+the live host: 6 overlapping `/api/monitor-comparison` requests answered 20 × `500` and 4 × `200`,
+while the identical requests issued sequentially all answered `200`. It is **not** specific to this
+endpoint or to this change — `/api/app-state` and `/api/rules-inventory`, neither touched here, each
+answered `500` for 1 of 6 concurrent requests on the same build. The shared factor is `store.Open()`
+per request (`Data/CLAUDE.md`'s `Pooling=False`, plus `Database.Migrate()`/`DerivedSchema.
+EnsureCurrent` on every open). The write gate (above) covers writer-vs-writer only; nothing serialises
+concurrent *readers* opening the store.
+
+This change does make the Monitor page hit it more easily — every version change now issues a request,
+where a non-adjacent selection previously issued none — which is the honest cost of moving the rule to
+the one place it belongs. Fixing the concurrency itself (open once per host, or gate readers) is a
+separate piece of work with its own design question, deliberately not folded in here.
+
 ### The Settings surface: this project's first POST endpoints, and where their logic lives
 
 The Settings page (`web/CLAUDE.md`) needed a read-only configuration view (Part A, `GET

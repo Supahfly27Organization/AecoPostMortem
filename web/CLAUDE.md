@@ -316,7 +316,24 @@ says the inventory shows one version at a time, and a client-side filter would m
 carried several versions' statements in the first place. Nothing in `rulesInventory.ts` can express
 that — `availableVersions` carries identities and windows, never rows.
 
-### The Monitor's two refusals are resolved on the client, not the server
+### The Monitor's refusals are read off the wire — the client-side port is deleted
+
+**This section's original decision has been reversed; the text below is kept as the record of what
+was tried and why it was replaced.** `/api/monitor-comparison` now answers a closed union naming which
+refusal applies (`AecoPostMortem.Api.MonitorComparisonResultEnvelope`), so `useMonitorComparison`
+reads the reason instead of deriving one. Deleted with it: `isAdjacent`/`compareVersions` (a real port
+of `Rules.RuleSetVersionAdjacency.RequireAdjacentPair` that nothing pinned to the original), the
+hook's `availableVersions` parameter and its array-identity foot-gun, and `MonitorPage`'s separate
+`repository === null` pre-check. `notAdjacent` also carries the intervening versions, so the page can
+now say *how many* rule-set versions were in force between a rejected pair — a fact it never had.
+
+The cost, stated plainly: a non-adjacent selection now makes a request where it previously made none.
+That is what buys a single implementation of adjacency. See `Api/CLAUDE.md`'s matching entry for the
+server-side ordering decision this forced into the open, and for a pre-existing concurrency defect
+(`500` on overlapping requests, on endpoints unrelated to this change) that the real-browser pass for
+this work uncovered and did not fix.
+
+### The Monitor's two refusals were resolved on the client, not the server (superseded — see above)
 
 FR-39's own PRD-level design says `/api/monitor-comparison` refuses in two structurally different
 ways — a non-adjacent pair (`Rules.NonAdjacentRuleSetVersionsException`) and an adjacent pair whose

@@ -94,6 +94,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.session-chips__label {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-chips__empty {
   margin: 0 0 1.5rem;
   color: var(--ink-2);

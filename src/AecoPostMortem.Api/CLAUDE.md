@@ -1599,8 +1599,9 @@ A version hash no session ever carried is still a `404` — that names something
 the same split `GetRulesInventory` already draws. `notAdjacent` carries the intervening versions the
 server already computes for `NonAdjacentRuleSetVersionsException`, so a client can say *why*.
 
-**A real, pre-existing defect this task's own real-browser pass uncovered, and did not fix: this host
-answers `500` for concurrent requests.** Chasing a "Could not reach the local API" message in a real
+**A real, pre-existing defect this task's own real-browser pass uncovered — since fixed, see
+`Data/CLAUDE.md`'s "The foreign-file guard reads the header with full sharing": this host answered
+`500` for concurrent requests.** Chasing a "Could not reach the local API" message in a real
 browser (reproducible 3 of 3 by changing both version selects rapidly) led to a measurement against
 the live host: 6 overlapping `/api/monitor-comparison` requests answered 20 × `500` and 4 × `200`,
 while the identical requests issued sequentially all answered `200`. It is **not** specific to this
@@ -1610,10 +1611,12 @@ per request (`Data/CLAUDE.md`'s `Pooling=False`, plus `Database.Migrate()`/`Deri
 EnsureCurrent` on every open). The write gate (above) covers writer-vs-writer only; nothing serialises
 concurrent *readers* opening the store.
 
-This change does make the Monitor page hit it more easily — every version change now issues a request,
-where a non-adjacent selection previously issued none — which is the honest cost of moving the rule to
-the one place it belongs. Fixing the concurrency itself (open once per host, or gate readers) is a
-separate piece of work with its own design question, deliberately not folded in here.
+This change made the Monitor page hit it more easily — every version change now issues a request,
+where a non-adjacent selection previously issued none — which is what surfaced it. The cause was not
+what the symptom suggested (nothing to do with SQLite locking, no read gate needed): `LocalStore`'s
+own foreign-file guard opened the store with `FileShare.Read`, denying write sharing, so it threw
+whenever any connection had the file open. After the fix, 30 overlapping requests across every read
+endpoint answer `200`.
 
 ### The Settings surface: this project's first POST endpoints, and where their logic lives
 

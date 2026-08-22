@@ -150,8 +150,16 @@ public sealed class LocalStore
             return;
         }
 
+        // FileShare.ReadWrite | FileShare.Delete, not FileInfo.OpenRead(): OpenRead opens with
+        // FileShare.Read, which *denies* write sharing, so this check threw
+        // "The process cannot access the file ... because it is being used by another process"
+        // whenever any SQLite connection had the store open — i.e. whenever a second request
+        // overlapped a first. Measured against a live host before the fix: 8 concurrent
+        // `/api/app-state` requests answered 3x500, and `/api/monitor-comparison` 20x500 of 24.
+        // This is a read of the first 15 bytes; it has no business excluding anyone.
         Span<byte> magic = stackalloc byte[15];
-        using (var stream = file.OpenRead())
+        using (var stream = new FileStream(
+            FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
         {
             if (stream.ReadAtLeast(magic, magic.Length, throwOnEndOfStream: false) < magic.Length
                 || !magic.SequenceEqual(SqliteMagic))

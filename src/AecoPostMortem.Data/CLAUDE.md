@@ -170,6 +170,37 @@ second test proves the scanner itself is not vacuous. Both projects are still cl
 this is the enforcement mechanism built ahead of what it enforces — extend the pattern list there,
 not a new one elsewhere, when a check lands that could plausibly read time or chance.
 
+### The foreign-file guard reads the header with full sharing — the fix for a live 500 under concurrent requests
+
+`Open`'s `GuardAgainstAForeignFile` refuses to touch a file this product did not create, by reading
+the first 15 bytes and checking SQLite's own magic. It did that with `FileInfo.OpenRead()`, which
+opens with `FileShare.Read` — allowing other *readers* while **denying writers**. Any SQLite
+connection has the store open for writing, so the guard threw
+`IOException: The process cannot access the file … because it is being used by another process`
+whenever a second `Open()` overlapped a request that was mid-query.
+
+That is a real, operator-visible failure, not a theoretical race: `serve` calls `Open()` per request,
+and browsers issue overlapping requests constantly. Measured against a live host before the fix —
+8 concurrent `/api/app-state` requests answered 3× `500`; 6 overlapping `/api/monitor-comparison`
+requests answered 20× `500` of 24 across repeats; the identical requests issued sequentially all
+answered `200`. In a browser it read as "Could not reach the local API. Is `aecopostmortem serve`
+running?" while the host was running perfectly well — reproducible 3 of 3 by changing both Monitor
+version selects in quick succession.
+
+The fix is the sharing mode, not a lock: a 15-byte read has no business excluding anyone, so it opens
+`FileShare.ReadWrite | FileShare.Delete`. Nothing about the guard's *meaning* changed — a foreign file
+is still refused, and a file being deleted concurrently (a purge) no longer blocks the reader either.
+
+**Two things this cost more than it should have, worth recording.** First, the obvious hypothesis was
+wrong: everything about the symptom said "SQLite locking under concurrency", and the fix looked like
+it would need a read gate or WAL. The stack trace said `System.IO.IOException` from
+`FileInfo.OpenRead` — the store's own guard, not the database engine at all. Second, the first two
+regression tests written for it **passed against the broken code**: eight threads calling `Open()`
+raced too narrowly to collide, and an idle `PostMortemContext` holds no file handle at all, because
+EF opens and closes the connection around each query. Only a genuinely open `SqliteConnection` —
+what a request mid-query actually has — reproduces it deterministically, which is what
+`ConcurrentOpenTests` now uses.
+
 ### `Pooling=False` on the connection
 
 A pooled handle outlives the context that opened it, and `purge` has to be able to delete the file

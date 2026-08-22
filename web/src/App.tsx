@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from 'react-router-dom'
 import { AppShell } from './AppShell'
 import { DigestPage } from './routes/DigestPage'
+import { MonitorPage } from './routes/MonitorPage'
 import { RulesInventoryPage } from './routes/RulesInventoryPage'
 import { SessionPage } from './routes/SessionPage'
 
@@ -17,7 +18,9 @@ function NotFound() {
   )
 }
 
-/** S-48's three routable surfaces (Scenario 1), each under the shared shell so the app-state
+/** S-48's three routable surfaces (Scenario 1), plus FR-39's Monitor comparison (a fourth,
+ * `/monitor` — see `MonitorPage.tsx`'s own doc comment for why it is a routed page rather than a
+ * section on the Digest or the Rules Inventory), each under the shared shell so the app-state
  * banner and the navigation are present regardless of which one is active. Router-agnostic on
  * purpose: `main.tsx` supplies `BrowserRouter` for the real app, tests supply `MemoryRouter`. */
 export function App() {
@@ -27,6 +30,7 @@ export function App() {
         <Route index element={<DigestPage />} />
         <Route path="sessions/:sessionId" element={<SessionPage />} />
         <Route path="rules" element={<RulesInventoryPage />} />
+        <Route path="monitor" element={<MonitorPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

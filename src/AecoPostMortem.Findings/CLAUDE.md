@@ -1136,8 +1136,9 @@ figure already does. Piece 4 wired a real caller: `AecoPostMortem.Api.ApiHost.Ge
 the live 35-session reference corpus with real hashes, both directions: a real adjacent pair answers
 200 (its rule's operands honestly `unresolved`, a null percentage on each side) and a real
 non-adjacent pair answers 404 via the same `NonAdjacentRuleSetVersionsException` this file's own
-`Compare` remarks already describe. No CLI command reads a served comparison yet — that, and
-mounting `web/src/digest/MonitorComparisonBlock.tsx` on a route, are still later work.
+`Compare` remarks already describe. `web/src/digest/MonitorComparisonBlock.tsx` is now mounted, at
+`/monitor` (`web/CLAUDE.md`'s "The Monitor comparison's missing door task") — no CLI command reads a
+served comparison yet, which is still later work.
 
 Mockup parity item #5 (`Finding.Headline`) is now real on all eleven `Finding`-producing files in
 this project — see "`Headline` is `required`, the same reason `Provenance` is" above for the exact

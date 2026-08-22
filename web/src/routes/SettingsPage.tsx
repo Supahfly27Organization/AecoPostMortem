@@ -186,6 +186,14 @@ function ConfigurationSummary({ settings }: { settings: SettingsEnvelope }) {
       <dl className="settings-page__figures">
         <Figure label="Store path" value={settings.storePath} mono />
         <Figure
+          label="Store location"
+          value={
+            settings.storeIsAtDefaultLocation
+              ? 'The documented default location for this machine'
+              : 'Not the default location — this store was chosen with --store'
+          }
+        />
+        <Figure
           label="Store"
           value={
             settings.storeExists

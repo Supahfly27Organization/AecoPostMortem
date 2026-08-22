@@ -28,8 +28,19 @@ public sealed class CommandSurfaceTests
     [Fact]
     public void Ingest_takes_an_optional_path_and_serve_an_optional_port()
     {
-        Assert.Equal("[path]", CommandSurface.Find("ingest")!.Arguments);
-        Assert.Equal("[--port <n>]", CommandSurface.Find("serve")!.Arguments);
+        Assert.Equal("[path] [--store <path>]", CommandSurface.Find("ingest")!.Arguments);
+        Assert.Equal("[--port <n>] [--store <path>]", CommandSurface.Find("serve")!.Arguments);
+    }
+
+    /// <summary>`--store` is global — every command opens the store, so every command documents it.
+    /// This table is the only place commands are enumerated, so a flag that works but is missing
+    /// here would be undiscoverable from the listing.</summary>
+    [Fact]
+    public void Every_command_documents_the_global_store_option()
+    {
+        Assert.All(
+            CommandSurface.Commands,
+            command => Assert.Contains("--store <path>", command.Arguments, StringComparison.Ordinal));
     }
 
     [Fact]

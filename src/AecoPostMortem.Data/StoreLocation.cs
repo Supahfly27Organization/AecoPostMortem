@@ -1,10 +1,16 @@
 namespace AecoPostMortem.Data;
 
 /// <summary>
-/// Where the store lives (FR-11). One documented per-user path, resolved from the platform's own
-/// local-application-data folder so the answer is the same on every machine without a setting to
-/// get wrong: <c>%LOCALAPPDATA%\AecoPostMortem\store.db</c> on Windows,
+/// Where the store lives by default (FR-11). One documented per-user path, resolved from the
+/// platform's own local-application-data folder so the answer is the same on every machine without
+/// anything to configure: <c>%LOCALAPPDATA%\AecoPostMortem\store.db</c> on Windows,
 /// <c>~/.local/share/AecoPostMortem/store.db</c> elsewhere.
+///
+/// This used to say "without a setting to get wrong", which stopped being literally true when
+/// <c>--store &lt;path&gt;</c> landed (<c>Cli/CLAUDE.md</c>). The rationale survives the change
+/// intact, and shaped it: the override is a per-invocation flag, never a persisted setting, so there
+/// is still nothing stored anywhere that can drift out of agreement with the store actually open —
+/// what this path is remains the answer for anyone who does not pass the flag.
 /// </summary>
 public static class StoreLocation
 {

@@ -71,7 +71,7 @@ const referenceComparison: MonitorComparisonEnvelope = {
 function stubFetch(handlers: {
   inventory?: RulesInventoryEnvelope
   comparisonStatus?: number
-  comparisonBody?: MonitorComparisonEnvelope
+  comparisonResult?: unknown
   comparisonThrows?: boolean
 }) {
   vi.stubGlobal(
@@ -88,7 +88,8 @@ function stubFetch(handlers: {
           throw new TypeError('Failed to fetch')
         }
         const status = handlers.comparisonStatus ?? 200
-        const body = handlers.comparisonBody ?? referenceComparison
+        const body =
+          handlers.comparisonResult ?? { kind: 'comparison', comparison: referenceComparison }
         return new Response(status === 200 ? JSON.stringify(body) : '', { status })
       }
 
@@ -116,31 +117,53 @@ describe('MonitorPage (FR-39, S-35, issue #43)', () => {
     expect(afterSelect).toHaveValue('v4')
   })
 
-  it('refuses a non-adjacent pair without a network request for the comparison, and never blanks the page', async () => {
+  // This test used to assert the opposite of what it asserts now, deliberately: the page once
+  // refused a non-adjacent pair *without any network request*, because the hook re-implemented the
+  // server's adjacency rule client-side to avoid an ambiguous 404. That duplication is gone, so the
+  // request is made and the server states the reason. The trade is one request per non-adjacent
+  // selection in exchange for a rule that exists in exactly one place -- and this page still never
+  // blanks while it is in flight.
+  it('renders the served non-adjacent refusal, naming what lies between, without blanking the page', async () => {
+    stubFetch({
+      comparisonResult: { kind: 'notAdjacent', intervening: [version('v2'), version('v3')] },
+    })
+
+    render(<MonitorPage />)
+
+    const refusal = await screen.findByText(/not adjacent/i)
+    expect(refusal).toBeInTheDocument()
+    expect(refusal).toHaveTextContent(/2 other rule-set versions were in force between them/i)
+    expect(screen.getByRole('combobox', { name: 'Before' })).toBeInTheDocument()
+  })
+
+  // Selecting a different version must re-request that pair. The old non-adjacent test covered this
+  // incidentally (it selected v1 and asserted no request followed); now that the server owns the
+  // adjacency rule, the interaction needs its own test or nothing would exercise the picker at all.
+  it('re-requests the comparison for a newly selected version', async () => {
     stubFetch({})
 
     render(<MonitorPage />)
-    // Wait for the initial adjacent-pair comparison to finish loading first, so the count captured
-    // below reflects only requests made *after* this point -- otherwise the initial (v3, v4) fetch,
-    // still in flight, could race with the count and read as a spurious call caused by selecting v1.
     await screen.findByText('41.8%')
 
-    const fetchMock = vi.mocked(fetch)
-    const callsBefore = fetchMock.mock.calls.length
+    const requestedBefore = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => (typeof input === 'string' ? input : input.toString()))
+    expect(requestedBefore.some((url) => url.includes('before=v3'))).toBe(true)
 
-    const beforeSelect = screen.getByRole('combobox', { name: 'Before' })
-    await userEvent.selectOptions(beforeSelect, 'v1')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Before' }), 'v1')
 
-    expect(await screen.findByText(/not adjacent/i)).toBeInTheDocument()
-
-    const comparisonCalls = fetchMock.mock.calls
-      .slice(callsBefore)
-      .filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes(MonitorComparisonRoute))
-    expect(comparisonCalls).toHaveLength(0)
+    await vi.waitFor(() => {
+      const urls = vi
+        .mocked(fetch)
+        .mock.calls.map(([input]) => (typeof input === 'string' ? input : input.toString()))
+      expect(urls.some((url) => url.includes(MonitorComparisonRoute) && url.includes('before=v1'))).toBe(
+        true,
+      )
+    })
   })
 
-  it('states the no-comparable-rule refusal distinctly for an adjacent pair the server still 404s', async () => {
-    stubFetch({ comparisonStatus: 404 })
+  it('states the no-comparable-rule refusal distinctly from the non-adjacent one', async () => {
+    stubFetch({ comparisonResult: { kind: 'noComparableRule' } })
 
     render(<MonitorPage />)
 
@@ -192,25 +215,26 @@ describe('MonitorPage (FR-39, S-35, issue #43)', () => {
     expect(screen.queryByRole('combobox', { name: 'Before' })).not.toBeInTheDocument()
   })
 
-  // ApiHost.GetMonitorComparison refuses unconditionally, before checking adjacency or any rule,
-  // when the whole store resolves no repository at all -- a real scope GetRulesInventory happily
-  // serves (`repository: null`). Reaching this page's picker in that scope would otherwise produce a
-  // false "no comparable rule" explanation for every pair, since that refusal reason is genuinely
-  // unrelated to adjacency or the rule shape (code review, round 2).
-  it('states plainly when no repository is recorded, rather than attempting a comparison', async () => {
+  // A store where no session resolves a repository at all is a real scope GetRulesInventory happily
+  // serves (`repository: null`). This page used to have to detect it itself and refuse *before*
+  // reaching the hook, purely so the endpoint's bodyless 404 could be labelled unambiguously. It is
+  // now just another served reason, stated in the same place as the other two -- so the page asks
+  // like it does for any other pair, and the pickers stay on screen.
+  it('states the served no-repository reason distinctly from the other refusals', async () => {
     const noRepoVersion = { ...version('v1'), repository: null }
     stubFetch({
       inventory: inventoryWith({
         selectedVersion: noRepoVersion,
         availableVersions: [noRepoVersion, { ...version('v2'), repository: null }],
       }),
+      comparisonResult: { kind: 'noRepository' },
     })
 
     render(<MonitorPage />)
 
     expect(await screen.findByText(/no repository is recorded/i)).toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: 'Before' })).not.toBeInTheDocument()
     expect(screen.queryByText(/no comparable rule/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not adjacent/i)).not.toBeInTheDocument()
   })
 
   it('renders its own message when the API cannot be reached', async () => {

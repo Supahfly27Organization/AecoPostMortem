@@ -1122,7 +1122,7 @@ public static class ApiHost
     /// statement to compare — the same "answers 404, the same as a missing session" precedent
     /// <see cref="GetRulesInventory"/> already documents for a version hash no session carried.
     /// </summary>
-    public static MonitorComparisonEnvelope? GetMonitorComparison(
+    public static MonitorComparisonResultEnvelope? GetMonitorComparison(
         LocalStore store, string beforeHash, string afterHash)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -1139,7 +1139,7 @@ public static class ApiHost
         var repositoryScope = BuildRepositoryScope(sessions);
         if (repositoryScope.SelectedRepository is null)
         {
-            return null;
+            return MonitorComparisonResultEnvelope.NoRepository;
         }
 
         var ruleSets = SessionRuleSetLookup.BuildAll(sessions, rawEvents);
@@ -1147,6 +1147,26 @@ public static class ApiHost
 
         var beforeId = new RuleSetVersionId { Repository = repositoryScope.SelectedRepository, Hash = beforeHash };
         var afterId = new RuleSetVersionId { Repository = repositoryScope.SelectedRepository, Hash = afterHash };
+
+        // Adjacency first, matching `Findings.MonitorComparison.Compare`'s own documented discipline
+        // ("the comparison refuses before it resolves anything"). The order used to be unobservable —
+        // both refusals collapsed into one bodyless 404 — and became a real decision the moment the
+        // reasons were served apart: a non-adjacent pair whose `after` version also happens to carry
+        // no comparable rule is *primarily* not adjacent, since that is true regardless of any rule.
+        try
+        {
+            RuleSetVersionAdjacency.RequireAdjacentPair(versions, beforeId, afterId);
+        }
+        catch (NonAdjacentRuleSetVersionsException nonAdjacent)
+        {
+            return MonitorComparisonResultEnvelope.NotAdjacent(nonAdjacent.Intervening);
+        }
+        catch (UnknownRuleSetVersionException)
+        {
+            // A hash no session in this repository ever carried names something that does not
+            // exist — 404, unlike the three designed refusals this method states for real pairs.
+            return null;
+        }
 
         var afterSessionIds = SessionIdsCarrying(ruleSets, afterId);
         var afterStatements = ruleSets
@@ -1160,7 +1180,7 @@ public static class ApiHost
             .FirstOrDefault(match => match.Kind == RuleShapeKind.PreferAOverB);
         if (preferAOverB is null)
         {
-            return null;
+            return MonitorComparisonResultEnvelope.NoComparableRule;
         }
 
         var beforeSessionIds = SessionIdsCarrying(ruleSets, beforeId);
@@ -1178,10 +1198,13 @@ public static class ApiHost
                 beforeInvocations,
                 afterInvocations);
 
-            return MonitorComparisonEnvelope.From(comparison);
+            return MonitorComparisonResultEnvelope.From(comparison);
         }
         catch (Exception ex) when (ex is UnknownRuleSetVersionException or NonAdjacentRuleSetVersionsException)
         {
+            // Unreachable through this method today — both are already answered above, before any
+            // operand is resolved — but `Compare` re-checks adjacency itself, so this stays as the
+            // structural guarantee that neither can escape as an unhandled 500.
             return null;
         }
     }

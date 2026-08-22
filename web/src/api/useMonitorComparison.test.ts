@@ -4,13 +4,17 @@ import { useMonitorComparison } from './useMonitorComparison'
 import { MonitorComparisonRoute, type MonitorComparisonEnvelope } from './monitor'
 import type { RuleSetVersionEnvelope } from './rulesInventory'
 
-// One ascending timestamp per hash -- real ISO-8601 values, distinct enough that ordinal string
-// comparison alone (no need for the FirstSessionId tie-break) settles every pair's order.
+// This file used to spend most of its length on adjacency: the hook re-implemented
+// `Rules.RuleSetVersionAdjacency.RequireAdjacentPair`'s sort in TypeScript, so it needed its own
+// tests for chronological ordering, a scrambled input array and the tie-break. That logic is gone --
+// the endpoint states which refusal applies (`MonitorComparisonResultEnvelope`) and the hook reads
+// it. Adjacency is tested where it is now implemented once, server-side, in
+// `RuleSetVersionAdjacencyTests` and `MonitorComparisonRouteTests`; what is left to test here is
+// this hook's own job: turning each served arm into a state, and not letting a stale response win.
+
 const startedAt: Record<string, string> = {
-  v1: '2026-04-01T09:00:00Z',
   v2: '2026-04-15T09:00:00Z',
   v3: '2026-05-01T09:00:00Z',
-  v4: '2026-05-15T09:00:00Z',
 }
 
 function version(hash: string, overrides: Partial<RuleSetVersionEnvelope> = {}): RuleSetVersionEnvelope {
@@ -19,14 +23,11 @@ function version(hash: string, overrides: Partial<RuleSetVersionEnvelope> = {}):
     hash,
     firstSessionId: `${hash}-first`,
     lastSessionId: `${hash}-last`,
-    firstSessionStartedAt: startedAt[hash],
+    firstSessionStartedAt: startedAt[hash] ?? '2026-04-01T09:00:00Z',
     sessionCount: 3,
     ...overrides,
   }
 }
-
-// Chronological order, matching Rules.RuleSetVersionAdjacency.RequireAdjacentPair's own ordering.
-const versions = [version('v1'), version('v2'), version('v3'), version('v4')]
 
 const referenceComparison: MonitorComparisonEnvelope = {
   beforeVersion: version('v2'),
@@ -51,149 +52,152 @@ const referenceComparison: MonitorComparisonEnvelope = {
   },
 }
 
+function respondWith(body: unknown, status = 200) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      expect(url).toContain(MonitorComparisonRoute)
+      return new Response(JSON.stringify(body), { status })
+    }),
+  )
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe('useMonitorComparison', () => {
-  it('loads a comparison for an adjacent pair', async () => {
+  it('loads a comparison, requesting the selected pair', async () => {
+    const requested: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString()
-        expect(url).toContain(MonitorComparisonRoute)
-        expect(url).toContain('before=v2')
-        expect(url).toContain('after=v3')
-        return new Response(JSON.stringify(referenceComparison), { status: 200 })
+        requested.push(typeof input === 'string' ? input : input.toString())
+        return new Response(
+          JSON.stringify({ kind: 'comparison', comparison: referenceComparison }),
+          { status: 200 },
+        )
       }),
     )
 
-    const { result } = renderHook(() => useMonitorComparison(versions, 'v2', 'v3'))
+    const { result } = renderHook(() => useMonitorComparison('v2', 'v3'))
 
-    expect(result.current).toEqual({ status: 'loading' })
     await waitFor(() => expect(result.current.status).toBe('loaded'))
-    expect(result.current).toEqual({ status: 'loaded', comparison: referenceComparison })
+    expect(requested[0]).toContain('before=v2')
+    expect(requested[0]).toContain('after=v3')
   })
 
-  // The two versions are real entries in `versions`, but two apart -- v1 and v3 skip v2. The check
-  // is computed locally against a real re-sort of the list, so this never reaches the network.
-  it('refuses a non-adjacent pair without ever calling the server', async () => {
-    const fetchSpy = vi.fn()
-    vi.stubGlobal('fetch', fetchSpy)
+  // The three refusals the endpoint used to collapse into one bodyless 404. Each is served 200 with
+  // its own `kind` now, so this hook reports it rather than inferring it.
+  it('reports a non-adjacent pair, carrying what the server says lies between them', async () => {
+    respondWith({ kind: 'notAdjacent', intervening: [version('v2')] })
 
-    const { result } = renderHook(() => useMonitorComparison(versions, 'v1', 'v3'))
+    const { result } = renderHook(() => useMonitorComparison('v1', 'v3'))
 
     await waitFor(() => expect(result.current.status).toBe('notAdjacent'))
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(result.current).toEqual({ status: 'notAdjacent', intervening: [version('v2')] })
   })
 
-  // Reversed order (after before before, chronologically) is not adjacent either -- the check
-  // requires after's index to be exactly one past before's, not merely "one apart".
-  it('refuses a reversed pair the same way', async () => {
-    const fetchSpy = vi.fn()
-    vi.stubGlobal('fetch', fetchSpy)
+  it('reports an adjacent pair with no comparable rule', async () => {
+    respondWith({ kind: 'noComparableRule' })
 
-    const { result } = renderHook(() => useMonitorComparison(versions, 'v3', 'v2'))
-
-    await waitFor(() => expect(result.current.status).toBe('notAdjacent'))
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  // Code review (round 2): the earlier version of this check trusted the caller's own array order
-  // rather than sorting by `firstSessionStartedAt` -- a real gap, since nothing on the TypeScript
-  // side enforced that `availableVersions` always arrives pre-sorted. This test hands the hook the
-  // same four versions in a deliberately scrambled array order (not the chronological order
-  // `startedAt` implies) and confirms adjacency is still judged correctly by real timestamp, not by
-  // array position: v2/v3 are still adjacent, v1/v3 are still not, even though v3 sits *before* v2
-  // in this array.
-  it('judges adjacency by real chronological order, not by the array order it is handed', async () => {
-    const scrambled = [version('v3'), version('v1'), version('v4'), version('v2')]
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify(referenceComparison), { status: 200 })),
-    )
-    const { result: adjacent } = renderHook(() => useMonitorComparison(scrambled, 'v2', 'v3'))
-    await waitFor(() => expect(adjacent.current.status).toBe('loaded'))
-
-    const fetchSpy = vi.fn()
-    vi.stubGlobal('fetch', fetchSpy)
-    const { result: nonAdjacent } = renderHook(() => useMonitorComparison(scrambled, 'v1', 'v3'))
-    await waitFor(() => expect(nonAdjacent.current.status).toBe('notAdjacent'))
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  // A 404 for a pair this hook already confirmed adjacent can only be GetMonitorComparison's other
-  // refusal reachable through this UI (no comparable PreferAOverB statement in the after version) --
-  // never the adjacency exception, since the hook never sends a request it believes is non-adjacent.
-  // (The endpoint's third 404 cause, no repository resolved at all, is ruled out by `MonitorPage.tsx`
-  // itself before this hook is ever reached with a real selection -- see that file's own doc comment.)
-  it('reports the no-comparable-rule refusal for an adjacent pair the server still 404s', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
-
-    const { result } = renderHook(() => useMonitorComparison(versions, 'v2', 'v3'))
+    const { result } = renderHook(() => useMonitorComparison('v2', 'v3'))
 
     await waitFor(() => expect(result.current.status).toBe('noComparableRule'))
   })
 
-  it('reports a network failure distinctly from either refusal', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new TypeError('Failed to fetch')
-      }),
-    )
+  it('reports a store with no repository recorded anywhere', async () => {
+    respondWith({ kind: 'noRepository' })
 
-    const { result } = renderHook(() => useMonitorComparison(versions, 'v2', 'v3'))
+    const { result } = renderHook(() => useMonitorComparison('v2', 'v3'))
+
+    await waitFor(() => expect(result.current.status).toBe('noRepository'))
+  })
+
+  it('reports a genuine failure as an error, distinctly from every stated refusal', async () => {
+    respondWith({}, 500)
+
+    const { result } = renderHook(() => useMonitorComparison('v2', 'v3'))
 
     await waitFor(() => expect(result.current.status).toBe('error'))
   })
 
-  // A non-404 HTTP failure (e.g. the server itself erroring) is the other side of the `/status 404/`
-  // discriminator `useMonitorComparison.ts` uses to tell a real refusal apart from every other
-  // failure -- it must not be mistaken for "no comparable rule" just because it's a 4xx.
-  it('reports a 500 response as a plain error, not the no-comparable-rule refusal', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })))
-
-    const { result } = renderHook(() => useMonitorComparison(versions, 'v2', 'v3'))
-
-    await waitFor(() => expect(result.current.status).toBe('error'))
-  })
-
-  it('stays loading until both hashes are chosen', () => {
+  it('stays loading, and fires no request, until both hashes are selected', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
 
-    const { result } = renderHook(() => useMonitorComparison(versions, null, null))
+    const { result } = renderHook(() => useMonitorComparison(null, 'v3'))
 
-    expect(result.current).toEqual({ status: 'loading' })
+    expect(result.current.status).toBe('loading')
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('re-fetches for the new pair when the selected pair changes', async () => {
-    const urls: string[] = []
+  it('never lets a response that settles after the pair changed overwrite the newer state', async () => {
+    // The stale-response guard: the first request resolves only after the hook has been re-rendered
+    // with a different pair, so its result must be discarded rather than replacing the new one.
+    let resolveFirst: (response: Response) => void = () => {}
+    let call = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        urls.push(typeof input === 'string' ? input : input.toString())
-        return new Response(JSON.stringify(referenceComparison), { status: 200 })
+      vi.fn(async () => {
+        call += 1
+        if (call === 1) {
+          return new Promise<Response>((resolve) => (resolveFirst = resolve))
+        }
+        return new Response(JSON.stringify({ kind: 'noComparableRule' }), { status: 200 })
       }),
     )
 
     const { result, rerender } = renderHook(
-      ({ before, after }: { before: string; after: string }) => useMonitorComparison(versions, before, after),
+      ({ before, after }: { before: string; after: string }) => useMonitorComparison(before, after),
       { initialProps: { before: 'v1', after: 'v2' } },
     )
 
-    await waitFor(() => expect(result.current.status).toBe('loaded'))
-    expect(urls).toHaveLength(1)
-    expect(urls[0]).toContain('before=v1')
-    expect(urls[0]).toContain('after=v2')
+    rerender({ before: 'v2', after: 'v3' })
+    await waitFor(() => expect(result.current.status).toBe('noComparableRule'))
+
+    resolveFirst(
+      new Response(JSON.stringify({ kind: 'comparison', comparison: referenceComparison }), {
+        status: 200,
+      }),
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(result.current.status).toBe('noComparableRule')
+  })
+  // A superseded request rejects with AbortError once the newer selection aborts it; that rejection
+  // must never surface as the error state, which is what an operator reads as "the API is down".
+  // Written while chasing a real "Could not reach the local API" seen in a browser -- this path
+  // turned out to be sound (the real cause was a pre-existing store-concurrency 500, see the PR),
+  // but the guard it pins had no test of its own, since the sibling test above covers a late
+  // *success* rather than a late rejection.
+  it('never reports an aborted, superseded request as a failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        void input
+        return await new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(
+            () => resolve(new Response(JSON.stringify({ kind: 'noComparableRule' }), { status: 200 })),
+            30,
+          )
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer)
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      }),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ before, after }: { before: string; after: string }) => useMonitorComparison(before, after),
+      { initialProps: { before: 'v1', after: 'v4' } },
+    )
 
     rerender({ before: 'v2', after: 'v3' })
 
-    await waitFor(() => expect(urls).toHaveLength(2))
-    expect(urls[1]).toContain('before=v2')
-    expect(urls[1]).toContain('after=v3')
+    await waitFor(() => expect(result.current.status).not.toBe('loading'))
+    expect(result.current.status).toBe('noComparableRule')
   })
 })

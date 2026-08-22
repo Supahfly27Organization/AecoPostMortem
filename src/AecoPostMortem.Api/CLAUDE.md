@@ -1607,35 +1607,72 @@ rebuild` in a terminal while a separate `serve` process was up), but was newly, 
 
 **The threat model this host assumes.** `ApiHost.Build` binds `127.0.0.1` only (`ApiHost.cs`'s
 existing "not `localhost`" decision, above) — no remote machine can reach either write route. Within
-that boundary this is a single-operator local tool with no authentication on any route, write ones
-included: a hostile web page open in the same browser could still fire a blind, cross-origin
-`fetch('http://127.0.0.1:<port>/api/ingest', { method: 'POST' })` — a body-less POST needs no CORS
-preflight, and this host adds no CORS policy of its own, so nothing stops the request from being
-*sent* even though the attacker's page could never read the (same-origin-only) response. This is a
-known, accepted gap for exactly `ingest` and `rebuild`, not a blind spot: both are safe to trigger
-uninvited — `ingest` is idempotent by construction (RAW's own `(source_file, byte_offset,
-content_hash)` conflict target, `Data/CLAUDE.md`) and `rebuild` only re-derives already-stored RAW,
-never reads the source directory again — so the worst an uninvited trigger can do is waste a few
-seconds of CPU. This reasoning does **not** extend to a hypothetical `purge` endpoint: deleting the
-operator's whole store from an uninvited cross-origin POST would be a real, destructive consequence
-this same gap would create, which is exactly why `purge` stays deliberately unbuilt here — the next
-person adding a POST that *can* destroy data inherits this paragraph as a reason to design its own,
-stricter gate (a confirmation token, an operator-supplied header, or CSRF protection) rather than
-assuming this one's reasoning still applies.
+that boundary this is a single-operator local tool with no authentication on any route.
 
-**What this paragraph does not cover (code review, Important — named so the next reader does not
-mistake loopback binding for a complete boundary):** binding to `127.0.0.1` defends against a remote
-network attacker, not against DNS rebinding — a page served from an attacker-controlled domain whose
-DNS answer is switched to `127.0.0.1` after the browser's same-origin check becomes, from the
-browser's perspective, same-origin with this host, at which point it can read every `GET` route's
-response too, not merely send a blind write. That would expose real corpus content (prompt text, file
-paths, tool arguments) through `/api/digest` and `/api/sessions/{id}/steps/{id}`, not only trigger a
-safe-to-replay write — a materially larger exposure than the write-only gap this paragraph otherwise
-accepts. This is a pre-existing gap in every route this host already served before this task (S-48
-onward), not something the Settings surface introduced; it is named here because this is now the
-threat-model paragraph of record and should not read as though loopback binding is a sufficient
-boundary on its own. The mitigation, if ever judged worth building, is `Host`-header validation
-(reject a request whose `Host` is not `127.0.0.1:<port>`) — not attempted in this slice.
+### Origin and Host validation close a live simple-request CSRF path (code review, follow-up round)
+
+The first version of this paragraph framed the cross-origin write risk as theoretical and
+DNS-rebinding-only ("a hostile page could fire a blind POST whose response it can never read, so the
+worst it can do is waste CPU"). That framing was wrong about how live the plain-CSRF case already
+was, and the coordinator verified it directly against a running `serve --port 5111` instance:
+
+```
+POST /api/rebuild
+Origin: https://evil.example
+Content-Type: text/plain
+```
+
+returned `200` with a real, genuine rebuild — no rebinding needed. `Content-Type: text/plain` (or no
+body at all) makes this a CORS **simple request**: the browser never sends a preflight `OPTIONS`
+for it, and this host added no CORS policy of its own, so nothing before this round of the task
+stopped the write from actually running. CORS only ever stopped the attacker's page from *reading*
+the response — it never stopped the write itself, which is the side effect that matters for `ingest`/
+`rebuild`. The default port (`CommandRunner.DefaultPort`) is a fixed, documented constant, so it is
+trivially guessable by any page that wants to try it blind.
+
+`ApiHost.IsAllowedWriteOrigin` is the fix, checked before either write route reaches `RunGated` (a
+refusal never runs the command underneath it, answering `403` via `Results.Problem`):
+
+1. **`Origin`, when present, must equal this host's own real origin exactly** — the load-bearing
+   check. A browser adds `Origin` to every cross-origin request and to most same-origin
+   state-changing requests too (the Fetch spec adds it for any non-GET/HEAD request, regardless of
+   `Content-Type`), and a real attacker page's own `Origin` can never be spoofed to read as this
+   host's. A request with **no** `Origin` header at all — curl, the CLI's own tests, this suite's own
+   `HttpClient` (which never sets it) — is not refused on that basis alone: there is no
+   browser-enforced guarantee to check for a caller that never sends one, and refusing it outright
+   would break every non-browser caller these two routes also have to serve.
+2. **`Host` must resolve to this same connection's own real, actually-bound loopback authority** —
+   read per request from `HttpContext.Connection.LocalPort` (the real, OS-assigned port for *this*
+   accepted connection), never the `port` parameter `Build` was originally given, which is `0` for
+   every test using an ephemeral port and would never match a real bound port if trusted directly.
+   This is what actually closes DNS rebinding, corrected from the prior framing: a rebound page's own
+   `Origin` header still names its real origin (its hostname, not the IP the DNS answer was switched
+   to), which check 1 above already refuses on its own — but the same attack could otherwise send
+   `Host: evil.example:<port>` while physically connecting to `127.0.0.1`, and validating `Host` too
+   closes that path independently of whatever `Origin` claims, rather than leaning on check 1 alone
+   for a threat this file used to name as its whole justification for a `Host` check.
+
+Both checks are permissive toward a non-browser caller by design (`WriteRouteOriginTests` proves the
+absent-`Origin` case explicitly, alongside a cross-origin `Origin` refusal, a matching same-origin
+`Origin` allowance, and a spoofed, non-loopback `Host` refusal with no `Origin` header present at
+all — the DNS-rebinding shape). Re-verified against a real browser on the real served page after this
+fix: same-origin `POST /api/ingest`/`POST /api/rebuild` from `http://127.0.0.1:5111/settings` still
+succeed end to end (real coverage report / rebuild summary rendered), since the page's own `Origin`
+and `Host` are both this host's real authority by construction.
+
+**Why this reasoning still does not extend to a hypothetical `purge` endpoint.** `ingest` and
+`rebuild` were accepted as safe-to-trigger-uninvited even before this fix — `ingest` is idempotent by
+construction (RAW's own `(source_file, byte_offset, content_hash)` conflict target, `Data/CLAUDE.md`)
+and `rebuild` only re-derives already-stored RAW, never reads the source directory again — so an
+uninvited trigger could waste CPU but never destroy data. That reasoning is now additionally backed
+by a real guard rather than resting on "safe replay" alone, but it still does not extend to a
+destructive endpoint: deleting the operator's whole store from an uninvited request would be a real,
+destructive consequence no amount of "it was idempotent anyway" reasoning covers, which is exactly
+why `purge` stays deliberately unbuilt here. The next person adding a POST that *can* destroy data
+inherits a working Origin/Host guard to build on top of, not only a paragraph — but a destructive
+route may still warrant a stricter gate on top of this one (a confirmation token or an
+operator-supplied header), since `IsAllowedWriteOrigin` only proves a request came from this host's
+own served page, not that the operator specifically intended *this* action.
 
 ### Real timing measured, not assumed, before deciding this stays synchronous
 

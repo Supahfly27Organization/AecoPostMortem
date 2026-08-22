@@ -428,7 +428,7 @@ phrased narrowly enough on both sides to watch yet (proven separately at the uni
 one operand a ban names, `Watched` when it resolves — no `ToolRole` involved, since the question a
 ban's own adherence check needs answered ("was the named tool called at all", `Rules.BannedToolCheck`)
 never needed a role in the first place, once the check was actually designed instead of assumed to
-need `ToolVocabularyMismatchCheck`'s own `RuleToolMention` shape (`Rules/CLAUDE.md`'s two new
+need the since-deleted `ToolVocabularyMismatchCheck`'s own `RuleToolMention` shape (`Rules/CLAUDE.md`'s
 non-obvious-decision entries explain why that check does not fit a prohibition).
 
 `RuleShapeKind.NeverReadPath` is piece 3's third slice: `Watched` unconditionally, the moment the
@@ -1224,7 +1224,7 @@ single real tool or role is named "Glob/Grep/Read".
 
 Piece 3's second slice (`BannedToolCheck.cs`, `Rules/CLAUDE.md`) closed the `ToolIsBanned` gap this
 paragraph once named: turning a ban into a real verdict did not need a `ToolRole` after all, once the
-check was actually designed rather than assumed to reuse `ToolVocabularyMismatchCheck`'s own
+check was actually designed rather than assumed to reuse the since-deleted `ToolVocabularyMismatchCheck`'s own
 `RuleToolMention` shape (`Rules/CLAUDE.md`'s two new non-obvious-decision entries). `Rules
 InventoryClassifier` now watches a `ToolIsBanned` match whose single operand resolves, and
 `Findings.BannedToolFinding` is wired into `GetDigest` as its seventh check — the real corpus has no
@@ -1733,6 +1733,26 @@ it.
 own headers are; a direct caller of the method (the CLI, a test) has already stated its intent by
 calling it, and putting the check inside would mean either passing a fake header around or a second,
 divergent notion of "confirmed".
+
+### The write gate is a parameter, not a local — so "every write route is behind it" is tested, not asserted
+
+`RunGatedTests` proves the gate's own refusal and release logic deterministically, and deliberately
+does not race two real HTTP requests (its own remarks explain why). But that leaves the claim this
+host actually depends on — *which routes consult that gate* — checked by nobody: a fourth write route
+wired to its own `new SemaphoreSlim(1, 1)`, or to none at all, would pass every test in this project
+while silently allowing a concurrent write.
+
+`Build` therefore has an `internal` overload taking the `SemaphoreSlim`, with the public one
+unchanged and still creating a fresh gate per host. A test holds the gate it passes in, then asserts
+all three write routes answer `409` — `PurgeRouteTests.
+Every_write_route_including_purge_is_served_behind_the_one_shared_gate`. It is deterministic by
+construction rather than by timing: the gate is held before any request is sent, and `RunGated` uses
+`Wait(0)`, so nothing blocks and no race has to be reproduced over a socket.
+
+The test was mutation-checked rather than trusted for passing: rewiring `PurgeRoute` to
+`RunGated(new SemaphoreSlim(1, 1), ...)` — a plausible copy-paste error, and exactly the defect this
+guards — makes it fail. A test that only ever passed would have proven nothing here, since the
+assertion it makes was previously unreachable at all.
 
 ### What an operator sees immediately after a purge — measured, and the opposite of what was predicted
 

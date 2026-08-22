@@ -321,7 +321,7 @@ adherence question ("was it called at all") is genuinely single-operand, with no
 subtract against. Forcing one operand into `AdherenceFigure`'s two-operand shape would mean inventing
 a second operand this check has no basis for, the same "do not guess a mapping nothing has decided"
 discipline `Rules/CLAUDE.md` documents for why this check exists in the first place rather than
-reusing `ToolVocabularyMismatchCheck`. `named_tool`, `call_count` and one `resolved_tool` entry per
+reusing the since-deleted `ToolVocabularyMismatchCheck`. `named_tool`, `call_count` and one `resolved_tool` entry per
 tool the operand resolved to ride in `Evidence` instead — the same "a percentage never appears
 without the count that produced it" discipline this note already documents for `FailedToolCallsFinding`,
 applied here to a plain count with no percentage at all.

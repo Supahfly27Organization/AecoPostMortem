@@ -12,8 +12,8 @@ namespace AecoPostMortem.Api;
 /// <c>ToolIsBanned</c> match's single operand is resolved via <see cref="OperandResolver.Resolve"/>
 /// and watched when that one operand resolves — no <see cref="ToolRole"/> involved, since
 /// <c>BannedToolCheck</c> (<c>Rules/CLAUDE.md</c>) answers "was the named tool called at all" rather
-/// than a role comparison, the question <c>ToolVocabularyMismatchCheck</c>'s own <c>TargetRole</c>
-/// exists for. <see cref="RuleShapeKind.NeverReadPath"/> and <see cref="RuleShapeKind.AlwaysPassParam"/>
+/// than a role comparison — the question a since-deleted role-comparison check
+/// (<c>ToolVocabularyMismatchCheck</c>) existed for, and the reason it never fit a prohibition. <see cref="RuleShapeKind.NeverReadPath"/> and <see cref="RuleShapeKind.AlwaysPassParam"/>
 /// are both watched unconditionally instead (below) — neither operand is a tool name, so neither has
 /// an "unresolved" state to gate on. Every other matched shape is
 /// <see cref="RuleStatementStatus.CheckableNotYetBuilt"/>.

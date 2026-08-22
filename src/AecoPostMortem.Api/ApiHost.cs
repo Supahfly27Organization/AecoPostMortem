@@ -116,8 +116,26 @@ public static class ApiHost
         LocalStore store,
         string copilotSessionStateRoot,
         int port,
-        string? webRootPath = null)
+        string? webRootPath = null) =>
+        Build(store, copilotSessionStateRoot, port, webRootPath, new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// The same host, with the write gate supplied rather than created here — the seam that makes
+    /// "every write route is served behind the one shared gate" a testable claim instead of a
+    /// structural one nothing checks. A test holds the gate it passes in and asserts each write route
+    /// answers 409 without its command running (<c>PurgeRouteTests.
+    /// Every_write_route_including_purge_is_served_behind_the_one_shared_gate</c>); the public
+    /// overload above is unchanged for every real caller, which still gets one fresh gate per host.
+    /// </summary>
+    internal static WebApplication Build(
+        LocalStore store,
+        string copilotSessionStateRoot,
+        int port,
+        string? webRootPath,
+        SemaphoreSlim writeGate)
     {
+        ArgumentNullException.ThrowIfNull(writeGate);
+
         ArgumentNullException.ThrowIfNull(store);
         ArgumentException.ThrowIfNullOrWhiteSpace(copilotSessionStateRoot);
 
@@ -146,12 +164,12 @@ public static class ApiHost
 
         var app = builder.Build();
 
-        // The single gate both write routes are served behind — see the "The first write endpoint:
-        // a shared write gate, and the threat model this host assumes" non-obvious decision in
-        // Api/CLAUDE.md. One SemaphoreSlim(1, 1) per host instance (not a process-wide static): a
-        // test that builds two hosts against two different stores must never have one host's run
-        // block the other's.
-        var writeGate = new SemaphoreSlim(1, 1);
+        // `writeGate` is the single gate all three write routes are served behind — see the "The
+        // first write endpoint: a shared write gate, and the threat model this host assumes"
+        // non-obvious decision in Api/CLAUDE.md. One SemaphoreSlim(1, 1) per host instance (not a
+        // process-wide static): a test that builds two hosts against two different stores must never
+        // have one host's run block the other's. It is a parameter rather than a local only so a test
+        // can hold it and prove every write route consults it — see this overload's own remarks.
 
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
 

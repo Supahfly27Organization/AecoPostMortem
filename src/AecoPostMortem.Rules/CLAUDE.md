@@ -12,8 +12,7 @@ versioning, tool-vocabulary and role derivation, operand resolution, the check s
 | `ToolRole.cs` | `ToolRole` — the closed five-member enum (`FileRead`, `Search`, `FileWrite`, `Shell`, `Spawn`); no sixth "unclassified" member, see below |
 | `ToolRoleDeriver.cs` | `ToolRoleDeriver.Derive` — classifies each tool by its calls' argument shapes (FR-30); `ToolRoleCount`, `ToolRoleSummary` (with `DominantTool`), `ToolRoleDerivation` |
 | `OperandResolver.cs` | FR-31/FR-32 (S-23, issue #37): `OperandResolutionLayer` (the four confidence layers), `ResolvedOperand`, `TwoOperandResolution`, and `OperandResolver.Resolve`/`ResolveTwoOperands` — a rule operand's text resolved to tool names, most-confident layer first, with two-operand subtraction (A winning ties) |
-| `ToolVocabularyMismatchCheck.cs` | FR-35 (S-26, issue #40): `RuleToolMention` (a rule's source text, one named tool, and the `ToolRole` it targets — plain input), `ToolVocabularyMismatch` (sealed base) with `MinorToolNamed`/`NonExistentToolNamed`, and `ToolVocabularyMismatchCheck.Run`, which resolves each mention through `OperandResolver` and compares against the target role's `DominantTool` |
-| `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why `ToolVocabularyMismatchCheck` does not fit a prohibition |
+| `BannedToolCheck.cs` | Piece 3's `ToolIsBanned` adherence check: `BannedToolMention` (a rule's source text and the one tool it bans — plain input, no `ToolRole`) and `BannedToolUsage` (the mention plus its resolved tools and call count), and `BannedToolCheck.Run`, which resolves each mention through `OperandResolver` and reports every resolved mention — always a violation, see below for why a role-comparison check does not fit a prohibition |
 | `NeverReadPathCheck.cs` | Piece 3's `NeverReadPath` adherence check: `NeverReadPathMention` (a rule's source text and the one path it prohibits — plain input) and `NeverReadPathViolation` (the mention plus how many real `ReadEvent`s matched it and which sessions), and `NeverReadPathCheck.Run`, which matches each mention's path against the corpus on a path-segment boundary (never a bare substring) and reports only mentions with at least one match — no `OperandResolver` involved, since a path operand is not a tool-vocabulary lookup |
 | `UseAAfterBCheck.cs` | Piece 3's `UseAAfterB` adherence check: `UseAAfterBMention` (a rule's source text plus `LaterToolText`/`EarlierToolText` — plain input), `TimedToolCall` (a call's session, tool name and `StartedAt`, opaque and ordinally sortable — no `Data.Execution.ToolCall` reference), `UseAAfterBViolation` (the mention plus how many later-tool calls had no earlier prerequisite call and which sessions), and `UseAAfterBCheck.Run`, which resolves both operands via `OperandResolver.ResolveTwoOperands` (skipping a mention with either side `Unresolved`, the same "no clean case reported" shape `BannedToolCheck` follows) and orders each session's calls by `StartedAt` itself (never trusting caller order) before walking them for the ordering violation |
 | `AlwaysPassParamCheck.cs` | Piece 3's fifth and final slice, `AlwaysPassParam`'s adherence check: `AlwaysPassParamMention` (a rule's source text and the one argument key it requires — plain input), `ParamCarryingCall` (a call's session, tool call id, `SpawnsAgent`, `ArgumentsRecorded` and the opaque `ArgumentKeys` set its own RAW arguments carried), `AlwaysPassParamViolation` (the mention plus how many subagent-dispatch calls omitted the key and which sessions), and `AlwaysPassParamCheck.Run`, which filters to `SpawnsAgent && ArgumentsRecorded` calls only — the one structural, Repo-Rule-6-safe population this shape's own operand can name without guessing (see below), narrowed further to calls this project actually has a record of — and reports a mention only when at least one such call is missing the key, the same "no clean case reported" shape `BannedToolCheck`/`NeverReadPathCheck` already follow |
@@ -349,37 +348,43 @@ own claim was entirely absorbed by A") from `Unresolved` ("nothing matched B in 
 and collapsing the two would make a resolution's own record of what happened lie about which one
 occurred.
 
-### `ToolVocabularyMismatch` is a sealed hierarchy, not one type with nullable fields
+### `ToolVocabularyMismatchCheck` was deleted — built for FR-35, never wired, and four scoping passes failed to find it a use
 
-FR-35's two scenarios carry structurally different data: a minor tool named needs the dominant tool
-and both call counts, a non-existent tool needs neither. `MinorToolNamed` and `NonExistentToolNamed`
-both derive from `ToolVocabularyMismatch` rather than being one record with nullable
-`DominantTool`/counts, the same reasoning `OperandResolutionLayer.Unresolved` gives for being its own
-enum member instead of an empty `Tools` set — there is no field here that could be null for one kind
-and required for the other, so a caller pattern-matching on the type can never observe a
-half-populated result.
+`ToolVocabularyMismatchCheck.cs` (FR-35, S-26, issue #40) and its 167-line test file are gone. It
+shipped complete and tested — `RuleToolMention` (a rule's text, one named tool, the `ToolRole` it
+targets), a sealed `ToolVocabularyMismatch` hierarchy (`MinorToolNamed`/`NonExistentToolNamed`) and a
+`Run` that resolved each mention through `OperandResolver` and compared it against the target role's
+`DominantTool` — and **no orchestrator ever called it**. Not once, in any release.
 
-### `ToolVocabularyMismatchCheck` reuses `Unresolved` and `DominantTool` rather than re-deriving either
+That was not an oversight anyone forgot to close; it was checked repeatedly and each pass concluded
+the check could not be used:
 
-`Run` calls `OperandResolver.Resolve` once per mention and checks `Layer == OperandResolutionLayer.
-Unresolved` for the non-existent case — the exact condition `OperandResolver.cs`'s own doc comment
-names S-26 as the caller of. For the minor-tool case it compares `resolved.Tools` (not the mention's
-raw text) against `ToolRoleDeriver.Derive(...).Roles[TargetRole].DominantTool.ToolName`, so an operand
-that resolved through the server or role layer to a set containing the dominant tool is not flagged
-even though its own text is not the dominant tool's literal name.
+- **Piece 3's second slice (PR #107)** intended to reuse it for `ToolIsBanned` and found it does not
+  fit a prohibition at all (the reasoning below, kept because it is the reason `BannedToolCheck`
+  exists and is the shape of mistake worth not repeating).
+- Two later scoping passes looked for any other caller and found none.
+- The Rules Inventory's own `Watched` classification never needed it: every one of FR-34's five
+  shapes resolves through `OperandResolver` directly.
 
-### A target role with no tools at all produces no finding, even for a tool that exists
+Deleting it is the honest close. A built, tested check that nothing calls reads as coverage the
+product does not have — precisely the "silence reading as compliance" failure this whole product
+exists to surface, turned inward. Its two genuinely reusable parts stay: `ToolRole`/`ToolRoleDeriver`
+(a real caller — `OperandResolver`'s derived-role layer) and `OperandResolver` itself. Recover the
+deleted file from git history if a real FR-35 caller ever appears; nothing about the deletion makes
+that harder than writing it fresh against whatever that caller actually needs.
 
-`DominantTool` is `null` when a `ToolRoleSummary`'s `Tools` list is empty (its own computed-property
-contract). `Run` treats that as "nothing to compare against" and skips the mention rather than
-fabricate a mismatch against an absent dominant tool — a decision this project's own test,
-`A_target_role_with_no_tools_at_all_produces_no_finding_for_an_existing_named_tool`
-(`ToolVocabularyMismatchCheckTests`), pins down since neither Gherkin scenario in issue #40 covers it.
+Two of its own design decisions are worth keeping as precedent even though the code is gone: a
+sealed hierarchy (`MinorToolNamed`/`NonExistentToolNamed`) rather than one record with nullable
+`DominantTool`/counts, so a caller pattern-matching on the type could never observe a half-populated
+result — the same reasoning `OperandResolutionLayer.Unresolved` gives for being its own enum member;
+and treating a target role whose `DominantTool` is `null` as "nothing to compare against" rather than
+fabricating a mismatch against an absent dominant tool.
 
-### `BannedToolCheck` exists because `ToolVocabularyMismatchCheck` does not fit a prohibition
+### `BannedToolCheck` exists because a role-comparison check does not fit a prohibition
 
-`ToolVocabularyMismatchCheck` was built for a recommendation ("prefer / always use tool X for role
-Y"), where "X is not the dominant tool for Y" is a real mismatch worth flagging. A prohibition
+The since-deleted `ToolVocabularyMismatchCheck` (above) was built for a recommendation ("prefer /
+always use tool X for role Y"), where "X is not the dominant tool for Y" is a real mismatch worth
+flagging. A prohibition
 ("never use X") does not target a role the way a recommendation does, and neither of that check's
 two outcomes reads as a meaningful violation signal for a ban: `NonExistentToolNamed` (the tool was
 never called) would mean the ban is being *honored*, and `MinorToolNamed` (the tool, when called, is
@@ -504,7 +509,7 @@ resolves a name to a tool that was never called. A banned tool that was never ca
 `Unresolved`, indistinguishable from an unknown name, and `BannedToolCheck.Run` reports neither: both
 are the ban being honored (or the corpus never having the tool in the first place), not a violation.
 This is why `BannedToolCheck` cannot follow `FailedToolCallsCheck`'s "report every candidate,
-including clean ones, let the caller filter" pattern the way `ToolVocabularyMismatchCheck` does —
+including clean ones, let the caller filter" pattern the way the deleted `ToolVocabularyMismatchCheck` did —
 there is no clean case for it to report at all; every `BannedToolUsage` returned is already a
 violation.
 
@@ -795,14 +800,12 @@ passed a hash that never existed" indistinguishable to a caller — the same rea
 Tool vocabulary and role derivation (S-21, issue #34) has landed, and so has four-layer operand
 resolution (S-23, issue #37, FR-31/FR-32): `OperandResolver.Resolve` and `.ResolveTwoOperands` are
 the mechanism every check shape with a named operand builds on rather than reimplementing tool
-classification. S-26 (issue #40, FR-35, "this rule names a tool your agent does not have") has also
-landed on top of it: `ToolVocabularyMismatchCheck.Run` takes `RuleToolMention` values (one named tool
-plus the `ToolRole` it targets) and reports `MinorToolNamed`/`NonExistentToolNamed`. Nothing yet
-extracts operand text — or which role a statement targets — from a rule statement's own phrasing;
-that is S-25's job (FR-34, issue #39), not implemented in this project yet. `RuleToolMention` is the
-plain-input shape S-25's extraction is expected to produce one of per named tool, the same way this
-project's other checks take an already-resolved plain input rather than doing their own text
-interpretation.
+classification. S-26 (issue #40, FR-35, "this rule names a tool your agent does not have") once landed on top of
+it as `ToolVocabularyMismatchCheck` — **since deleted**, having never acquired a caller in any
+release; see "`ToolVocabularyMismatchCheck` was deleted" above for the four scoping passes that each
+concluded it could not be used, and for what was kept. `RuleShapeCatalogue` (below) is what actually
+extracts operands from a statement's own phrasing, and every one of FR-34's five shapes resolves
+through `OperandResolver` directly.
 
 The check-shape catalogue itself (S-25, issue #39, FR-34) has now landed and closes that gap:
 `RuleShapeCatalogue.MatchAll` takes `RuleStatement`s — what `RuleStatementExtractor` already
@@ -814,10 +817,11 @@ through it, resolves the matched operands against that corpus's tools, or render
 that is S-26 (issue #40) and S-38 (issue #47), which consume this surface rather than extend it.
 
 The check-shape catalogue has
-eleven entries: `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
+ten entries (it had eleven until `ToolVocabularyMismatchCheck` was deleted for never having a
+caller): `HookFailureCheck` (issue #27, FR-17), `RepeatedReadCheck` (issue #25, FR-15),
 `FailedToolCallsCheck` (issue #26, FR-16), `InterruptionLoadCheck` (issue #30, FR-20),
 `AbortedTurnCheck` (issue #28, FR-18), `PhaseChurnCheck` (issue #29, FR-19),
-`ToolVocabularyMismatchCheck` (issue #40, FR-35), `BannedToolCheck` (piece 3's second slice,
+`BannedToolCheck` (piece 3's second slice,
 FR-35's `ToolIsBanned` counterpart), `NeverReadPathCheck` (piece 3's third slice, FR-35's
 `NeverReadPath` counterpart), `UseAAfterBCheck` (piece 3's fourth slice, FR-35's `UseAAfterB`
 counterpart) and `AlwaysPassParamCheck` (piece 3's fifth and final slice, FR-35's `AlwaysPassParam`
@@ -827,7 +831,7 @@ any specific tool name — is the pattern later checks in this project should fo
 
 `BannedToolCheck` (piece 3's second slice) closes the `ToolIsBanned` gap the `RulesInventoryClassifier`
 remarks (`Api/CLAUDE.md`) once left open: turning a ban into a real verdict does not need a
-`ToolRole` after all — see this file's own remarks above for why `ToolVocabularyMismatchCheck`
+`ToolRole` after all — see this file's own remarks above for why a role-comparison check
 does not fit a prohibition, and why `BannedToolUsage.CallCount` can never be zero for a returned
 result. `AecoPostMortem.Findings.BannedToolFinding` is the real caller, wired into
 `AecoPostMortem.Api.ApiHost.GetDigest` as a seventh check orchestrator, and

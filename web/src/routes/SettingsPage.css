@@ -45,6 +45,11 @@
   color: var(--ink-2);
 }
 
+.settings-page__updating {
+  color: var(--ink-2);
+  margin: 0;
+}
+
 .settings-page__actions {
   display: flex;
   flex-wrap: wrap;

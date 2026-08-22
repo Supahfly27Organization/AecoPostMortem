@@ -39,10 +39,13 @@ export interface RebuildResultEnvelope {
 
 /** Thrown for a `409` response — the shared write gate (`ApiHost.RunGated`, `Api/CLAUDE.md`)
  * refusing a second ingest or rebuild while one is already running. Distinct from every other
- * failure so a caller can say "already running" rather than a generic error message. */
+ * failure so a caller can say "already running" rather than a generic error message.
+ * `message` is the server's own operator-facing sentence (`Results.Conflict(new { message = "An
+ * ingest or rebuild is already running." })`) read off the body (code review, Minor) — a bare route
+ * path is not a sentence an operator should have to read. */
 export class WriteConflictError extends Error {
-  constructor(route: string) {
-    super(`${route} is already running.`)
+  constructor(message: string) {
+    super(message)
     this.name = 'WriteConflictError'
   }
 }
@@ -69,24 +72,30 @@ async function postForResult<T>(route: string, signal?: AbortSignal): Promise<T>
   const response = await fetch(route, { method: 'POST', signal })
 
   if (response.status === 409) {
-    throw new WriteConflictError(route)
+    throw new WriteConflictError(
+      (await readErrorMessage(response)) ?? `${route} is already running.`,
+    )
   }
 
   if (!response.ok) {
-    throw new Error((await readProblemDetail(response)) ?? `POST ${route} failed with status ${response.status}`)
+    throw new Error((await readErrorMessage(response)) ?? `POST ${route} failed with status ${response.status}`)
   }
 
   return (await response.json()) as T
 }
 
-/** `Results.Problem(detail: ex.Message, ...)` on the server (`ApiHost.RunGated`) serialises as
- * RFC 7807 `{ ..., "detail": "..." }` — read defensively (a non-JSON or differently-shaped error
- * body must not itself throw here) so a genuine failure always renders the real message rather than
- * a swallowed one. */
-async function readProblemDetail(response: Response): Promise<string | null> {
+/** Reads whichever field the server's own error body carries — `Results.Problem(detail: ex.Message,
+ * ...)` (`ApiHost.RunGated`'s 500 path) serialises as RFC 7807 `{ ..., "detail": "..." }`, and
+ * `Results.Conflict(new { message = "..." })` (its 409 path) serialises as `{ "message": "..." }`.
+ * Read defensively — a non-JSON or differently-shaped error body must not itself throw here — so a
+ * genuine failure always renders the server's own real message rather than a swallowed one. */
+async function readErrorMessage(response: Response): Promise<string | null> {
   try {
-    const body = (await response.json()) as { detail?: unknown }
-    return typeof body.detail === 'string' ? body.detail : null
+    const body = (await response.json()) as { detail?: unknown; message?: unknown }
+    if (typeof body.detail === 'string') {
+      return body.detail
+    }
+    return typeof body.message === 'string' ? body.message : null
   } catch {
     return null
   }

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
 using AecoPostMortem.Data;
 using AecoPostMortem.Data.Execution;
 using AecoPostMortem.Findings;
@@ -302,7 +301,7 @@ public static class ApiHost
     /// message on the wire) rather than surfacing as a bare, unexplained 500 — "a failed ingest must
     /// show what failed" (the brief's own Scenario 2).
     /// </summary>
-    internal static IResult RunGated(SemaphoreSlim gate, Func<object> run)
+    internal static IResult RunGated<T>(SemaphoreSlim gate, Func<T> run)
     {
         if (!gate.Wait(0))
         {

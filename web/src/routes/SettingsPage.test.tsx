@@ -190,4 +190,45 @@ describe('Part B: ingest and rebuild as buttons', () => {
     await waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
     window.removeEventListener(StoreChangedEventName, listener)
   })
+
+  // Code review, Important: the store-changed event used to fire unconditionally, including on a
+  // 409 or a real failure — neither means the store actually changed, and dispatching it into a
+  // concurrent write's own drop/repopulate window was a real hazard (Api/CLAUDE.md's own remarks on
+  // NormalizedLayerWriter.RebuildAll's transaction wrap). useWriteOperation.run now reports its own
+  // terminal outcome so SettingsPage can gate on it directly.
+  it('does not dispatch the store-changed event when the server refuses a concurrent write with 409', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      rebuild: () => new Response('', { status: 409 }),
+    })
+
+    const listener = vi.fn()
+    window.addEventListener(StoreChangedEventName, listener)
+
+    render(<SettingsPage />)
+    await user.click(await screen.findByRole('button', { name: 'Run rebuild' }))
+
+    await screen.findByRole('alert')
+    expect(listener).not.toHaveBeenCalled()
+    window.removeEventListener(StoreChangedEventName, listener)
+  })
+
+  it('does not dispatch the store-changed event when a write genuinely fails', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      ingest: () => jsonResponse({ detail: 'boom' }, 500),
+    })
+
+    const listener = vi.fn()
+    window.addEventListener(StoreChangedEventName, listener)
+
+    render(<SettingsPage />)
+    await user.click(await screen.findByRole('button', { name: 'Run ingest' }))
+
+    await screen.findByRole('alert')
+    expect(listener).not.toHaveBeenCalled()
+    window.removeEventListener(StoreChangedEventName, listener)
+  })
 })

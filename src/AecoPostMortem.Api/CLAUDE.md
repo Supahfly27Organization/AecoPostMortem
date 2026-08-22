@@ -1593,6 +1593,18 @@ manually-held `SemaphoreSlim` rather than by racing two real HTTP requests again
 sub-millisecond in-memory operations are not reliably reproducible as a race over a real socket, so
 the gate's own refusal/release logic is proven directly instead.
 
+The gate covers writer-vs-writer only — a **reader** racing a concurrent `POST /api/rebuild` was a
+real, separate gap the write gate does nothing about (code review, Important), closed instead in
+`Ingestion.NormalizedLayerWriter.RebuildAll` itself (`Ingestion/CLAUDE.md`'s own remarks): the derived
+tables are genuinely dropped and absent for a real window mid-rebuild, and a `GET /api/digest` or
+`/api/app-state` from a second browser tab landing in that window, on its own SQLite connection, would
+otherwise hit "no such table" — a hard error, not the retriable busy/timeout SQLite gives a reader
+waiting on an open write transaction. `RebuildAll` now wraps its whole drop-then-repopulate sequence
+in one transaction, so a concurrent reader sees either the pre-rebuild tables or the fully-repopulated
+post-rebuild ones, never neither. This risk existed in kind before this task (running `aecopostmortem
+rebuild` in a terminal while a separate `serve` process was up), but was newly, easily reachable once
+`rebuild` became a route inside the same long-lived process serving those reads.
+
 **The threat model this host assumes.** `ApiHost.Build` binds `127.0.0.1` only (`ApiHost.cs`'s
 existing "not `localhost`" decision, above) — no remote machine can reach either write route. Within
 that boundary this is a single-operator local tool with no authentication on any route, write ones
@@ -1610,6 +1622,20 @@ this same gap would create, which is exactly why `purge` stays deliberately unbu
 person adding a POST that *can* destroy data inherits this paragraph as a reason to design its own,
 stricter gate (a confirmation token, an operator-supplied header, or CSRF protection) rather than
 assuming this one's reasoning still applies.
+
+**What this paragraph does not cover (code review, Important — named so the next reader does not
+mistake loopback binding for a complete boundary):** binding to `127.0.0.1` defends against a remote
+network attacker, not against DNS rebinding — a page served from an attacker-controlled domain whose
+DNS answer is switched to `127.0.0.1` after the browser's same-origin check becomes, from the
+browser's perspective, same-origin with this host, at which point it can read every `GET` route's
+response too, not merely send a blind write. That would expose real corpus content (prompt text, file
+paths, tool arguments) through `/api/digest` and `/api/sessions/{id}/steps/{id}`, not only trigger a
+safe-to-replay write — a materially larger exposure than the write-only gap this paragraph otherwise
+accepts. This is a pre-existing gap in every route this host already served before this task (S-48
+onward), not something the Settings surface introduced; it is named here because this is now the
+threat-model paragraph of record and should not read as though loopback binding is a sufficient
+boundary on its own. The mitigation, if ever judged worth building, is `Host`-header validation
+(reject a request whose `Host` is not `127.0.0.1:<port>`) — not attempted in this slice.
 
 ### Real timing measured, not assumed, before deciding this stays synchronous
 

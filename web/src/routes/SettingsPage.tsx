@@ -33,13 +33,19 @@ export function SettingsPage() {
   const anyRunning = ingest.state.status === 'running' || rebuild.state.status === 'running'
 
   async function runIngest() {
-    await ingest.run()
-    afterWrite()
+    // Gated on a genuine success (code review, Important): a 409 conflict or a real failure must
+    // never dispatch `notifyStoreChanged()` — the store did not actually change, and a stray
+    // refetch fired while a *concurrent* rebuild is mid-drop could hit the real window
+    // `NormalizedLayerWriter.RebuildAll`'s own transaction wrap otherwise closes.
+    if ((await ingest.run()) === 'succeeded') {
+      afterWrite()
+    }
   }
 
   async function runRebuild() {
-    await rebuild.run()
-    afterWrite()
+    if ((await rebuild.run()) === 'succeeded') {
+      afterWrite()
+    }
   }
 
   function afterWrite() {
@@ -57,7 +63,20 @@ export function SettingsPage() {
         </p>
       )}
 
-      {query.status === 'loaded' && <ConfigurationSummary settings={query.settings} />}
+      {query.status === 'loaded' && (
+        <>
+          <ConfigurationSummary settings={query.settings} />
+          {/* A post-write refresh keeps the previous configuration on screen (useSettings' own
+              isRefetching) rather than blanking it — this is the one visible sign it is updating.
+              role="status" is an implicit aria-live="polite" region, so it announces without
+              stealing focus, the same choice DigestPage's own "Updating…" note makes. */}
+          {query.isRefetching && (
+            <p className="settings-page__updating" role="status">
+              Updating…
+            </p>
+          )}
+        </>
+      )}
 
       <section className="settings-page__actions" aria-label="Commands">
         <WriteOperationCard

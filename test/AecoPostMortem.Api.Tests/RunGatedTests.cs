@@ -54,7 +54,7 @@ public sealed class RunGatedTests
     {
         using var gate = new SemaphoreSlim(1, 1);
 
-        var result = ApiHost.RunGated(gate, () => throw new InvalidOperationException("boom"));
+        var result = ApiHost.RunGated<string>(gate, () => throw new InvalidOperationException("boom"));
 
         var problem = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
         Assert.Equal(StatusCodes.Status500InternalServerError, problem.StatusCode);

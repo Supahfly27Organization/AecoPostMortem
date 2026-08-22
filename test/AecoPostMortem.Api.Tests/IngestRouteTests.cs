@@ -78,6 +78,39 @@ public sealed class IngestRouteTests
         }
     }
 
+    /// <summary>Minor (code review): proves the 500 path end to end over the real wire, not only
+    /// via <c>RunGatedTests</c>' own direct unit-level exercise of <c>RunGated</c>'s catch branch —
+    /// a real store-open failure (<see cref="LocalStore.GuardAgainstAForeignFile"/>) is a genuine way
+    /// <see cref="ApiHost.RunIngest"/> can throw, and this confirms the client-observable contract
+    /// (<c>readErrorMessage</c> in <c>web/src/api/settings.ts</c> is written against) is real: a
+    /// `Results.Problem` body carrying the real exception message, not a bare unexplained 500.</summary>
+    [Fact]
+    public async Task Posting_ingest_against_a_store_path_that_is_not_a_sqlite_database_reports_a_real_problem_detail()
+    {
+        using var temporary = new TemporaryStore();
+        Directory.CreateDirectory(temporary.Folder);
+        await File.WriteAllTextAsync(temporary.Store.FilePath, "not a sqlite database", Cancellation);
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var response = await client.PostAsync(ApiHost.IngestRoute, content: null, Cancellation);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync(Cancellation);
+            Assert.Contains("not a SQLite database", body, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    static string MissingCopilotRoot(TemporaryStore temporary) =>
+        Path.Combine(temporary.Folder, "no-such-copilot-root");
+
     static HttpClient HttpClientFor(WebApplication app) =>
         new() { BaseAddress = new Uri(ListeningAddress(app), UriKind.Absolute) };
 

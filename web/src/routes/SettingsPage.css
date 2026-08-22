@@ -66,6 +66,38 @@
   border-radius: 6px;
 }
 
+/* The one card that destroys data reads as such before it is armed, using the same --flag token the
+   app already spends on a real problem (`index.css`, ported from the mockups) rather than a new
+   colour invented here. */
+.settings-page__card[data-destructive='true'] {
+  border-color: var(--flag);
+  background: var(--flag-soft);
+}
+
+.settings-page__card[data-destructive='true'] h2 {
+  color: var(--flag);
+}
+
+.settings-page__confirmation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-page__confirmation label {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.settings-page__confirmation input {
+  font-family: var(--mono);
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .settings-page__description {
   color: var(--ink-2);
   margin: 0;

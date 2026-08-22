@@ -11,9 +11,10 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean. Mockup parity item #6 added `Provenance`/`ProvenanceLabel`, projected straight from `CheckRegistryEntry.Provenance` (below) so a clean-check card can carry the same badge a finding does |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs. Mockup parity item #6 added `SilentChecks` (`SilentCheckEnvelope.From(digest.CheckRegistry)`), threading FR-42's surface through the same fetch. Mockup parity item #15 added `RuleCoverageStatusEnvelope` (`notYetAnalyzed`/`analyzed`, the closed wire shape for `Findings.RuleCoverageStatus`) and changed `MastheadEnvelope.RuleCoverage` from a bare enum to that type — `AnalyzedCoverage.Counts` reuses `RulesInventoryStatusCountsEnvelope` (`RulesInventoryEnvelope.cs`) verbatim rather than a second four-int shape. Digest session-naming Slice 2 added `RepositoryScopeEnvelope.SessionLabels` and a matching optional `sessionLabels` parameter threaded through `MastheadEnvelope.From`/`DigestEnvelope.From` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest?from=&to=` (`DigestRoute`, `FromParameter`/`ToParameter` — the pager & date-range filter task's optional `DateOnly` bounds, both omittable, a caller error on `from > to` answering 400), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), `GET /api/settings` (`SettingsRoute`, the Settings surface's Part A), `POST /api/ingest` and `POST /api/rebuild` (`IngestRoute`/`RebuildRoute`, the Settings surface's Part B and this codebase's first two write endpoints), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession`, `GetStepEvidence`, `GetSettings`, `RunIngest` and `RunRebuild` are the same eight without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest?from=&to=` (`DigestRoute`, `FromParameter`/`ToParameter` — the pager & date-range filter task's optional `DateOnly` bounds, both omittable, a caller error on `from > to` answering 400), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), `GET /api/settings` (`SettingsRoute`, the Settings surface's Part A), `POST /api/ingest` and `POST /api/rebuild` (`IngestRoute`/`RebuildRoute`, the Settings surface's Part B and this codebase's first two write endpoints), `POST /api/purge` (`PurgeRoute`, Part C — the only destructive endpoint, gated additionally by `ConfirmationHeader`/`PurgeConfirmation` via `IsConfirmed`), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession`, `GetStepEvidence`, `GetSettings`, `RunIngest`, `RunRebuild` and `RunPurge` are the same nine without a listener |
 | `SettingsEnvelope.cs` | the Settings surface's read-only contract (Part A): store path/existence/size, the Copilot source root and whether it was found, and the configured exclusion list — every field a real, already-resolved fact, never guessed or zero-filled for a store that does not exist yet |
 | `IngestResultEnvelope.cs` | `POST /api/ingest`'s response contract (Part B): FR-14's `Ingestion.CoverageReport` carried onto the wire verbatim (via `ExcludedSessionEnvelope`), plus a server-measured `DurationSeconds` — the same report the CLI's own `ingest` prints to stdout, never reduced to a bare "OK" |
+| `PurgeResultEnvelope.cs` | `POST /api/purge`'s response contract (Part C): which files were actually deleted and how many bytes that reclaimed — `Data.LocalStore.PurgeOutcome` carried onto the wire verbatim. `DeletedAnything` is served explicitly rather than inferred from an empty `DeletedFiles`, so "there was no store to purge" stays a distinct, stated outcome instead of a success claiming a deletion that never happened. No `DurationSeconds`, unlike the other two write routes — deleting a file is not work an operator waits on |
 | `RebuildResultEnvelope.cs` | `POST /api/rebuild`'s response contract (Part B): how many RAW events and sessions the derived layer was just re-derived from, plus a server-measured `DurationSeconds` |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
 | `HookTriggerNameLookup.cs` | What triggered a hook, sibling task: `FindForHookSteps` resolves a `Hook` step's own trigger tool name eagerly (batched, keyed by `StepId`), the same "additive, no-fetch" shape `PromptTextLookup` established for a Prompt step's own text — deliberately a separate, narrower reader from `StepEvidenceLookup`'s own `FindTrigger` (below), which resolves the fuller, on-demand trigger evidence once a step is selected. See the non-obvious decision below for why these stay two readers rather than one |
@@ -1411,6 +1412,32 @@ corpus and a real browser: the dominant repository's own 25 sessions all resolve
 "run ef database update for…", "i have cors issues for…"), rendered on a real, expanded Digest
 finding row in place of the bare session-id GUID it showed before.
 
+The Settings surface's Part C closed the last gap in that surface: `POST /api/purge`
+(`PurgeResultEnvelope.cs`, `ApiHost.RunPurge`), the only destructive endpoint this codebase serves,
+and the first route with a gate of its own beyond the two every write route shares — see "A
+destructive route needs a gate that proves intent, not only provenance" above.
+
+Verified against the operator's real 35-session store (248,815,616 bytes), not only at the unit
+level, and with the store backed up outside the store folder first. All four refusals were probed
+against a real `serve --port 5120` before anything was deleted, each answering `403` with the store
+still on disk afterwards: no confirmation header; a wrong confirmation value (`rebuild`); a
+cross-origin `Origin` carrying a *valid* confirmation header (the header never overrides the origin
+guard); and the full pre-#142 CSRF shape (`Origin: https://evil.example` + `Content-Type: text/plain`
++ a valid confirmation header), which is refused by the origin guard first and reports that reason.
+
+Then end to end in a real browser: the confirmation field resolves a real accessible name in Chrome
+("Type purge to confirm", read from the accessibility tree — the gap that bit `DateRangeFilter` is
+not present here), a near-miss (`purg`) leaves the button genuinely disabled, and the real button
+against the real store rendered "Deleted 1 file, reclaiming 237.3 MB." naming the real path. The
+store file was then genuinely absent from disk, `GET /api/app-state` answered `emptyStore`, the
+global banner flipped to "Nothing has been ingested yet.", and the configuration block re-read "Does
+not exist yet — nothing has been ingested". Recovery was verified through the page itself rather than
+from the backup: the same page's own Ingest button re-ingested 35 of 47 found sessions in 13.5s
+(56,138 lines parsed, 0 skipped), after which `/api/digest` served the corpus's own familiar 35
+sessions and 297 ranked findings and the app state returned to `ready` — which is the claim the purge
+result's own sentence makes ("Run ingest to rebuild the store from your Copilot sessions"), now
+measured rather than asserted.
+
 ### A date-range filter re-scopes the whole analysis, not merely which already-computed findings display
 
 The pager & date-range filter task's own real design question, settled before writing any code:
@@ -1660,7 +1687,9 @@ fix: same-origin `POST /api/ingest`/`POST /api/rebuild` from `http://127.0.0.1:5
 succeed end to end (real coverage report / rebuild summary rendered), since the page's own `Origin`
 and `Host` are both this host's real authority by construction.
 
-**Why this reasoning still does not extend to a hypothetical `purge` endpoint.** `ingest` and
+**Why this reasoning did not extend to the `purge` endpoint** (written while `purge` was still
+unbuilt; it has since landed, behind the extra gate this paragraph predicted it would need — see
+"A destructive route needs a gate that proves intent, not only provenance" below). `ingest` and
 `rebuild` were accepted as safe-to-trigger-uninvited even before this fix — `ingest` is idempotent by
 construction (RAW's own `(source_file, byte_offset, content_hash)` conflict target, `Data/CLAUDE.md`)
 and `rebuild` only re-derives already-stored RAW, never reads the source directory again — so an
@@ -1673,6 +1702,49 @@ inherits a working Origin/Host guard to build on top of, not only a paragraph �
 route may still warrant a stricter gate on top of this one (a confirmation token or an
 operator-supplied header), since `IsAllowedWriteOrigin` only proves a request came from this host's
 own served page, not that the operator specifically intended *this* action.
+
+### A destructive route needs a gate that proves intent, not only provenance
+
+`POST /api/purge` deletes the operator's whole store. It is served behind everything the other two
+write routes are — the shared `SemaphoreSlim` write gate (a purge landing mid-ingest is exactly as
+unsafe as two ingests overlapping) and `IsAllowedWriteOrigin` — plus one gate neither of them has: a
+required `X-AecoPostMortem-Confirm: purge` header (`ApiHost.IsConfirmed`), checked *after* the origin
+guard and *before* `RunGated`, so a refusal never reaches `LocalStore.Purge`.
+
+The reason the origin guard alone is not enough is stated in that guard's own paragraph above:
+`IsAllowedWriteOrigin` proves a request came from this host's own served page; it cannot prove the
+operator meant to destroy their store. Anything that page can be made to do — a stray script, a
+mis-wired future component, a click on the wrong control — passes it. The header closes a second gap
+too, and this one is browser-enforced rather than convention: a custom header makes a cross-origin
+`fetch` a CORS **non-simple** request, so the browser preflights it and this host, which answers no
+CORS policy at all, fails that preflight before the real request is ever sent. That is the exact
+request shape (`Content-Type: text/plain`, no preflight) that made `POST /api/rebuild` reachable
+cross-origin before the origin guard existed.
+
+The value names the action rather than being a generic "yes", so a header a future destructive route
+copies cannot authorise the wrong one, and it is compared ordinally: this is a machine token from
+this app's own client, not operator input to be forgiving about. The operator's own confirmation is a
+separate, client-side gate — a typed word, `web/CLAUDE.md`'s "A destructive button is armed by
+typing, not by clicking" — and the two are deliberately different mechanisms rather than one repeated
+twice: the header proves *which* action a request intends, the typed word proves *a person* intended
+it.
+
+`RunPurge` itself carries no confirmation check. The gate belongs at the route, where the request's
+own headers are; a direct caller of the method (the CLI, a test) has already stated its intent by
+calling it, and putting the check inside would mean either passing a fake header around or a second,
+divergent notion of "confirmed".
+
+### What an operator sees immediately after a purge — measured, and the opposite of what was predicted
+
+This task's design pass predicted a wrinkle that turned out not to exist, which is worth recording so
+nobody re-derives the wrong worry: a completed purge fires `notifyStoreChanged()`, which re-fetches
+`GET /api/app-state`, and `DiagnoseAppState` opens the store — so the file was expected to be
+recreated (empty, by migrations) within a second of being deleted, leaving Settings reporting a store
+that "exists" right after saying it deleted one. It does not happen: `StoreHasBeenIngested` returns
+`false` on `!store.Exists` *before* calling `store.Open()`, so nothing on the post-purge path
+recreates the file. Verified against the real store, not reasoned about: after a real purge through
+the real page, the store's own directory was empty, a direct `GET /api/app-state` answered
+`emptyStore`, and the directory was still empty afterwards.
 
 ### Real timing measured, not assumed, before deciding this stays synchronous
 

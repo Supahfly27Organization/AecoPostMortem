@@ -1,8 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import {
   postIngest,
+  postPurge,
   postRebuild,
+  PurgeConfirmation,
   type IngestResultEnvelope,
+  type PurgeResultEnvelope,
   type RebuildResultEnvelope,
   type SettingsEnvelope,
 } from '../api/settings'
@@ -29,8 +32,18 @@ export function SettingsPage() {
 
   const ingest = useWriteOperation(postIngest)
   const rebuild = useWriteOperation(postRebuild)
+  const purge = useWriteOperation(postPurge)
 
-  const anyRunning = ingest.state.status === 'running' || rebuild.state.status === 'running'
+  // The operator's own half of the purge confirmation (the machine half is the header `postPurge`
+  // sends). Held here rather than inside `WriteOperationCard` so that clearing it after a run — the
+  // card is re-armed deliberately, never left one click away from a second purge — is the same
+  // post-write step `afterWrite` already is, not hidden state a parent cannot reset.
+  const [purgeConfirmation, setPurgeConfirmation] = useState('')
+
+  const anyRunning =
+    ingest.state.status === 'running' ||
+    rebuild.state.status === 'running' ||
+    purge.state.status === 'running'
 
   async function runIngest() {
     // Gated on a genuine success (code review, Important): a 409 conflict or a real failure must
@@ -44,6 +57,18 @@ export function SettingsPage() {
 
   async function runRebuild() {
     if ((await rebuild.run()) === 'succeeded') {
+      afterWrite()
+    }
+  }
+
+  async function runPurge() {
+    const outcome = await purge.run()
+
+    // Cleared whatever the outcome: a refused or failed purge leaving the button armed would sit one
+    // click away from retrying a destructive action the operator has not re-confirmed.
+    setPurgeConfirmation('')
+
+    if (outcome === 'succeeded') {
       afterWrite()
     }
   }
@@ -100,8 +125,58 @@ export function SettingsPage() {
           onRun={runRebuild}
           renderResult={(result) => <RebuildResultSummary result={result} />}
         />
+
+        {/* The only destructive action in the app, and the only card that has to be armed before it
+            can be run — see `web/CLAUDE.md`'s "A destructive button is armed by typing, not by
+            clicking" for why a typed word rather than a second click or a native confirm(). */}
+        <WriteOperationCard
+          heading="Purge"
+          description="Deletes the local store — every ingested session, every analysed table. Nothing in your Copilot session directory is touched, so a later ingest rebuilds the store from the same source."
+          buttonLabel="Purge the store"
+          runningLabel="Purging…"
+          state={purge.state}
+          disabled={anyRunning || purgeConfirmation.trim() !== PurgeConfirmation}
+          onRun={runPurge}
+          renderResult={(result) => <PurgeResultSummary result={result} />}
+          destructive
+          confirmationField={
+            <ConfirmationField
+              value={purgeConfirmation}
+              onChange={setPurgeConfirmation}
+              disabled={anyRunning}
+            />
+          }
+        />
       </section>
     </section>
+  )
+}
+
+function ConfirmationField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (value: string) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="settings-page__confirmation">
+      {/* Explicit htmlFor/id rather than an implicit wrapping label — the association every
+          accessibility API agrees on, the same gap a real-browser check caught on
+          `digest/DateRangeFilter.tsx` (`web/CLAUDE.md`). */}
+      <label htmlFor="purge-confirmation">Type {PurgeConfirmation} to confirm</label>
+      <input
+        id="purge-confirmation"
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
   )
 }
 
@@ -161,6 +236,8 @@ function WriteOperationCard<T>({
   disabled,
   onRun,
   renderResult,
+  destructive,
+  confirmationField,
 }: {
   heading: string
   description: string
@@ -170,13 +247,22 @@ function WriteOperationCard<T>({
   disabled: boolean
   onRun: () => void
   renderResult: (result: T) => ReactNode
+  /** Marks the card as one that destroys data — a `data-` attribute rather than a second class, so
+   * the distinction is readable from the DOM (and assertable in a test) rather than only visual. */
+  destructive?: boolean
+  /** Rendered between the description and the button, for a card the operator has to arm before the
+   * button becomes usable. Absent for a card that needs no arming — the two non-destructive write
+   * actions render byte-for-byte as they did before this prop existed. */
+  confirmationField?: ReactNode
 }) {
   const running = state.status === 'running'
 
   return (
-    <div className="settings-page__card">
+    <div className="settings-page__card" data-destructive={destructive ? 'true' : undefined}>
       <h2>{heading}</h2>
       <p className="settings-page__description">{description}</p>
+
+      {confirmationField}
 
       <button type="button" onClick={onRun} disabled={disabled}>
         {buttonLabel}
@@ -231,6 +317,34 @@ function RebuildResultSummary({ result }: { result: RebuildResultEnvelope }) {
         {result.sessionCount} session{result.sessionCount === 1 ? '' : 's'} — in{' '}
         {result.durationSeconds.toFixed(1)}s.
       </p>
+    </div>
+  )
+}
+
+function PurgeResultSummary({ result }: { result: PurgeResultEnvelope }) {
+  return (
+    <div className="settings-page__result" role="status">
+      {result.deletedAnything ? (
+        <>
+          <p>
+            Deleted {result.deletedFiles.length} file
+            {result.deletedFiles.length === 1 ? '' : 's'}, reclaiming{' '}
+            {formatBytes(result.bytesReclaimed)}. Run ingest to rebuild the store from your Copilot
+            sessions.
+          </p>
+          <ul>
+            {result.deletedFiles.map((file) => (
+              <li key={file} className="settings-page__mono">
+                {file}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        // Never "Deleted 0 files": nothing was deleted, and saying so plainly is a different fact
+        // from a deletion of nothing.
+        <p>There was no store to purge — nothing has been ingested at this path yet.</p>
+      )}
     </div>
   )
 }

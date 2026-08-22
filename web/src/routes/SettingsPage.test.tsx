@@ -1,8 +1,16 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPage } from './SettingsPage'
-import { IngestRoute, RebuildRoute, SettingsRoute, type SettingsEnvelope } from '../api/settings'
+import {
+  ConfirmationHeader,
+  IngestRoute,
+  PurgeConfirmation,
+  PurgeRoute,
+  RebuildRoute,
+  SettingsRoute,
+  type SettingsEnvelope,
+} from '../api/settings'
 import { StoreChangedEventName } from '../api/storeChangeEvents'
 
 const baseSettings: SettingsEnvelope = {
@@ -18,6 +26,7 @@ function stubFetch(handlers: {
   settings?: () => Response | Promise<Response>
   ingest?: () => Response | Promise<Response>
   rebuild?: () => Response | Promise<Response>
+  purge?: (init?: RequestInit) => Response | Promise<Response>
 }) {
   vi.stubGlobal(
     'fetch',
@@ -27,6 +36,10 @@ function stubFetch(handlers: {
 
       if (method === 'POST' && url.includes(IngestRoute) && handlers.ingest) {
         return handlers.ingest()
+      }
+
+      if (method === 'POST' && url.includes(PurgeRoute) && handlers.purge) {
+        return handlers.purge(init)
       }
 
       if (method === 'POST' && url.includes(RebuildRoute) && handlers.rebuild) {
@@ -232,3 +245,159 @@ describe('Part B: ingest and rebuild as buttons', () => {
     window.removeEventListener(StoreChangedEventName, listener)
   })
 })
+
+describe('Part C: purge behind a typed confirmation', () => {
+  const purgeButtonName = 'Purge the store'
+  const confirmationLabel = `Type ${PurgeConfirmation} to confirm`
+
+  it('leaves the purge button disabled until the operator types the confirmation word exactly', async () => {
+    const user = userEvent.setup()
+    stubFetch({ settings: () => jsonResponse(baseSettings) })
+    render(<SettingsPage />)
+
+    const purgeButton = await screen.findByRole('button', { name: purgeButtonName })
+    expect(purgeButton).toBeDisabled()
+
+    const field = screen.getByLabelText(confirmationLabel)
+    await user.type(field, 'purg')
+    expect(purgeButton).toBeDisabled()
+
+    await user.type(field, 'e')
+    expect(purgeButton).not.toBeDisabled()
+  })
+
+  it('sends the confirmation header the server requires for a destructive route', async () => {
+    const user = userEvent.setup()
+    let purgeInit: RequestInit | undefined
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      purge: (init) => {
+        purgeInit = init
+        return jsonResponse({ deletedAnything: true, deletedFiles: [], bytesReclaimed: 0 })
+      },
+    })
+    render(<SettingsPage />)
+
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    await waitFor(() => expect(purgeInit).toBeDefined())
+    expect(new Headers(purgeInit!.headers).get(ConfirmationHeader)).toBe(PurgeConfirmation)
+  })
+
+  it('reports what was actually deleted, not a bare "done"', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      purge: () =>
+        jsonResponse({
+          deletedAnything: true,
+          deletedFiles: [baseSettings.storePath],
+          bytesReclaimed: 248_815_616,
+        }),
+    })
+    render(<SettingsPage />)
+
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    expect(await screen.findByText(/Deleted 1 file/)).toBeInTheDocument()
+
+    // Scoped to the purge card: the same path is also on screen in the configuration summary
+    // above, so an unscoped query would pass without the result naming anything at all.
+    const card = screen.getByRole('heading', { name: 'Purge' }).closest('.settings-page__card')
+    expect(within(card as HTMLElement).getByText(baseSettings.storePath)).toBeInTheDocument()
+  })
+
+  it('states that there was nothing to purge rather than claiming a deletion that never happened', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse({ ...baseSettings, storeExists: false, storeSizeBytes: 0 }),
+      purge: () => jsonResponse({ deletedAnything: false, deletedFiles: [], bytesReclaimed: 0 }),
+    })
+    render(<SettingsPage />)
+
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    expect(await screen.findByText(/There was no store to purge/)).toBeInTheDocument()
+    expect(screen.queryByText(/Deleted 0 files/)).not.toBeInTheDocument()
+  })
+
+  it('shows the server’s own refusal when it rejects the request', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      purge: () =>
+        jsonResponse(
+          { detail: "This request destroys data and must carry the header '…'; refused." },
+          403,
+        ),
+    })
+    render(<SettingsPage />)
+
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This request destroys data')
+  })
+
+  it('re-arms the confirmation after a purge, so a second one has to be typed again', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      purge: () =>
+        jsonResponse({ deletedAnything: true, deletedFiles: ['store.db'], bytesReclaimed: 1024 }),
+    })
+    render(<SettingsPage />)
+
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    await screen.findByText(/Deleted 1 file/)
+    expect(screen.getByLabelText(confirmationLabel)).toHaveValue('')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: purgeButtonName })).toBeDisabled(),
+    )
+  })
+
+  it('dispatches the store-changed event after a successful purge', async () => {
+    const user = userEvent.setup()
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      purge: () =>
+        jsonResponse({ deletedAnything: true, deletedFiles: ['store.db'], bytesReclaimed: 1024 }),
+    })
+
+    const listener = vi.fn()
+    window.addEventListener(StoreChangedEventName, listener)
+
+    render(<SettingsPage />)
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
+    window.removeEventListener(StoreChangedEventName, listener)
+  })
+
+  it('disables the ingest and rebuild buttons while a purge is running', async () => {
+    const user = userEvent.setup()
+    let resolvePurge: (response: Response) => void = () => {}
+    stubFetch({
+      settings: () => jsonResponse(baseSettings),
+      purge: () => new Promise<Response>((resolve) => (resolvePurge = resolve)),
+    })
+    render(<SettingsPage />)
+
+    await user.type(await screen.findByLabelText(confirmationLabel), PurgeConfirmation)
+    await user.click(screen.getByRole('button', { name: purgeButtonName }))
+
+    expect(await screen.findByText('Purging…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run ingest' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run rebuild' })).toBeDisabled()
+
+    resolvePurge(jsonResponse({ deletedAnything: false, deletedFiles: [], bytesReclaimed: 0 }))
+    await screen.findByText(/There was no store to purge/)
+  })
+})
+

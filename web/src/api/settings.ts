@@ -6,6 +6,16 @@
 export const SettingsRoute = '/api/settings'
 export const IngestRoute = '/api/ingest'
 export const RebuildRoute = '/api/rebuild'
+export const PurgeRoute = '/api/purge'
+
+/** The header a destructive request must carry, mirroring `AecoPostMortem.Api.ApiHost.
+ * ConfirmationHeader`/`PurgeConfirmation`. A custom header makes the request a CORS *non-simple*
+ * one, so a hostile page cannot fire it without a preflight this host answers no policy for — see
+ * `Api/CLAUDE.md`'s "A destructive route needs a gate that proves intent, not only provenance". This
+ * is the machine half of the confirmation; the operator's own typed word is the other half
+ * (`routes/SettingsPage.tsx`). */
+export const ConfirmationHeader = 'X-AecoPostMortem-Confirm'
+export const PurgeConfirmation = 'purge'
 
 export interface SettingsEnvelope {
   storePath: string
@@ -35,6 +45,17 @@ export interface RebuildResultEnvelope {
   rawEventCount: number
   sessionCount: number
   durationSeconds: number
+}
+
+/** Mirrors `AecoPostMortem.Api.PurgeResultEnvelope`. `deletedAnything` is served explicitly rather
+ * than inferred from an empty `deletedFiles`: purging a store that was never created is a real,
+ * honest outcome, and rendering "the store was deleted" for it would claim a deletion that never
+ * happened. No `durationSeconds` — unlike ingest and rebuild, deleting a file is not work an
+ * operator waits on. */
+export interface PurgeResultEnvelope {
+  deletedAnything: boolean
+  deletedFiles: string[]
+  bytesReclaimed: number
 }
 
 /** Thrown for a `409` response — the shared write gate (`ApiHost.RunGated`, `Api/CLAUDE.md`)
@@ -68,8 +89,20 @@ export function postRebuild(signal?: AbortSignal): Promise<RebuildResultEnvelope
   return postForResult<RebuildResultEnvelope>(RebuildRoute, signal)
 }
 
-async function postForResult<T>(route: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(route, { method: 'POST', signal })
+/** The only call in this app that sends `ConfirmationHeader` — the server refuses this route with a
+ * `403` without it (`ApiHost.IsConfirmed`). */
+export function postPurge(signal?: AbortSignal): Promise<PurgeResultEnvelope> {
+  return postForResult<PurgeResultEnvelope>(PurgeRoute, signal, {
+    [ConfirmationHeader]: PurgeConfirmation,
+  })
+}
+
+async function postForResult<T>(
+  route: string,
+  signal?: AbortSignal,
+  headers?: Record<string, string>,
+): Promise<T> {
+  const response = await fetch(route, { method: 'POST', signal, headers })
 
   if (response.status === 409) {
     throw new WriteConflictError(

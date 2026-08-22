@@ -1739,4 +1739,24 @@ silent checks at population 24 each (unaffected — `SessionsInScope` is 25 ther
 misleadingly-clean entries — `DigestRouteTests.A_range_matching_zero_sessions_serves_an_empty_but_
 honest_scope` is the regression test for exactly this. `DigestPage.tsx` needed no change: its own
 `noSessionsInRange` gate already hid `<CleanChecks>` for this exact case, so the fix is invisible to
-the one client that already handled it correctly, and closes the gap for every client that doesn't.
+the one client that already handled it correctly.
+
+**What this closes, precisely, and what it deliberately leaves alone (code review).** The refusal is
+keyed on `SessionsInScope`, the whole analysis scope's own size — not on the date-range filter that
+happened to be this bug's own reproduction — so it also, incidentally, closes the same conflation for
+an unfiltered digest whose repository scope is itself empty (an empty store, or a repository with no
+sessions at all): `web/CLAUDE.md`'s "The pager is client-side" section calls that "a different,
+pre-existing case this task does not touch," written before this fix existed and now stale for the
+`silentChecks` field specifically — `SessionsInScope == 0` in that case too, so `SilentCheckEnvelope.
+From` refuses there as well, with no code change on either side needed. What this fix does *not*
+close: `Findings.Digest.cs`'s `DigestState` is still derived only from `checkRegistry.Entries.Any(entry
+=> entry.Status == CheckRunStatus.Ran)`, independent of `SessionsInScope` — so
+`GET /api/digest?from=2026-01-01&to=2026-01-31` still serves `state: "Analyzed"` alongside its now-empty
+`silentChecks`, `rankedFindings` and `inferredFindings`. A second client reading only `state` and
+`silentChecks.length === 0` could still misread "analysed, nothing to report" as "clean" rather than
+"nothing was in scope" — the served `masthead.repositoryScope.sessionIds` (empty) is the field that
+actually answers that question, the same field `DigestPage.tsx`'s own `noSessionsInRange` check reads.
+Giving `DigestState` a fourth, scope-aware value is a genuinely separate, wider decision (`ProcessDigest.
+Build` has no scope-size input today, and every other state this type distinguishes is about whether
+analysis ran at all, not how large its scope was) — recorded here as a known, deliberately out-of-scope
+remainder for this task, not an oversight (code review).

@@ -57,6 +57,14 @@ public sealed record CheckRegistry
     /// zero even though real sessions were genuinely examined). Both share the number zero; only the
     /// first is "nothing was looked at". Required, the same "a caller-stated fact, never guessed"
     /// discipline <see cref="CheckRegistryEntry.Provenance"/> already uses — a registry built without
-    /// stating its own scope size is a compile error, not a silently-defaulted zero.</summary>
+    /// stating its own scope size is a compile error, not a silently-defaulted zero.
+    ///
+    /// In production this equals <c>Findings.RepositoryScope.SessionIds.Count</c> for the same
+    /// request — both are set from the identical <c>scopedSessionIds</c> by
+    /// <c>AecoPostMortem.Api.ApiHost</c>, so the two can never disagree there — but nothing on either
+    /// type enforces that at the type level, since each is an independently-supplied plain input (the
+    /// same "already-resolved, not computed here" discipline <see cref="RepositoryScope"/> and
+    /// <see cref="MastheadCounters"/> already follow); a test fixture that hands the two mismatched
+    /// values compiles and runs, it just states an impossible-in-production scenario.</summary>
     public required int SessionsInScope { get; init; }
 }

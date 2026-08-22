@@ -1122,3 +1122,19 @@ or a real error on completion (the brief's Scenario 2, verbatim) — so one hook
 with `SettingsPage` itself owning only the cross-cutting part neither instance can know about on its
 own: disabling *both* buttons whenever *either* is running (`anyRunning`), and calling
 `notifyStoreChanged()`/bumping `useSettings`'s own `refetchToken` after whichever one just finished.
+
+### A stale note, corrected: the empty-repository-scope case is no longer entirely untouched
+
+The pager & date-range filter task's own "Code review round" note above (and the comment it left in
+`DigestPage.tsx`) called "an unfiltered digest with a truly empty repository scope" a different,
+pre-existing case that task did not touch. That is still literally true of this page's own rendering
+— an empty-scope unfiltered digest still shows "Every check ran and found nothing." (`DigestState.
+Analyzed`, no `noSessionsInRange` gate to suppress it, since that gate only fires for an *active*
+filter) — but a later task (the digest silent-check wire-contract fix, `AecoPostMortem.Api/CLAUDE.md`'s
+"`SilentCheckEnvelope.From` refuses on `CheckRegistry.SessionsInScope`...") closed the server-side half
+of exactly this case: `digest.silentChecks` is now genuinely `[]` for an empty-repository-scope
+unfiltered digest too, not ten `population: 0` "clean" entries — `<CleanChecks>` already rendered
+nothing for an empty list, so nothing here needed to change for that half to become honest. What is
+still open, precisely, is what that later task's own remarks record as a deliberate, separate
+remainder: `DigestState` itself carries no scope-size signal, so this exact case still says "found
+nothing" rather than a state naming that nothing was in scope to look at.

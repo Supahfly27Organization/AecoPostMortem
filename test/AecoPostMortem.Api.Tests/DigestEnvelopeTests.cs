@@ -99,6 +99,11 @@ public sealed class DigestEnvelopeTests
         IngestInProgress = false,
     };
 
+    // SessionsInScope matches SingleRepoScope()'s own session count (2) — the field it mirrors in
+    // production (ApiHost.BuildFindingsForScope sets both from the same scopedSessionIds), not the
+    // corpus-wide MastheadCounters.SessionCount (35) this file's Counters() fixture states
+    // independently (code review: an earlier version of this fixture set 35 here, contradicting the
+    // scope it was paired with).
     static CheckRegistry RanCleanRegistry() => new()
     {
         Entries =
@@ -112,7 +117,7 @@ public sealed class DigestEnvelopeTests
                 Provenance = Provenance.Derived,
             },
         ],
-        SessionsInScope = 35,
+        SessionsInScope = 2,
     };
 
     static RepositoryScope SingleRepoScope() => new()
@@ -210,7 +215,9 @@ public sealed class DigestEnvelopeTests
                     Provenance = Provenance.Derived,
                 },
             ],
-            SessionsInScope = 35,
+            // SessionsInScope matches SingleRepoScope()'s own session count, not either entry's own
+            // (independent) Population — see RanCleanRegistry()'s own comment above.
+            SessionsInScope = 2,
         };
 
         var digest = ProcessDigest.Build(Counters(), registry, [], SingleRepoScope());

@@ -1151,17 +1151,25 @@ wording per check kind, the real-corpus verification, and the one deliberately u
 Added so `AecoPostMortem.Api.SilentCheckEnvelope.From` can tell "the whole analysis scope was empty"
 apart from "this one check's own narrower population happens to be zero" — see `Api/CLAUDE.md`'s
 "`SilentCheckEnvelope.From` refuses on `CheckRegistry.SessionsInScope`..." for the full real-corpus
-investigation and the wire-contract fix this enabled. The distinction matters because most checks'
-own `CheckRegistryEntry.Population` (`AbortedTurnFinding`, `BannedToolFinding`, `AlwaysPassParamFinding`,
-`NeverReadPathFinding`, `UseAAfterBFinding`, `RepeatedFileReadFindingCheck`, `PhaseChurnFinding`,
-`InterruptionLoadFinding`) counts distinct sessions among that check's own candidate items (tool
-calls, turns, permissions+questions, declared intents) — a strict subset of the whole scope, which
-can genuinely be zero within a real, non-empty scope without the scope itself being empty. Only
-`HookFailureFinding.Population` (`allSessionIds.Count`) is pinned to the whole scope size directly.
-`SessionsInScope` is the one corpus-level fact that holds for every check in a given registry
-regardless of which of those two shapes its own `Population` takes — set once, by
-`ApiHost.BuildFindingsForScope` (the registry's one production call site), to `scopedSessionIds.Count`,
-the same session count `Findings.RepositoryScope.SessionIds` already carries for that exact scope.
-Required, the same "a caller-stated fact, never guessed" discipline `CheckRegistryEntry.Provenance`
-already uses — `CheckRegistryTests.SessionsInScope_is_a_required_member` proves it the same way
-`Provenance_is_a_required_member` does.
+investigation and the wire-contract fix this enabled. The distinction matters because `Population`
+across this project's own check orchestrators takes three shapes, none of them pinned to the whole
+scope except the first: `HookFailureFinding.Population` (`allSessionIds.Count`) is the whole scope
+size directly, so it can never be zero while real sessions are in scope. Eight others
+(`AbortedTurnFinding`, `BannedToolFinding`, `AlwaysPassParamFinding`, `NeverReadPathFinding`,
+`UseAAfterBFinding`, `RepeatedFileReadFindingCheck`, `PhaseChurnFinding`, `InterruptionLoadFinding`)
+count distinct sessions among that check's own candidate items (tool calls, turns,
+permissions+questions, declared intents) — a strict subset of the whole scope, which can genuinely
+be zero within a real, non-empty scope without the scope itself being empty. A third shape
+(`FailedToolCallsFinding.Population`, and `ToolFailureClusterFinding.Population` — not itself one of
+the ten `ApiHost.GetDigest` wires into a registry today, this file's own "`MissingCapability`, not
+`Waste`" remarks — but sharing the identical `ToolFailureRate` computation and therefore the same
+`Population` shape) counts *calls* rather than sessions at all (`outcomes.Count`), a strictly weaker
+guarantee than even the session-count shape — one more reason a blanket `Population == 0` filter
+would be the wrong fix, since none of these three shapes bounds "was the scope itself empty" the way
+`SessionsInScope` does. `SessionsInScope` is the one corpus-level
+fact that holds for every check in a given registry regardless of which of those shapes its own
+`Population` takes — set once, by `ApiHost.BuildFindingsForScope` (the registry's one production call
+site), to `scopedSessionIds.Count`, the same session count `Findings.RepositoryScope.SessionIds`
+already carries for that exact scope. Required, the same "a caller-stated fact, never guessed"
+discipline `CheckRegistryEntry.Provenance` already uses — `CheckRegistryTests.
+SessionsInScope_is_a_required_member` proves it the same way `Provenance_is_a_required_member` does.

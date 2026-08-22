@@ -83,6 +83,26 @@ public static class ApiHost
     public const string RebuildRoute = "/api/rebuild";
 
     /// <summary>
+    /// The Settings surface's third write route (Part B), and the only destructive endpoint this
+    /// codebase serves: it deletes the operator's whole store. Served behind the same write gate and
+    /// the same Origin/Host guard the other two are, <em>plus</em> a required confirmation header
+    /// (<see cref="ConfirmationHeader"/>) — see the "A destructive route needs a gate that proves
+    /// intent, not only provenance" non-obvious decision in <c>Api/CLAUDE.md</c>.
+    /// </summary>
+    public const string PurgeRoute = "/api/purge";
+
+    /// <summary>The header a destructive request must carry, naming the action it intends. A custom
+    /// header cannot ride on a CORS <em>simple</em> request — the exact request shape that made
+    /// <see cref="RebuildRoute"/> reachable cross-origin before <see cref="IsAllowedWriteOrigin"/>
+    /// existed — so requiring one is a browser-enforced guard, not only a convention.</summary>
+    public const string ConfirmationHeader = "X-AecoPostMortem-Confirm";
+
+    /// <summary>The one value <see cref="ConfirmationHeader"/> may carry on <see cref="PurgeRoute"/>.
+    /// Named for the action rather than a generic "yes", so a header copied onto a different
+    /// destructive route later cannot authorise it by accident.</summary>
+    public const string PurgeConfirmation = "purge";
+
+    /// <summary>
     /// Builds the host without starting it — the caller decides when and how to run it, which is
     /// what keeps this testable without a Kestrel listener staying up for the life of a test run.
     /// </summary>
@@ -145,6 +165,13 @@ public static class ApiHost
         app.MapPost(RebuildRoute, (HttpContext context) =>
             IsAllowedWriteOrigin(context)
                 ? RunGated(writeGate, () => RunRebuild(store))
+                : RefusedOrigin());
+
+        app.MapPost(PurgeRoute, (HttpContext context) =>
+            IsAllowedWriteOrigin(context)
+                ? IsConfirmed(context, PurgeConfirmation)
+                    ? RunGated(writeGate, () => RunPurge(store))
+                    : RefusedUnconfirmed()
                 : RefusedOrigin());
 
         app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to) =>
@@ -299,7 +326,35 @@ public static class ApiHost
     }
 
     /// <summary>
-    /// Origin/Host validation for the two write routes (code review, follow-up round — see the
+    /// The Settings surface's third write action (Part B), and the only destructive one: the
+    /// identical call the CLI's own <c>purge</c> command makes
+    /// (<c>AecoPostMortem.Cli.CommandRunner.Purge</c> — a <see cref="LocalStore.Purge"/> call plus
+    /// stdout formatting, so there is no shared sequence to factor out the way
+    /// <see cref="NormalizedLayerWriter.RebuildAll"/> was). The store is deleted, not emptied: the
+    /// next request that opens it recreates it from migrations, empty — see the "What an operator
+    /// sees immediately after a purge" non-obvious decision in <c>Api/CLAUDE.md</c>.
+    ///
+    /// This method itself carries no confirmation check: the gate belongs at the route
+    /// (<see cref="IsConfirmed"/>), where the request's own headers are, and a direct caller of this
+    /// method (the CLI, a test) has already stated its intent by calling it.
+    /// </summary>
+    public static PurgeResultEnvelope RunPurge(LocalStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        var outcome = store.Purge();
+
+        return new PurgeResultEnvelope(
+            outcome.DeletedAnything,
+            outcome.Deleted,
+            outcome.BytesReclaimed);
+    }
+
+    /// <summary>
+    /// Origin/Host validation for every write route — the two safe ones (<see cref="IngestRoute"/>,
+    /// <see cref="RebuildRoute"/>) and, since Part C, the destructive one
+    /// (<see cref="PurgeRoute"/>, which adds <see cref="IsConfirmed"/> on top of this rather than
+    /// instead of it) (code review, follow-up round — see the
     /// "Origin and Host validation close a live simple-request CSRF path" non-obvious decision in
     /// <c>Api/CLAUDE.md</c> for the full reasoning and how this was verified against a running host).
     /// A plain cross-origin <c>fetch(..., { method: 'POST' })</c> with a <c>text/plain</c> (or no)
@@ -350,6 +405,38 @@ public static class ApiHost
     static IResult RefusedOrigin() =>
         Results.Problem(
             detail: "This request's Origin or Host did not match this local server; refused.",
+            statusCode: StatusCodes.Status403Forbidden);
+
+    /// <summary>
+    /// The second, stricter gate <see cref="PurgeRoute"/> is served behind, and the only route that
+    /// has one — see the "A destructive route needs a gate that proves intent, not only provenance"
+    /// non-obvious decision in <c>Api/CLAUDE.md</c>. <see cref="IsAllowedWriteOrigin"/> proves a
+    /// request came from this host's own served page; it cannot prove the operator meant to destroy
+    /// their store. A custom header can only be set by a caller that deliberately set it — a
+    /// cross-origin <c>fetch</c> carrying one is no longer a CORS <em>simple</em> request, so the
+    /// browser preflights it and this host, which answers no CORS policy at all, fails that
+    /// preflight before the real request is ever sent.
+    ///
+    /// The value must name the action (<see cref="PurgeConfirmation"/>), so a header a future
+    /// destructive route copies cannot authorise the wrong one. Compared ordinally and
+    /// case-sensitively: this is a machine-to-machine token from this app's own client, not operator
+    /// input to be forgiving about (the operator's own typed confirmation is a separate,
+    /// client-side gate — <c>web/CLAUDE.md</c>).
+    /// </summary>
+    internal static bool IsConfirmed(HttpContext context, string expectedAction) =>
+        string.Equals(
+            context.Request.Headers[ConfirmationHeader].ToString(),
+            expectedAction,
+            StringComparison.Ordinal);
+
+    /// <summary>The refusal <see cref="IsConfirmed"/>'s own caller answers with — a stated reason
+    /// naming the missing header, the same <c>Results.Problem</c> shape <see cref="RefusedOrigin"/>
+    /// already uses.</summary>
+    static IResult RefusedUnconfirmed() =>
+        Results.Problem(
+            detail:
+                $"This request destroys data and must carry the header '{ConfirmationHeader}: " +
+                $"{PurgeConfirmation}'; refused.",
             statusCode: StatusCodes.Status403Forbidden);
 
     /// <summary>

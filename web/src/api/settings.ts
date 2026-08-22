@@ -21,6 +21,9 @@ export interface SettingsEnvelope {
   storePath: string
   storeExists: boolean
   storeSizeBytes: number
+  /** Whether `storePath` is FR-11's documented per-user location. Served rather than derived here:
+   * the client has no way to know what that location is on the operator's platform. */
+  storeIsAtDefaultLocation: boolean
   copilotSourceRoot: string
   copilotSourceFound: boolean
   excludedRoots: string[]

@@ -290,9 +290,34 @@ public static class ApiHost
             store.FilePath,
             store.Exists,
             store.SizeInBytes,
+            IsAtDefaultLocation(store.FilePath),
             copilotSessionStateRoot,
             copilotSourceFound,
             excludedRoots);
+    }
+
+    /// <summary>
+    /// Whether this store sits at FR-11's documented per-user location. Compared as full paths so a
+    /// relative or differently-spelled route to the same file still reads as the default, and
+    /// case-insensitively, matching <c>Ingestion.SessionExclusion</c>'s own precedent for real
+    /// filesystem paths on the platforms this runs on. A path that cannot be resolved at all
+    /// (malformed, or a drive that no longer exists) answers <see langword="false"/> rather than
+    /// throwing: this is one field on a settings page, and it is not worth failing the whole request
+    /// over — being unable to prove a path is the default is itself an honest "not the default".
+    /// </summary>
+    static bool IsAtDefaultLocation(string storePath)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(storePath),
+                Path.GetFullPath(StoreLocation.Default),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

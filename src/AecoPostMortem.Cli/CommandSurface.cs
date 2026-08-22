@@ -10,26 +10,26 @@ public static class CommandSurface
     [
         new(
             "ingest",
-            "[path]",
+            "[path] [--store <path>]",
             "stdout — the coverage report",
             "Read the Copilot session state and re-derive from it.",
             "the ingestion stories in E1"),
         new(
             "rebuild",
-            "",
+            "[--store <path>]",
             "stdout — the re-derivation summary",
             "Re-derive the normalized and findings layers from RAW.",
             "S-46 (issue #24) for the drop/re-derive mechanism; the ingestion stories in E1 for "
             + "the derivation logic that populates the recreated tables"),
         new(
             "purge",
-            "",
+            "[--store <path>]",
             "stdout — what was deleted",
             "Delete the local store.",
             "S-01 (local store and its governance)"),
         new(
             "serve",
-            "[--port <n>]",
+            "[--port <n>] [--store <path>]",
             "stdout — the listening URL",
             $"Start the local API and web shell (default port {CommandRunner.DefaultPort}); opens nothing by itself.",
             "S-48 (API host, web shell and the zero-data state)"),

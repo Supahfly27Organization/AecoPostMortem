@@ -108,6 +108,46 @@ public sealed class SettingsRouteTests
         }
     }
 
+    /// <summary>A store opened anywhere but FR-11's documented per-user location says so, rather
+    /// than serving a bare path the operator has to recognise. Only `--store <path>` can produce
+    /// this in a real run (`Cli/CLAUDE.md`), which is what the Settings page's own wording says.
+    /// </summary>
+    [Fact]
+    public async Task A_store_away_from_the_documented_location_is_reported_as_not_the_default()
+    {
+        using var temporary = new TemporaryStore();
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var settings = await client.GetFromJsonAsync<SettingsEnvelope>(ApiHost.SettingsRoute, Cancellation);
+
+            Assert.NotNull(settings);
+            Assert.False(settings!.StoreIsAtDefaultLocation);
+            Assert.Equal(temporary.Store.FilePath, settings.StorePath);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The other half, and the one a real operator sees: the default store reports itself as
+    /// the default. Built against <see cref="StoreLocation.Default"/> as a path only — the host is
+    /// never started and nothing opens it, so this test never creates or touches the real store.
+    /// </summary>
+    [Fact]
+    public void The_documented_per_user_location_is_reported_as_the_default()
+    {
+        var settings = ApiHost.GetSettings(
+            new LocalStore(StoreLocation.Default), Path.Combine(Path.GetTempPath(), "no-such-copilot-root"));
+
+        Assert.True(settings.StoreIsAtDefaultLocation);
+        Assert.Equal(StoreLocation.Default, settings.StorePath);
+    }
+
     static string MissingCopilotRoot(TemporaryStore temporary) =>
         Path.Combine(temporary.Folder, "no-such-copilot-root");
 

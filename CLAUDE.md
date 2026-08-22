@@ -87,7 +87,9 @@ The `github` MCP server (`mcp__github__*`) is always configured — general GitH
 ## Local DB Defaults
 
 One local SQLite file, owner-only, no server or account (FR-11). Migrations apply on first use, so
-there is no database command to run.
+there is no database command to run. Every command accepts `--store <path>` to open a store
+elsewhere — a per-invocation flag, never a persisted setting (`Cli/CLAUDE.md`). Use it for any
+verification run so a test or a demo never touches the operator's real store.
 
 | DB | Connection String |
 |---|---|

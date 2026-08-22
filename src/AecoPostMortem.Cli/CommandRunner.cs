@@ -49,10 +49,26 @@ public static class CommandRunner
 
         var command = invocation.Command!;
 
+        if (invocation.OptionError is { } optionError)
+        {
+            stderr.WriteLine(optionError);
+            return InvalidArguments;
+        }
+
+        // Precedence, outermost first: the injected `store` (tests only — the CLI never passes one),
+        // then `--store <path>`, then FR-11's documented per-user default. The injected store wins so
+        // a test can keep itself off the real store unconditionally; see `CommandRunnerTests.
+        // A_store_option_opens_the_store_at_that_path_instead_of_the_default_location` for why that
+        // test deliberately forgoes it, and what it does instead to stay safe.
+        var resolvedStore = store
+            ?? (invocation.StorePath is { } storePath
+                ? new LocalStore(storePath)
+                : LocalStore.AtDefaultLocation());
+
         if (string.Equals(command.Name, "ingest", StringComparison.Ordinal))
         {
             return Ingest(
-                store ?? LocalStore.AtDefaultLocation(),
+                resolvedStore,
                 copilotSessionStateRoot ?? CopilotSourceLocation.DefaultSessionStateRoot,
                 invocation,
                 stdout);
@@ -60,18 +76,18 @@ public static class CommandRunner
 
         if (string.Equals(command.Name, "purge", StringComparison.Ordinal))
         {
-            return Purge(store ?? LocalStore.AtDefaultLocation(), stdout);
+            return Purge(resolvedStore, stdout);
         }
 
         if (string.Equals(command.Name, "rebuild", StringComparison.Ordinal))
         {
-            return Rebuild(store ?? LocalStore.AtDefaultLocation(), stdout);
+            return Rebuild(resolvedStore, stdout);
         }
 
         if (string.Equals(command.Name, "serve", StringComparison.Ordinal))
         {
             return Serve(
-                store ?? LocalStore.AtDefaultLocation(),
+                resolvedStore,
                 copilotSessionStateRoot ?? CopilotSourceLocation.DefaultSessionStateRoot,
                 invocation,
                 stdout,

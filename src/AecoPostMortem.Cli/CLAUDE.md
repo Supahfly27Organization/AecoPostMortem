@@ -23,6 +23,44 @@ failing — FR-58 requires the surface to enumerate itself before what sits behi
 It defaults to `LocalStore.AtDefaultLocation()`, which is the operator's real store. Tests pass a
 throwaway one; without that argument the only way to test `purge` would be to delete it.
 
+### `--store <path>` is global, per-invocation, and never persisted
+
+Every command opens the store, so `--store` is taken by `CommandParser` (which stays pure — no
+environment, no file system) rather than by each command's own argument handling; a flag that meant
+something different, or nothing, depending on the verb would be its own trap. It is documented on all
+four `CommandSurface` entries, and `CommandSurfaceTests.Every_command_documents_the_global_store_option`
+keeps it that way — that table is the only place commands are enumerated, so a working-but-undocumented
+flag is structurally impossible.
+
+**Taking the flag out of the argument list is load-bearing, not tidiness.** `ingest` reads
+`Arguments[0]` as its session-state root, so a `--store` left in place would be read as that path.
+`CommandParser.TakeStoreOption` lifts the flag and its value out and preserves the order of
+everything else; `CommandParserTests` pins both halves, including a `--store` that follows
+`serve`'s own `--port`.
+
+Precedence, outermost first: the injected `store` parameter (tests only — the CLI never passes one),
+then `--store`, then the default location. The injected store wins so a test can keep itself off the
+real store unconditionally.
+
+**Why a flag and not a persisted setting.** `Data.StoreLocation`'s own rationale — one documented
+per-user path, nothing to configure and therefore nothing to get wrong — is what shaped this: a
+config file or a UI-editable setting would be a second, persisted source of truth that can drift out
+of agreement with the store actually open, and `ApiHost.Build` bakes the path in at startup, so a UI
+that changed it would be changing something the operator cannot see take effect until they restart
+the very process serving that page. A per-invocation flag adds the override without adding any of
+that.
+
+**One real consequence**: the exclusion list is loaded from beside the store actually opened
+(`Path.Combine(store.Folder, ExclusionListSource.FileName)` — see `ingest`'s own remarks below), so
+`--store` moves the exclusion list with it. A store and its exclusions travelling together is the
+intended reading, not an accident, but it does mean a store in a fresh directory starts with
+`ExclusionListSource.Load`'s own documented fallback rather than whatever the default store's
+`exclusions.json` holds.
+
+**A side benefit worth naming**: this is what finally lets a real-browser verification pass run
+against a throwaway store. Verifying the `purge` button (PR #146) previously required deleting the
+operator's real store and re-ingesting it, because `serve` had no way to be pointed anywhere else.
+
 ### `rebuild` drops, recreates, and repopulates the derived layer, and takes no arguments
 
 `rebuild` calls `AecoPostMortem.Ingestion.NormalizedLayerWriter.RebuildAll` — the one shared
@@ -96,7 +134,9 @@ state `ApiHost.Build` already handles (`webRootPath: null`), not a failure. `dot
 The command surface exists (`CommandSpec`, `CommandSurface`, `CommandParser`, `CommandListing`,
 `CommandRunner`, `Program`), and all four commands are wired. `serve` builds and runs the local API
 and web shell host (`AecoPostMortem.Api.ApiHost`) on a stated default port
-(`CommandRunner.DefaultPort`), overridable with `--port <n>`. `ingest` persists RAW through
+(`CommandRunner.DefaultPort`), overridable with `--port <n>`. Every command also accepts the global
+`--store <path>`, which opens a store somewhere other than FR-11's documented per-user location — see
+the non-obvious decision above for why it is a per-invocation flag rather than a persisted setting. `ingest` persists RAW through
 `IngestionRun.Run`, populates the NORMALIZED derived tables through `NormalizedLayerWriter` as it
 goes, and reports the coverage report; `rebuild` repopulates the same six tables for every session
 RAW holds. Both are verified end to end against the live reference corpus, not only fixtures.

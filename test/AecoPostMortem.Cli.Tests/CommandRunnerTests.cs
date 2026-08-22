@@ -364,9 +364,16 @@ public sealed class CommandRunnerTests
     /// commands that do) — there is structurally nowhere for a source directory to be passed, so
     /// "the source directory is not read" holds without a runtime check.</summary>
     [Fact]
-    public void Rebuild_takes_no_arguments_so_there_is_no_source_directory_to_read()
+    public void Rebuild_takes_no_source_directory_argument_so_there_is_none_to_read()
     {
-        Assert.Equal(string.Empty, CommandSurface.Find("rebuild")!.Arguments);
+        // Used to assert `Arguments` was empty outright, which stopped being the expression of this
+        // invariant once `--store <path>` became global. The invariant itself is unchanged and is
+        // what is asserted now: `rebuild` names no source directory (S-46, issue #24 — repopulation
+        // reads only RAW, already in the store). A store to open is not a source to read.
+        var arguments = CommandSurface.Find("rebuild")!.Arguments;
+
+        Assert.Equal("[--store <path>]", arguments);
+        Assert.DoesNotContain("[path]", arguments, StringComparison.Ordinal);
     }
 
     /// <summary>A store in a throwaway directory: the CLI's default is the operator's real store,
@@ -400,6 +407,55 @@ public sealed class CommandRunnerTests
                 // Never created, or already gone.
             }
         }
+    }
+
+    /// <summary>
+    /// `--store <path>` opens the store at that path instead of FR-11's documented per-user default.
+    /// Proven end to end (the wiring, not the parsing — `CommandParserTests` owns that) by the store
+    /// file appearing at the requested path.
+    ///
+    /// **This test is deliberately written so that a broken flag is harmless, not merely detected.**
+    /// It passes no injected `store` — that parameter is the outermost override and would mask the
+    /// flag entirely — which means a regression sends the command to the operator's *real* store. So
+    /// the command is `ingest` over an **empty** session-state root: with the flag broken it opens
+    /// the real store, finds nothing to ingest and writes nothing, while the assertion below still
+    /// fails loudly. A destructive command (`purge`) or a non-empty root would each have made a
+    /// regression in this flag destroy or pollute real data — which is exactly what happened once
+    /// while this test was first being written, and is why it is shaped this way.
+    /// </summary>
+    [Fact]
+    public void A_store_option_opens_the_store_at_that_path_instead_of_the_default_location()
+    {
+        using var sessionState = new TemporarySessionState();
+        var folder = Path.Combine(
+            Path.GetTempPath(), "AecoPostMortem.Tests", Guid.NewGuid().ToString("n", CultureInfo.InvariantCulture));
+        var elsewhere = Path.Combine(folder, StoreLocation.FileName);
+
+        try
+        {
+            var (exitCode, _, stderr) = Run("ingest", "--store", elsewhere, sessionState.Root);
+
+            Assert.Equal(CommandRunner.Success, exitCode);
+            Assert.Equal(string.Empty, stderr);
+            Assert.True(File.Exists(elsewhere), $"no store was created at {elsewhere}");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void The_store_option_with_no_value_is_rejected_before_anything_runs()
+    {
+        var (exitCode, stdout, stderr) = Run("purge", "--store");
+
+        Assert.Equal(CommandRunner.InvalidArguments, exitCode);
+        Assert.Contains("--store", stderr, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]

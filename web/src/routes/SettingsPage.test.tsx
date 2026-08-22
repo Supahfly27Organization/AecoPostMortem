@@ -17,6 +17,7 @@ const baseSettings: SettingsEnvelope = {
   storePath: 'C:\\Users\\operator\\AppData\\Local\\AecoPostMortem\\store.db',
   storeExists: true,
   storeSizeBytes: 248_815_616,
+  storeIsAtDefaultLocation: true,
   copilotSourceRoot: 'C:\\Users\\operator\\.copilot\\session-state',
   copilotSourceFound: true,
   excludedRoots: ['F:\\git\\AecoPostMortem'],
@@ -89,6 +90,33 @@ describe('Part A: the read-only configuration', () => {
     const config = await screen.findByRole('group', { name: 'Configuration' })
     expect(config).toHaveTextContent('Does not exist yet')
     expect(config).not.toHaveTextContent('0 bytes')
+  })
+
+  // A bare path tells an operator nothing about whether it is the path the product documents. The
+  // server answers that (`storeIsAtDefaultLocation`), and both answers are stated in words.
+  it('says the store is at the documented default location when it is', async () => {
+    stubFetch({ settings: () => jsonResponse(baseSettings) })
+    render(<SettingsPage />)
+
+    const config = await screen.findByRole('group', { name: 'Configuration' })
+    expect(config).toHaveTextContent(/documented default location/i)
+  })
+
+  it('says the store is somewhere else, and names how, when it is not the default', async () => {
+    stubFetch({
+      settings: () =>
+        jsonResponse({
+          ...baseSettings,
+          storePath: 'D:\\elsewhere\\store.db',
+          storeIsAtDefaultLocation: false,
+        }),
+    })
+    render(<SettingsPage />)
+
+    const config = await screen.findByRole('group', { name: 'Configuration' })
+    expect(config).toHaveTextContent('D:\\elsewhere\\store.db')
+    expect(config).toHaveTextContent(/--store/)
+    expect(config).not.toHaveTextContent(/documented default location/i)
   })
 
   it('states plainly when no roots are configured for exclusion', async () => {

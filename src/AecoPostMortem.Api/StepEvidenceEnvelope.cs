@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using AecoPostMortem.Ingestion;
 
 namespace AecoPostMortem.Api;
 
@@ -119,4 +120,73 @@ public sealed record StepEvidenceEnvelope
     /// session ended mid-call — never an empty string read as "the result was empty"; or no raw event
     /// was found for the step at all (the same reason <see cref="Raw"/> reports for that case).</summary>
     public required RawStepEventEnvelope Result { get; init; }
+
+    /// <summary>What triggered a hook — <c>hook.start.data.input</c>'s own <c>toolName</c>/
+    /// <c>toolArgs</c>/<c>toolResult</c>, verified against the live 35-session reference corpus. A
+    /// hook row today says a hook ran but not what it ran in response to; this closes that gap.
+    /// Populated only for a <c>Hook</c> step — every other step kind states plainly that it has no
+    /// trigger at all, the same short-circuit <see cref="Result"/> already applies to a non-tool-call
+    /// step kind. See <see cref="HookTriggerEnvelope"/>'s own doc comment for the full shape.</summary>
+    public required HookTriggerEnvelope Trigger { get; init; }
+}
+
+/// <summary>
+/// What triggered a hook (FR-17's sibling gap — a hook row said a hook ran, never what it ran in
+/// response to). A closed two-shape union behind a private constructor, the same
+/// <see cref="RawStepEventEnvelope"/>/<see cref="ThinkingEnvelope"/> mechanism: a <c>postToolUse</c>
+/// hook's real trigger is <see cref="ToolInvocation"/>, and every other case — a
+/// <c>sessionStart</c> hook (structurally no tool trigger: it fires at session start, carrying
+/// <c>initialPrompt</c>/<c>source</c>/<c>cwd</c> instead of <c>toolName</c>, verified against 35 real
+/// <c>sessionStart</c> events in the live reference corpus, none with a <c>toolName</c>), a non-hook
+/// step kind, or a hook step whose own <c>hook.start</c> cannot be found — is <see cref="Absent"/>
+/// with a reason distinguishing which. "No trigger" is therefore always a distinct, stated value,
+/// never an empty string a client could render as though the trigger were blank or unknown.
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(ToolInvocation), "toolInvocation")]
+[JsonDerivedType(typeof(Absent), "absent")]
+public abstract record HookTriggerEnvelope
+{
+    private HookTriggerEnvelope()
+    {
+    }
+
+    public sealed record ToolInvocation : HookTriggerEnvelope
+    {
+        public required string ToolName { get; init; }
+
+        public required HookTriggerArguments Arguments { get; init; }
+
+        /// <summary>The literal <c>toolResult</c> JSON text, verbatim — served whole, never
+        /// truncated, the same precedent <see cref="RawStepEventEnvelope.Present.Payload"/>'s own doc
+        /// comment states: measured max 199,831 characters (~200 KB) across the live 35-session
+        /// reference corpus (a <c>github-mcp-server-get_file_contents</c> call), and only 22 of 2,992
+        /// real <c>postToolUse</c> trigger results exceed the 43 KB max this project already served
+        /// whole for a tool call's own result. The client bounds the rendered block instead
+        /// (<c>web/CLAUDE.md</c>'s matching <c>max-height</c>/<c>overflow-y</c> entry). Measured 100%
+        /// (2,992 of 2,992) of real <c>postToolUse</c> triggers carry one, but this is still modelled
+        /// as nullable rather than assumed — a trigger genuinely carrying none states that fact as
+        /// <see langword="null"/>, never an empty string standing in for "no result."</summary>
+        public required string? Result { get; init; }
+    }
+
+    public sealed record Absent : HookTriggerEnvelope
+    {
+        public required string Reason { get; init; }
+    }
+}
+
+/// <summary>A hook trigger's own <c>toolArgs</c>, parsed the identical polymorphic way
+/// <see cref="ToolArguments"/> parses <c>tool.execution_start.data.arguments</c> (FR-4): object for
+/// most tools, a bare JSON string for <c>apply_patch</c>'s whole patch body (a measured 840 of 2,992
+/// real <c>postToolUse</c> <c>hook.start</c> events in the live reference corpus), never coerced.
+/// <see cref="Kind"/> reuses <see cref="ToolArgumentKind"/> itself rather than a second, parallel
+/// enum — the same "camelCase enum on the wire" convention <see cref="Data.Execution.OwnerKind"/>
+/// already gets from the global <c>JsonStringEnumConverter</c>, no per-property override needed.
+/// <see cref="Raw"/> is the value's own JSON text, exactly as read — never re-serialised.</summary>
+public sealed record HookTriggerArguments
+{
+    public required ToolArgumentKind Kind { get; init; }
+
+    public required string Raw { get; init; }
 }

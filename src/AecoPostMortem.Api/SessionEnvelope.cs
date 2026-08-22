@@ -160,6 +160,15 @@ public sealed record SessionTapeStepEnvelope
     /// (<see cref="PromptTextLookup"/>'s own remarks).</summary>
     public string? PromptText { get; init; }
 
+    /// <summary>A <see cref="Findings.SessionTapeStepKind.Hook"/> step's own trigger — the tool name
+    /// a <c>postToolUse</c> hook fired in response to (<see cref="HookTriggerNameLookup"/>), resolved
+    /// eagerly the same way <see cref="PromptText"/> is, so the Detail tab needs no per-step fetch to
+    /// show it. <see langword="null"/> for every other step kind, for a <c>sessionStart</c> hook
+    /// (structurally no tool trigger), and for a hook whose own trigger could not be resolved — never
+    /// an empty string standing in for "blank" or "unknown." The Raw tab's fuller trigger evidence
+    /// (arguments, result) is a separate, on-demand fact — see <see cref="StepEvidenceEnvelope.Trigger"/>.</summary>
+    public string? TriggeredBy { get; init; }
+
     public required DateTimeOffset Timestamp { get; init; }
 
     public required long OffsetMs { get; init; }
@@ -195,7 +204,8 @@ public sealed record SessionTapeStepEnvelope
         SessionTapeStep step,
         IReadOnlyList<FindingEnvelope>? findings = null,
         ThinkingEnvelope? thinking = null,
-        string? promptText = null)
+        string? promptText = null,
+        string? triggeredBy = null)
     {
         ArgumentNullException.ThrowIfNull(step);
 
@@ -207,6 +217,7 @@ public sealed record SessionTapeStepEnvelope
             PluginName = step.PluginName,
             PluginVersion = step.PluginVersion,
             PromptText = promptText,
+            TriggeredBy = triggeredBy,
             Timestamp = step.Timestamp,
             OffsetMs = (long)step.Offset.TotalMilliseconds,
             OwnerKind = step.OwnerKind,
@@ -374,7 +385,10 @@ public sealed record SessionEnvelope
     /// <see langword="null"/> when the caller supplies none (every step then serves
     /// <see cref="SessionTapeStepEnvelope.Thinking"/> as <see langword="null"/>, unchanged from
     /// before this item), keyed by <see cref="SessionTapeStep.StepId"/> so the lookup is a direct
-    /// join rather than a second pass over <c>recording.Tape.Steps</c>.</summary>
+    /// join rather than a second pass over <c>recording.Tape.Steps</c>. <paramref
+    /// name="triggeredByToolNameByStepId"/> follows the identical additive shape for a
+    /// <see cref="Findings.SessionTapeStepKind.Hook"/> step's own trigger
+    /// (<see cref="HookTriggerNameLookup"/>).</summary>
     public static SessionEnvelope From(
         SessionRecording recording,
         SessionFindings findings,
@@ -382,7 +396,8 @@ public sealed record SessionEnvelope
         IReadOnlyList<SessionAgentLaneEnvelope>? lanes = null,
         IReadOnlyDictionary<(SessionTapeStepKind Kind, string StepId), IReadOnlyList<Finding>>? stepFindings = null,
         IReadOnlyDictionary<string, ThinkingEnvelope>? thinkingByPromptStepId = null,
-        IReadOnlyDictionary<string, string>? promptTextByStepId = null)
+        IReadOnlyDictionary<string, string>? promptTextByStepId = null,
+        IReadOnlyDictionary<string, string>? triggeredByToolNameByStepId = null)
     {
         ArgumentNullException.ThrowIfNull(recording);
         ArgumentNullException.ThrowIfNull(findings);
@@ -402,6 +417,9 @@ public sealed record SessionEnvelope
                         : null,
                     step.Kind == SessionTapeStepKind.Prompt
                         ? promptTextByStepId?.GetValueOrDefault(step.StepId)
+                        : null,
+                    step.Kind == SessionTapeStepKind.Hook
+                        ? triggeredByToolNameByStepId?.GetValueOrDefault(step.StepId)
                         : null))
                 .ToList(),
             Status = SessionRecordingStatusEnvelope.From(recording.Status),

@@ -36,6 +36,15 @@ public sealed class SessionEnvelopeTests
         OwnerKind = OwnerKind.Main,
     };
 
+    static Hook Hook(string eventId, string name, string startedAt) => new()
+    {
+        SessionId = "s1",
+        EventId = eventId,
+        Name = name,
+        StartedAt = startedAt,
+        OwnerKind = OwnerKind.Main,
+    };
+
     static SessionFindings NoFindings() => SessionFindings.For("s1", []);
 
     [Fact]
@@ -514,5 +523,59 @@ public sealed class SessionEnvelopeTests
 
         var step = Assert.Single(envelope.Steps);
         Assert.Null(step.PromptText);
+    }
+
+    /// <summary>A caller that supplies no <c>triggeredByToolNameByStepId</c> argument still serialises
+    /// every step's <c>TriggeredBy</c> as <see langword="null"/>, the same "additive, existing call
+    /// sites unaffected" discipline <see cref="No_prompt_text_argument_leaves_every_steps_prompt_text_null"/>
+    /// already proves for <c>PromptText</c>.</summary>
+    [Fact]
+    public void No_triggered_by_argument_leaves_every_steps_triggered_by_null()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var hooks = new[] { Hook("h1", "postToolUse", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], [], [], [], hooks);
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Null(step.TriggeredBy);
+    }
+
+    /// <summary>A hook step's own resolved trigger tool name is carried onto its step, joined by
+    /// <c>StepId</c> (the hook's own <c>EventId</c> — the same identity <c>hook.start</c>'s own
+    /// envelope id already gives it).</summary>
+    [Fact]
+    public void A_hook_steps_resolved_trigger_tool_name_is_carried_onto_its_own_step()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var hooks = new[] { Hook("h1", "postToolUse", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], [], [], [], hooks);
+        var triggeredBy = new Dictionary<string, string>(StringComparer.Ordinal) { ["h1"] = "edit" };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, triggeredByToolNameByStepId: triggeredBy);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Equal("edit", step.TriggeredBy);
+    }
+
+    /// <summary>A non-hook step's own <c>TriggeredBy</c> stays <see langword="null"/> even when the
+    /// caller supplies a lookup — the same kind-gated join <c>PromptText</c>/<c>Thinking</c> already
+    /// prove for their own kind.</summary>
+    [Fact]
+    public void A_tool_call_steps_triggered_by_stays_null_even_with_a_supplied_lookup()
+    {
+        var session = SessionWith("2026-08-16T10:00:00Z", null);
+        var toolCalls = new[] { ToolCall("tc1", "view", "2026-08-16T10:00:01Z") };
+        var recording = SessionRecording.Build(session, [], toolCalls, [], [], []);
+        var triggeredBy = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["tc1"] = "Should never be read for a tool call.",
+        };
+
+        var envelope = SessionEnvelope.From(recording, NoFindings(), FindingEnvelope.From, triggeredByToolNameByStepId: triggeredBy);
+
+        var step = Assert.Single(envelope.Steps);
+        Assert.Null(step.TriggeredBy);
     }
 }

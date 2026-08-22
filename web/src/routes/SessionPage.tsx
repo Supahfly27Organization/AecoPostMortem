@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import type { ModelReasoningReadability, RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
+import type { HookTriggerEnvelope, ModelReasoningReadability, RawStepEventEnvelope, SessionAgentLane, SessionEnvelope, SessionFindingChip, SessionTapeStep, SubagentOutputEnvelope, ThinkingEnvelope } from '../api/session'
 import { useSession } from '../api/useSession'
 import { useStepEvidence } from '../api/useStepEvidence'
 import { MethodologyFooter } from '../session/MethodologyFooter'
@@ -281,6 +281,12 @@ function DetailPanel({ step }: { step: SessionTapeStep }) {
         <dt>Owner</dt>
         <dd>{step.ownerKind === 'agent' ? `Subagent (${step.agentId ?? 'unknown'})` : 'Main thread'}</dd>
       </div>
+      {step.kind === 'hook' && (
+        <div className="inspector__detail-field">
+          <dt>Triggered by</dt>
+          <dd>{step.triggeredBy ?? 'No tool trigger resolved — see Raw tab for detail.'}</dd>
+        </div>
+      )}
     </dl>
   )
 }
@@ -339,15 +345,61 @@ function RawEventBlock({ label, event }: { label: string; event: RawStepEventEnv
   )
 }
 
+/** A hook row said a hook ran, never what it ran in response to — a third, separately labeled Raw
+ * tab block, reusing the identical `inspector__raw`/`inspector__raw-payload` rendering (and its own
+ * `max-height`/`overflow-y` bound) `RawEventBlock` already gives the call and its result, since a
+ * trigger's own arguments/result are the identical "the literal payload, or a stated absence"
+ * question, asked of a hook's own trigger rather than a second event. */
+function TriggerBlock({ trigger }: { trigger: HookTriggerEnvelope }) {
+  return (
+    <div className="inspector__raw-block">
+      <p className="inspector__raw-block-label">Trigger</p>
+      {trigger.kind === 'absent' ? (
+        <p className="inspector__unavailable">{trigger.reason}</p>
+      ) : (
+        <div className="inspector__raw">
+          <p className="inspector__raw-event-type">{trigger.toolName}</p>
+          <pre className="inspector__raw-payload">{trigger.arguments.raw}</pre>
+          {trigger.result != null ? (
+            <pre className="inspector__raw-payload">{trigger.result}</pre>
+          ) : (
+            <p className="inspector__unavailable">No result was recorded for this hook's trigger.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** The Raw tab: "the provenance guarantee made clickable, not a debugging affordance" (the
  * story's own edge case) — it must never render blank, and a step whose raw event was skipped at
  * ingest states that fact instead. A tool call's own result is a second, separately labeled block
- * below the call — an operator previously saw the call going out and never what came back. */
-function RawPanel({ raw, result }: { raw: RawStepEventEnvelope; result: RawStepEventEnvelope }) {
+ * below the call — an operator previously saw the call going out and never what came back.
+ *
+ * A hook's own trigger is a third block, but — unlike Call/Result, which apply (or state "not
+ * applicable") for every step kind — it is rendered only for a `'hook'` step (code review): a
+ * trigger is meaningful for exactly one step kind, and showing "Trigger — Only a hook step has a
+ * trigger; this step kind does not." on every Prompt/ToolCall/McpCall/Skill step in every session
+ * would be structural noise on the large majority of steps, the same "no section unless there is a
+ * real reason for one" discipline `Pager`/`StepFlag`/`CleanChecks` already follow elsewhere in this
+ * app (`web/CLAUDE.md`). The server still serves the not-applicable state for every other kind
+ * (`HookTriggerEnvelope.Absent`) — this is a frontend-only rendering choice, not a contract change. */
+function RawPanel({
+  raw,
+  result,
+  trigger,
+  showTrigger,
+}: {
+  raw: RawStepEventEnvelope
+  result: RawStepEventEnvelope
+  trigger: HookTriggerEnvelope
+  showTrigger: boolean
+}) {
   return (
     <>
       <RawEventBlock label="Call" event={raw} />
       <RawEventBlock label="Result" event={result} />
+      {showTrigger && <TriggerBlock trigger={trigger} />}
     </>
   )
 }
@@ -393,7 +445,12 @@ function SelectedStepInspector({ sessionId, step }: { sessionId: string; step: S
           <p className="inspector__unavailable">Could not load this step's evidence.</p>
         )}
         {evidenceQuery.status === 'loaded' && (
-          <RawPanel raw={evidenceQuery.evidence.raw} result={evidenceQuery.evidence.result} />
+          <RawPanel
+            raw={evidenceQuery.evidence.raw}
+            result={evidenceQuery.evidence.result}
+            trigger={evidenceQuery.evidence.trigger}
+            showTrigger={step.kind === 'hook'}
+          />
         )}
       </div>
     </>

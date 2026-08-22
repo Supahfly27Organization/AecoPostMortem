@@ -15,11 +15,16 @@ passing `--prefix`, for the same reason.
 
 | File | What it holds |
 |---|---|
-| `src/App.tsx` | the routes (`/`, `/sessions/:sessionId`, `/rules`, `/monitor`) plus a `*` catch-all (`NotFound`), all under `AppShell`. Router-agnostic on purpose — `main.tsx` supplies `BrowserRouter`, tests supply `MemoryRouter`. `/monitor` (FR-39) is the fourth routed surface, added once `MonitorComparisonBlock`/`fetchMonitorComparison` had no door to the real app — see `routes/MonitorPage.tsx`'s own doc comment for why it earns a route rather than a section on the Digest or the Rules Inventory |
-| `src/AppShell.tsx` | the nav to the Digest, Rules Inventory and Monitor (always reachable, S-48 Scenario 1 plus FR-39's own extension of it); the session view is reachable only via session id links from the digest, plus `AppStateBanner`, above whichever route's `<Outlet />` content is showing |
+| `src/App.tsx` | the routes (`/`, `/sessions/:sessionId`, `/rules`, `/monitor`, `/settings`) plus a `*` catch-all (`NotFound`), all under `AppShell`. Router-agnostic on purpose — `main.tsx` supplies `BrowserRouter`, tests supply `MemoryRouter`. `/monitor` (FR-39) is the fourth routed surface, added once `MonitorComparisonBlock`/`fetchMonitorComparison` had no door to the real app — see `routes/MonitorPage.tsx`'s own doc comment for why it earns a route rather than a section on the Digest or the Rules Inventory. `/settings` is the fifth — see `routes/SettingsPage.tsx`'s own doc comment for why it earns one too, the identical reasoning Monitor's own doc comment already gives |
+| `src/AppShell.tsx` | the nav to the Digest, Rules Inventory, Monitor and Settings (always reachable, S-48 Scenario 1 plus FR-39's and the Settings surface's own extensions of it); the session view is reachable only via session id links from the digest, plus `AppStateBanner`, above whichever route's `<Outlet />` content is showing |
 | `src/AppStateBanner.tsx` | S-48 Scenarios 2 and 3: fetches `/api/app-state` and renders its diagnosis, distinctly per state — no-source-found, empty-store, and a fourth state (unreachable API) neither Gherkin scenario names but a real machine can hit |
 | `src/api/appState.ts` | the `AppStateReport`/`AppStateKind` shapes and `fetchAppState`, hand-kept in sync with `AecoPostMortem.Api.AppStateReport` (`src/AecoPostMortem.Api/AppStateReport.cs`) — no generated client exists yet |
-| `src/api/useAppState.ts` | the fetch-once-on-mount hook `AppStateBanner` reads; loading renders nothing rather than a message that might not apply a moment later |
+| `src/api/useAppState.ts` | the fetch-once-on-mount hook `AppStateBanner` reads; loading renders nothing rather than a message that might not apply a moment later. The Settings surface task added a second re-fetch trigger: `onStoreChanged` (`api/storeChangeEvents.ts`), since `AppShell` (and therefore this banner) stays mounted for the whole SPA session and a route change alone does not refresh it the way a page's own per-mount fetch would |
+| `src/api/storeChangeEvents.ts` | The Settings surface task's cross-cutting seam: a plain `window` `CustomEvent` (`notifyStoreChanged`/`onStoreChanged`) `SettingsPage` fires after a completed ingest or rebuild, so `useAppState` — the one hook mounted for the whole SPA session rather than per-route — can refresh without a shared store/cache library this app has no other need for. See `routes/SettingsPage.tsx`'s own doc comment for why the Digest/Rules Inventory/Monitor pages need no equivalent wiring |
+| `src/api/settings.ts` | the `SettingsEnvelope`/`IngestResultEnvelope`/`RebuildResultEnvelope` shapes, `fetchSettings`, `postIngest`/`postRebuild` and `WriteConflictError`, hand-kept in sync with `AecoPostMortem.Api.SettingsEnvelope`/`IngestResultEnvelope`/`RebuildResultEnvelope` (`src/AecoPostMortem.Api/*.cs`) — the same no-generated-client gap `api/appState.ts` documents. A `409` response (the server's shared write gate already running, `Api/CLAUDE.md`) throws `WriteConflictError` carrying the server's own operator-facing `message` field (code review, Minor: this used to hardcode a bare route path instead of reading it) rather than a generic error, so `SettingsPage` can render "already running" with the server's real sentence; any other non-2xx reads whichever field the server's error body carries — RFC 7807 `detail` (a caught exception, `ApiHost.RunGated`'s own `Results.Problem`) or `message` (the 409 path's own `Results.Conflict`) — so a real failure's own message reaches the operator rather than a bare status code |
+| `src/api/useSettings.ts` | the fetch-per-`refetchToken` hook `SettingsPage` reads for Part A — mirrors `useRulesInventory`'s re-fetch-on-change shape; `SettingsPage` bumps the token after a successful write so the store-size/existence figures shown reflect what the write just did. `isRefetching` (code review, Minor) mirrors `useDigest`'s own convention: a post-write refresh keeps the previously-loaded configuration on screen with a small "Updating…" note rather than blanking the whole block back to bare `'loading'` — unlike `useRulesInventory`'s version switch, a post-write refresh here is a background update of facts that mostly did not change |
+| `src/api/useWriteOperation.ts` | The Settings surface's Part B mutation hook: `idle`/`running`/`succeeded`/`failed`, generic over the POST's own result type so `SettingsPage` instantiates it once for `postIngest` and once for `postRebuild`. A `useRef` running-flag (checked synchronously before the state update) refuses a second concurrent `run()` from this same hook instance — belt-and-braces alongside the server's own shared write gate (`ApiHost.RunGated`), which is what actually prevents two concurrent writes from touching the store; this hook's own guard is what keeps a double-click from firing a second HTTP request at all. `run()` returns its own terminal `WriteOperationOutcome` (`'succeeded'`/`'failed'`, code review, Important) so `SettingsPage` can gate `afterWrite()` — the post-write refetch and the cross-cutting `notifyStoreChanged()` — on a genuine success rather than firing it unconditionally, including on a `409` or a real failure that never changed the store; see the "A completed write refreshes the global app-state banner..." non-obvious decision below and `Api/CLAUDE.md`'s matching concurrency remarks for why an unconditional dispatch was a real hazard, not only an imprecise fact. No `AbortController` is created here (code review, Minor): aborting the client's own fetch would not stop the real ingest/rebuild work already running server-side under the write gate, so there is nothing correct to cancel, unlike `useSettings`'s own GET |
+| `src/routes/SettingsPage.tsx` | The Settings surface, both parts: Part A renders `SettingsEnvelope` as a `role="group"` figure list — the store path/existence/size, the Copilot source root and whether it was found, and the configured exclusion list, with an honest "Does not exist yet" sentence for a store that doesn't (never a bare `0 bytes`, `web/CLAUDE.md`'s own "an honest empty state" discipline). Part B renders one card per write action (`WriteOperationCard`), each with its own button, a `role="status"` "Running …" sentence while in flight, disabling *both* buttons while either runs, a `role="alert"` failure message that shows the server's own real error (including a distinct "already running" for a `409`), and — on success — the real served result (`IngestResultEnvelope`'s coverage figures / `RebuildResultEnvelope`'s counts), never reduced to a bare "done" |
 | `src/routes/ComingSoon.tsx` | the placeholder a surface with no real content yet renders — naming its own story and release rather than sharing one generic message. **Currently unreferenced**: all four routed surfaces (Digest, Rules Inventory, session view, Monitor) are built as of the Monitor comparison's missing-door task. Kept because the playbook below still points a new route at it, so the next one does not invent a second placeholder shape |
 | `src/routes/RulesInventoryPage.tsx` | FR-40's real content (S-22, issue #35): one rule-set version's statements, each with exactly one status, its source file, its carrying sessions, its in-force window and its retirement — plus the version scope, the status breakdown and the two designed "no rules found" states. Fetches `/api/rules-inventory` via `useRulesInventory`. Mockup parity item #7 added a "Violations" column (`ViolationCountCell`): a Watched row's real count, a stated "No check built" for a Watched row whose matched shape has no orchestrator, or a plain dash for every non-Watched row — three visually distinct states, never one collapsed into another |
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render. Mockup parity item #7 added `RuleViolationCountEnvelope` (`counted`/`notAvailable`) and `RulesInventoryRowEnvelope.violationCount` |
@@ -670,8 +675,8 @@ an unrelated file this task never touches) before and after this whole round.
    placeholder shape.
 2. Register the route in `App.tsx`, under the shared `AppShell` element so navigation and the
    app-state banner stay present.
-3. Add its nav link in `AppShell.tsx` if it is a primary surface (four today: Digest, Rules
-   Inventory, Monitor, plus the session view reachable only by link).
+3. Add its nav link in `AppShell.tsx` if it is a primary surface (five today: Digest, Rules
+   Inventory, Monitor, Settings, plus the session view reachable only by link).
 4. Cover it in `App.routing.test.tsx` — the route resolves, and (if still a placeholder) the
    correct story/release text is present. A route that fetches needs its own arm in that file's
    shared `fetch` stub, which throws on an unexpected URL by design.
@@ -1050,3 +1055,70 @@ Test tooling: `vitest` + `@testing-library/react` + `jsdom`, configured in `vite
 rather than shared) and `src/vitest-setup.ts` (jest-dom matchers, and `afterEach(cleanup)` since
 `test.globals` is off and testing-library's usual auto-cleanup never registers without it).
 `npm test` runs the suite once; `npm run build` still type-checks (`tsc -b`) ahead of `vite build`.
+
+### The Settings surface earns a fifth nav link, the same reasoning Monitor's own addition gives
+
+The nav went from two links to three when Monitor landed (PR #141) and the same question applied
+again here: is Settings a primary surface, or something reachable from elsewhere? It is primary —
+there is no other page that would plausibly link to "the operator's configuration and the ingest/
+rebuild controls," the way, say, a session id on the Digest naturally links to that session's Flight
+Recorder. An operator who wants to check where the store lives or run a fresh ingest has no other
+door to walk through, so `AppShell` gets a fourth `NavLink` (`/settings`), always reachable
+regardless of the app's data state — the identical unconditional placement `AppStateBanner` and the
+other three nav links already have.
+
+### A completed write refreshes the global app-state banner via a small event, not a shared cache
+
+The brief's own design question 3 asked what, if anything, this slice does about other pages having
+already fetched once. The honest answer split in two, and both halves are stated rather than left
+implicit:
+
+- **Digest, Rules Inventory and Monitor need nothing new.** Each fetches fresh in its own
+  `useEffect` on mount (`useDigest`/`useRulesInventory`/`useMonitorComparison`), and React Router
+  unmounts a route's content when the operator navigates away from it — leaving Settings for any of
+  the other three pages already triggers a fresh mount, and therefore a fresh fetch, with the app's
+  existing per-page fetch-on-mount discipline doing the whole job unmodified.
+- **`AppStateBanner` is the one real gap.** `AppShell` renders it once, above the routed
+  `<Outlet />` (this file's own "shown above every route" decision), so it stays mounted for the
+  entire SPA session — a route change never remounts it, and its own `useAppState` fetches only
+  once. Without a fix, a "Nothing has been ingested yet" banner shown before the operator's first
+  real ingest would keep reading exactly that after a successful one, until a full page reload
+  happened to remount the whole tree — silence reading as compliance, the one failure mode this
+  whole product exists to catch, now inside its own chrome.
+
+A shared cache/state library (React Query and similar) would solve this too, but this app has
+exactly one cross-cutting listener today and no other case anywhere in the codebase where two
+mounted components need to agree on server state without a shared parent already passing it down —
+introducing a whole caching layer for one listener would be the heavier fix, not the smaller one.
+`api/storeChangeEvents.ts`'s plain `window` `CustomEvent` (`notifyStoreChanged`/`onStoreChanged`) is
+the seam instead: `SettingsPage` calls `notifyStoreChanged()` after either write succeeds,
+`useAppState` adds a second effect that calls `onStoreChanged` to bump an internal `refetchToken`
+and re-run its fetch effect. `AppStateBanner.test.tsx`'s own new describe block proves the wiring
+end to end — a stale `'emptyStore'` banner becomes no banner at all the moment
+`notifyStoreChanged()` fires, with no route change in between.
+
+**"After either write succeeds" is load-bearing, and the first pass got it wrong (code review,
+Important).** `SettingsPage.runIngest`/`runRebuild` originally called `afterWrite()`
+unconditionally after `await ingest.run()`/`await rebuild.run()` — including on a `409` conflict and
+on a genuine failure, neither of which means the store actually changed. Beyond being simply
+inaccurate, a `409` specifically means *another write is still in flight*, and `POST /api/rebuild`
+drops the derived tables for a real window before repopulating them (`Ingestion.
+NormalizedLayerWriter.RebuildAll`, `Ingestion/CLAUDE.md`'s own remarks) — dispatching
+`notifyStoreChanged()` at that moment fires a `GET /api/app-state` request that opens the store
+(`ApiHost.StoreHasBeenIngested` → `store.Open()` → `Database.Migrate()`/`DerivedSchema.EnsureCurrent`)
+squarely into that window. `useWriteOperation.run` now returns its own terminal
+`WriteOperationOutcome`, and `SettingsPage` gates `afterWrite()` on `'succeeded'` specifically —
+`SettingsPage.test.tsx`'s two new regression cases prove the negative directly: the store-changed
+listener is never called for a `409` or for a real failure, only for a genuine success.
+
+### Ingest and rebuild share one generic mutation hook, not two bespoke ones
+
+`useWriteOperation<T>` is generic over the POST's own result type rather than `SettingsPage` hand-
+rolling `idle`/`running`/`succeeded`/`failed` state twice with two different result shapes
+(`IngestResultEnvelope`/`RebuildResultEnvelope`). Both write actions need the identical shape — a
+button that cannot be clicked twice while running, a stated "Running …" sentence, and a real result
+or a real error on completion (the brief's Scenario 2, verbatim) — so one hook instantiated twice
+(`useWriteOperation(postIngest)`, `useWriteOperation(postRebuild)`) is the whole implementation,
+with `SettingsPage` itself owning only the cross-cutting part neither instance can know about on its
+own: disabling *both* buttons whenever *either* is running (`anyRunning`), and calling
+`notifyStoreChanged()`/bumping `useSettings`'s own `refetchToken` after whichever one just finished.

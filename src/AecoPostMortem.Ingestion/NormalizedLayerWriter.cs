@@ -1,4 +1,5 @@
 using AecoPostMortem.Data;
+using AecoPostMortem.Data.Execution;
 using Microsoft.EntityFrameworkCore;
 
 namespace AecoPostMortem.Ingestion;
@@ -88,5 +89,47 @@ public static class NormalizedLayerWriter
         // makes deriving the same session twice in one context (Derive calls this first) replace
         // rather than throw.
         context.ChangeTracker.Clear();
+    }
+
+    /// <summary>
+    /// "Rebuild", as one definition both callers share: drop and recreate the derived schema
+    /// (<see cref="DerivedSchema.Rebuild"/>, unconditional — distinct from the version-gated rebuild
+    /// <see cref="LocalStore.Open"/> already runs via <c>EnsureCurrent</c>), then <see cref="Derive"/>
+    /// every distinct session RAW still holds. Before this method existed, <c>AecoPostMortem.Cli</c>'s
+    /// <c>rebuild</c> command carried this exact sequence inline; <c>AecoPostMortem.Api</c>'s
+    /// <c>POST /api/rebuild</c> needs the identical sequence, and factoring it here — the layer both
+    /// projects already reference — means "what rebuild means" is defined in exactly one place rather
+    /// than two thin dispatch layers each repeating the loop. Returns the session ids re-derived, so a
+    /// caller can report how many without a second query of its own.
+    /// </summary>
+    /// <remarks>
+    /// Wrapped in one transaction (code review, Settings surface task): the CLI's own short-lived
+    /// process made the drop-then-repopulate window this method opens academic — nothing else was
+    /// ever reading the same store mid-rebuild. Reachable from <c>POST /api/rebuild</c> inside a
+    /// long-lived <c>serve</c> process, a concurrent <c>GET</c> (a second browser tab's own
+    /// <c>/api/digest</c> or <c>/api/app-state</c>) could otherwise land in the real window between
+    /// <see cref="DerivedSchema.Drop"/> and the last <see cref="Derive"/> call and see "no such
+    /// table" — a hard error, not the retriable busy/timeout SQLite gives a reader that instead waits
+    /// on an open write transaction. SQLite's DDL is transactional, so a reader on a separate
+    /// connection now sees either the pre-rebuild tables or the fully-repopulated post-rebuild ones,
+    /// never neither.
+    /// </remarks>
+    public static IReadOnlyList<string> RebuildAll(PostMortemContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        using var transaction = context.Database.BeginTransaction();
+
+        DerivedSchema.Rebuild(context);
+
+        var sessionIds = context.RawEvents.Select(raw => raw.SessionId).Distinct().ToList();
+        foreach (var sessionId in sessionIds)
+        {
+            Derive(context, sessionId);
+        }
+
+        transaction.Commit();
+
+        return sessionIds;
     }
 }

@@ -190,4 +190,38 @@ public sealed class NormalizedLayerWriterTests
 
         Assert.Single(context.Sessions.Where(s => s.SessionId == "session-2"));
     }
+
+    /// <summary>The sequence <c>AecoPostMortem.Cli</c>'s <c>rebuild</c> command and
+    /// <c>AecoPostMortem.Api</c>'s <c>POST /api/rebuild</c> both need — drop-and-recreate the derived
+    /// schema, then re-derive every session RAW still holds — factored out here so both callers share
+    /// one definition of "rebuild" rather than each repeating the loop over
+    /// <see cref="Derive(PostMortemContext, string)"/> independently.</summary>
+    [Fact]
+    public void RebuildAll_recreates_the_schema_and_repopulates_every_session_raw_holds()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        using var context = workspace.Store.Open();
+        Seed(context, AFullSession("session-1"));
+        Seed(context, AFullSession("session-2"));
+
+        var sessionIds = NormalizedLayerWriter.RebuildAll(context);
+
+        Assert.Equal(["session-1", "session-2"], sessionIds.OrderBy(id => id, StringComparer.Ordinal));
+        Assert.Equal(2, context.Sessions.Count());
+        Assert.Equal(2, context.Turns.Count());
+        Assert.Equal(2, context.ToolCalls.Count());
+        Assert.Equal(2, context.RawEvents.Select(e => e.SessionId).Distinct().Count());
+    }
+
+    [Fact]
+    public void RebuildAll_against_a_store_with_no_raw_events_repopulates_nothing_and_does_not_throw()
+    {
+        using var workspace = new IngestionTestWorkspace();
+        using var context = workspace.Store.Open();
+
+        var sessionIds = NormalizedLayerWriter.RebuildAll(context);
+
+        Assert.Empty(sessionIds);
+        Assert.Empty(context.Sessions);
+    }
 }

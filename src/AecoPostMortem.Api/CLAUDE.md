@@ -11,7 +11,10 @@ Endpoints for the three surfaces, and the host that serves them.
 | `SilentCheckEnvelope.cs` | FR-42's "checks that found nothing" surface — `SilentCheckEnvelope.From(CheckRegistry)` projects only the entries that ran clean. Mockup parity item #6 added `Provenance`/`ProvenanceLabel`, projected straight from `CheckRegistryEntry.Provenance` (below) so a clean-check card can carry the same badge a finding does |
 | `DigestEnvelope.cs` | FR-41 part 1 (issue #44, S-36): `MastheadEnvelope` and `DigestEnvelope` — the served corpus masthead and the findings already ranked by sessions affected; FR-41 part 2 (issue #45, S-54): `RepositoryScopeEnvelope`, carried on `MastheadEnvelope`. FR-48 (issue #52, S-42) added `InferredFindings`, served separately from `RankedFindings`. Mockup parity item #2 added `RepositoryScopeEnvelope.SessionIds`, the ordered session list a per-finding session strip needs. Mockup parity item #6 added `SilentChecks` (`SilentCheckEnvelope.From(digest.CheckRegistry)`), threading FR-42's surface through the same fetch. Mockup parity item #15 added `RuleCoverageStatusEnvelope` (`notYetAnalyzed`/`analyzed`, the closed wire shape for `Findings.RuleCoverageStatus`) and changed `MastheadEnvelope.RuleCoverage` from a bare enum to that type — `AnalyzedCoverage.Counts` reuses `RulesInventoryStatusCountsEnvelope` (`RulesInventoryEnvelope.cs`) verbatim rather than a second four-int shape. Digest session-naming Slice 2 added `RepositoryScopeEnvelope.SessionLabels` and a matching optional `sessionLabels` parameter threaded through `MastheadEnvelope.From`/`DigestEnvelope.From` |
 | `AppStateReport.cs` | S-48's zero-data diagnosis — `AppStateKind` (`NoSourceFound` / `EmptyStore` / `Ready`) and `AppStateReport.Diagnose`, the two-empty-states-are-different-fixes rule as one pure function over two booleans |
-| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest?from=&to=` (`DigestRoute`, `FromParameter`/`ToParameter` — the pager & date-range filter task's optional `DateOnly` bounds, both omittable, a caller error on `from > to` answering 400), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession` and `GetStepEvidence` are the same five without a listener |
+| `ApiHost.cs` | builds the ASP.NET Core host: `GET /api/app-state` (`AppStateRoute`), `GET /api/digest?from=&to=` (`DigestRoute`, `FromParameter`/`ToParameter` — the pager & date-range filter task's optional `DateOnly` bounds, both omittable, a caller error on `from > to` answering 400), `GET /api/rules-inventory?version=` (`RulesInventoryRoute`, `VersionParameter`), `GET /api/sessions/{sessionId}` (`SessionRouteTemplate`), `GET /api/sessions/{sessionId}/steps/{stepId}?kind=` (`StepEvidenceRouteTemplate`, S-52, issue #16), `GET /api/settings` (`SettingsRoute`, the Settings surface's Part A), `POST /api/ingest` and `POST /api/rebuild` (`IngestRoute`/`RebuildRoute`, the Settings surface's Part B and this codebase's first two write endpoints), and, when a built web app is available, the static files that serve it from the same process; `DiagnoseAppState`, `GetDigest`, `GetRulesInventory`, `GetSession`, `GetStepEvidence`, `GetSettings`, `RunIngest` and `RunRebuild` are the same eight without a listener |
+| `SettingsEnvelope.cs` | the Settings surface's read-only contract (Part A): store path/existence/size, the Copilot source root and whether it was found, and the configured exclusion list — every field a real, already-resolved fact, never guessed or zero-filled for a store that does not exist yet |
+| `IngestResultEnvelope.cs` | `POST /api/ingest`'s response contract (Part B): FR-14's `Ingestion.CoverageReport` carried onto the wire verbatim (via `ExcludedSessionEnvelope`), plus a server-measured `DurationSeconds` — the same report the CLI's own `ingest` prints to stdout, never reduced to a bare "OK" |
+| `RebuildResultEnvelope.cs` | `POST /api/rebuild`'s response contract (Part B): how many RAW events and sessions the derived layer was just re-derived from, plus a server-measured `DurationSeconds` |
 | `HookFailureEventLookup.cs` | FR-17's error text (issue #27): resolves failed `hook.start`/`hook.end` pairs straight from a session's own RAW events into `Findings.HookFailureEvent` — `Data.Execution.Hook` carries no error column, so `GetDigest` cannot read it any other way |
 | `HookTriggerNameLookup.cs` | What triggered a hook, sibling task: `FindForHookSteps` resolves a `Hook` step's own trigger tool name eagerly (batched, keyed by `StepId`), the same "additive, no-fetch" shape `PromptTextLookup` established for a Prompt step's own text — deliberately a separate, narrower reader from `StepEvidenceLookup`'s own `FindTrigger` (below), which resolves the fuller, on-demand trigger evidence once a step is selected. See the non-obvious decision below for why these stay two readers rather than one |
 | `DeclaredIntentLookup.cs` | FR-19's not-yet-wired gap (issue #29), closed: resolves `report_intent` tool calls' own `arguments.intent` straight from RAW into `Rules.DeclaredIntent`, ordering by the call's own timestamp read as Unix milliseconds (`Data.Execution.ToolCall` carries no field for it, and `RawEvent.Sequence` only orders within one session) — the one place in the codebase allowed to name `report_intent` |
@@ -1546,3 +1549,143 @@ tab; the `postToolUse` hook step at 53.6s (step id `814db88c-…`, the `skill` t
 BY — skill" on the Detail tab and the full "TRIGGER — skill — `{"skill":"using-superpowers"}` — ⟨the
 real 18,574-character `toolResult`⟩" on the Raw tab, scrolling inside its own bounded block rather
 than pushing the page down. `web/CLAUDE.md`'s matching Status entry names the same real check.
+
+### The Settings surface: this project's first POST endpoints, and where their logic lives
+
+The Settings page (`web/CLAUDE.md`) needed a read-only configuration view (Part A, `GET
+/api/settings`) and two write actions (Part B, `POST /api/ingest`/`POST /api/rebuild`) — every POST
+endpoint that exists anywhere in this codebase today. Two design questions had to be settled before
+writing either route: what the API calls, and how concurrent writes are kept from corrupting the
+store.
+
+**What the API calls.** `Cli` references `Api` (`Cli/CLAUDE.md`'s own References section) — never
+the other direction — so `ApiHost.RunIngest`/`RunRebuild` cannot call into `AecoPostMortem.Cli` at
+all, and duplicating `CommandRunner.Ingest`/`Rebuild`'s own logic inline here was the only apparent
+alternative. It turned out neither `Cli` method holds real business logic worth duplicating: `Ingest`
+is a thin wrapper over `Ingestion.IngestionRun.Run` (already a direct, reusable entry point — the CLI
+itself does no more than resolve which source root and exclusion list to pass it), and `Rebuild`'s own
+drop-and-recreate-then-rederive sequence was inlined directly in `CommandRunner` before this task
+(`Data.Execution.DerivedSchema.Rebuild` plus a loop over `Ingestion.NormalizedLayerWriter.Derive`) —
+worth sharing, not duplicating. That sequence is now `Ingestion.NormalizedLayerWriter.RebuildAll`
+(`Ingestion/CLAUDE.md`'s own remarks), the one place "what rebuild means" is defined; both
+`CommandRunner.Rebuild` and `ApiHost.RunRebuild` call it. `RunIngest` and `RunRebuild` therefore call
+`Ingestion`/`Data` directly — the same two projects `ApiHost` already references for every read
+endpoint — rather than reaching into `Cli` or copying its dispatch logic. `RunIngest` has no request
+body: the source directory served is always the one `Build` was given
+(`copilotSessionStateRoot`, the same parameter `DiagnoseAppState`/`GetSettings` already read), unlike
+the CLI's own optional positional path argument — an operator driving a browser has no terminal to
+type an override into, and adding one would be unused surface for this slice.
+
+**Concurrency.** Both write routes share one `SemaphoreSlim(1, 1)`, declared as a local inside `Build`
+(so two hosts built in the same test process, or two builds against two different stores, never share
+one gate) and captured by both route closures — `RunGated` is the seam: `gate.Wait(0)` never blocks
+the request thread, so a second click, a second browser tab, or a rebuild fired while an ingest is
+still running all get an immediate `409 Conflict` rather than a silently queued request or a
+request racing the first one against the same SQLite connection (`Pooling=False`,
+`Data/CLAUDE.md`). One gate for both routes, not one each — `ingest` and `rebuild` both open and
+write through the identical store file, so a rebuild starting mid-ingest is exactly as unsafe as two
+ingests overlapping. A caught exception is served as `Results.Problem(detail: ex.Message, ...)`, not
+a bare unexplained 500 — "a failed ingest must show what failed" (the brief's own Scenario 2) — and
+the gate is always released in a `finally`, proven by `RunGatedTests.
+A_failed_run_still_releases_the_gate_and_reports_the_failure` so one failed write can never
+permanently lock out every future one. `RunGatedTests` exercises this deterministically against a
+manually-held `SemaphoreSlim` rather than by racing two real HTTP requests against each other — two
+sub-millisecond in-memory operations are not reliably reproducible as a race over a real socket, so
+the gate's own refusal/release logic is proven directly instead.
+
+The gate covers writer-vs-writer only — a **reader** racing a concurrent `POST /api/rebuild` was a
+real, separate gap the write gate does nothing about (code review, Important), closed instead in
+`Ingestion.NormalizedLayerWriter.RebuildAll` itself (`Ingestion/CLAUDE.md`'s own remarks): the derived
+tables are genuinely dropped and absent for a real window mid-rebuild, and a `GET /api/digest` or
+`/api/app-state` from a second browser tab landing in that window, on its own SQLite connection, would
+otherwise hit "no such table" — a hard error, not the retriable busy/timeout SQLite gives a reader
+waiting on an open write transaction. `RebuildAll` now wraps its whole drop-then-repopulate sequence
+in one transaction, so a concurrent reader sees either the pre-rebuild tables or the fully-repopulated
+post-rebuild ones, never neither. This risk existed in kind before this task (running `aecopostmortem
+rebuild` in a terminal while a separate `serve` process was up), but was newly, easily reachable once
+`rebuild` became a route inside the same long-lived process serving those reads.
+
+**The threat model this host assumes.** `ApiHost.Build` binds `127.0.0.1` only (`ApiHost.cs`'s
+existing "not `localhost`" decision, above) — no remote machine can reach either write route. Within
+that boundary this is a single-operator local tool with no authentication on any route.
+
+### Origin and Host validation close a live simple-request CSRF path (code review, follow-up round)
+
+The first version of this paragraph framed the cross-origin write risk as theoretical and
+DNS-rebinding-only ("a hostile page could fire a blind POST whose response it can never read, so the
+worst it can do is waste CPU"). That framing was wrong about how live the plain-CSRF case already
+was, and the coordinator verified it directly against a running `serve --port 5111` instance:
+
+```
+POST /api/rebuild
+Origin: https://evil.example
+Content-Type: text/plain
+```
+
+returned `200` with a real, genuine rebuild — no rebinding needed. `Content-Type: text/plain` (or no
+body at all) makes this a CORS **simple request**: the browser never sends a preflight `OPTIONS`
+for it, and this host added no CORS policy of its own, so nothing before this round of the task
+stopped the write from actually running. CORS only ever stopped the attacker's page from *reading*
+the response — it never stopped the write itself, which is the side effect that matters for `ingest`/
+`rebuild`. The default port (`CommandRunner.DefaultPort`) is a fixed, documented constant, so it is
+trivially guessable by any page that wants to try it blind.
+
+`ApiHost.IsAllowedWriteOrigin` is the fix, checked before either write route reaches `RunGated` (a
+refusal never runs the command underneath it, answering `403` via `Results.Problem`):
+
+1. **`Origin`, when present, must equal this host's own real origin exactly** — the load-bearing
+   check. A browser adds `Origin` to every cross-origin request and to most same-origin
+   state-changing requests too (the Fetch spec adds it for any non-GET/HEAD request, regardless of
+   `Content-Type`), and a real attacker page's own `Origin` can never be spoofed to read as this
+   host's. A request with **no** `Origin` header at all — curl, the CLI's own tests, this suite's own
+   `HttpClient` (which never sets it) — is not refused on that basis alone: there is no
+   browser-enforced guarantee to check for a caller that never sends one, and refusing it outright
+   would break every non-browser caller these two routes also have to serve.
+2. **`Host` must resolve to this same connection's own real, actually-bound loopback authority** —
+   read per request from `HttpContext.Connection.LocalPort` (the real, OS-assigned port for *this*
+   accepted connection), never the `port` parameter `Build` was originally given, which is `0` for
+   every test using an ephemeral port and would never match a real bound port if trusted directly.
+   This is what actually closes DNS rebinding, corrected from the prior framing: a rebound page's own
+   `Origin` header still names its real origin (its hostname, not the IP the DNS answer was switched
+   to), which check 1 above already refuses on its own — but the same attack could otherwise send
+   `Host: evil.example:<port>` while physically connecting to `127.0.0.1`, and validating `Host` too
+   closes that path independently of whatever `Origin` claims, rather than leaning on check 1 alone
+   for a threat this file used to name as its whole justification for a `Host` check.
+
+Both checks are permissive toward a non-browser caller by design (`WriteRouteOriginTests` proves the
+absent-`Origin` case explicitly, alongside a cross-origin `Origin` refusal, a matching same-origin
+`Origin` allowance, and a spoofed, non-loopback `Host` refusal with no `Origin` header present at
+all — the DNS-rebinding shape). Re-verified against a real browser on the real served page after this
+fix: same-origin `POST /api/ingest`/`POST /api/rebuild` from `http://127.0.0.1:5111/settings` still
+succeed end to end (real coverage report / rebuild summary rendered), since the page's own `Origin`
+and `Host` are both this host's real authority by construction.
+
+**Why this reasoning still does not extend to a hypothetical `purge` endpoint.** `ingest` and
+`rebuild` were accepted as safe-to-trigger-uninvited even before this fix — `ingest` is idempotent by
+construction (RAW's own `(source_file, byte_offset, content_hash)` conflict target, `Data/CLAUDE.md`)
+and `rebuild` only re-derives already-stored RAW, never reads the source directory again — so an
+uninvited trigger could waste CPU but never destroy data. That reasoning is now additionally backed
+by a real guard rather than resting on "safe replay" alone, but it still does not extend to a
+destructive endpoint: deleting the operator's whole store from an uninvited request would be a real,
+destructive consequence no amount of "it was idempotent anyway" reasoning covers, which is exactly
+why `purge` stays deliberately unbuilt here. The next person adding a POST that *can* destroy data
+inherits a working Origin/Host guard to build on top of, not only a paragraph — but a destructive
+route may still warrant a stricter gate on top of this one (a confirmation token or an
+operator-supplied header), since `IsAllowedWriteOrigin` only proves a request came from this host's
+own served page, not that the operator specifically intended *this* action.
+
+### Real timing measured, not assumed, before deciding this stays synchronous
+
+No async job/queue infrastructure exists in this codebase, and PRD §3.1's "single local process"
+shape gives no obvious place to add one. Whether that is actually safe for a synchronous HTTP handler
+depends on real numbers, not on the shape of the architecture: measured against the live 35-session
+reference corpus (56,138 RAW events) on the machine this task was built on, a full `ingest` run (CLI,
+Release build, incremental — every session already stored, so this is the worst case for "found
+nothing new to do but still walked every session") took **16.0s**, and a full `rebuild` took **6.8s**.
+Both are comfortably inside any default HTTP client or Kestrel request timeout, and — this being a
+single-operator local tool the brief explicitly rules async infrastructure out of scope for — a
+synchronous `MapPost` handler that blocks the request thread for single-digit seconds is an accepted
+trade-off, not an oversight. The frontend still treats the wait as real (`SettingsPage`'s own "Running
+ingest…"/"Running rebuild…" `role="status"` text, `web/CLAUDE.md`) rather than assuming it is
+instant, so a corpus large enough to take noticeably longer than this still reads as "working," not as
+a hung page.

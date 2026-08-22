@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -65,6 +66,22 @@ public static class ApiHost
     /// <see cref="StepEvidenceRoute"/> to build the concrete request path for one step.</summary>
     public const string StepEvidenceRouteTemplate = "/api/sessions/{sessionId}/steps/{stepId}";
 
+    /// <summary>The Settings surface's read-only route (Part A): the operator's currently-resolved
+    /// configuration, real facts only — see <see cref="SettingsEnvelope"/>.</summary>
+    public const string SettingsRoute = "/api/settings";
+
+    /// <summary>
+    /// The Settings surface's first write route (Part B), and this codebase's first POST endpoint
+    /// anywhere — see the "The first write endpoint: a shared write gate, and the threat model
+    /// this host assumes" non-obvious decision in <c>Api/CLAUDE.md</c> for the concurrency guard and
+    /// the security posture this and <see cref="RebuildRoute"/> share.
+    /// </summary>
+    public const string IngestRoute = "/api/ingest";
+
+    /// <summary>The Settings surface's second write route (Part B) — see <see cref="IngestRoute"/>'s
+    /// own remarks for the shared write gate both routes are served behind.</summary>
+    public const string RebuildRoute = "/api/rebuild";
+
     /// <summary>
     /// Builds the host without starting it — the caller decides when and how to run it, which is
     /// what keeps this testable without a Kestrel listener staying up for the life of a test run.
@@ -109,7 +126,26 @@ public static class ApiHost
 
         var app = builder.Build();
 
+        // The single gate both write routes are served behind — see the "The first write endpoint:
+        // a shared write gate, and the threat model this host assumes" non-obvious decision in
+        // Api/CLAUDE.md. One SemaphoreSlim(1, 1) per host instance (not a process-wide static): a
+        // test that builds two hosts against two different stores must never have one host's run
+        // block the other's.
+        var writeGate = new SemaphoreSlim(1, 1);
+
         app.MapGet(AppStateRoute, () => Results.Ok(DiagnoseAppState(store, copilotSessionStateRoot)));
+
+        app.MapGet(SettingsRoute, () => Results.Ok(GetSettings(store, copilotSessionStateRoot)));
+
+        app.MapPost(IngestRoute, (HttpContext context) =>
+            IsAllowedWriteOrigin(context)
+                ? RunGated(writeGate, () => RunIngest(store, copilotSessionStateRoot))
+                : RefusedOrigin());
+
+        app.MapPost(RebuildRoute, (HttpContext context) =>
+            IsAllowedWriteOrigin(context)
+                ? RunGated(writeGate, () => RunRebuild(store))
+                : RefusedOrigin());
 
         app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to) =>
         {
@@ -185,6 +221,165 @@ public static class ApiHost
         var storeHasBeenIngested = StoreHasBeenIngested(store);
 
         return AppStateReport.Diagnose(copilotSourceFound, storeHasBeenIngested);
+    }
+
+    /// <summary>
+    /// The Settings surface's read-only half (Part A): every field here is a real, already-resolved
+    /// fact — the same <see cref="LocalStore"/>/<see cref="ExclusionListSource"/> calls
+    /// <see cref="RunIngest"/> and the CLI's own <c>ingest</c> command already make, never a second,
+    /// looser guess at the same configuration. The exclusion list is loaded from beside the store
+    /// actually being served (<see cref="LocalStore.Folder"/>), not
+    /// <see cref="ExclusionListSource.DefaultPath"/>, the same isolation
+    /// <c>AecoPostMortem.Cli.CommandRunner.Ingest</c>'s own remarks document for a test store.
+    /// </summary>
+    public static SettingsEnvelope GetSettings(LocalStore store, string copilotSessionStateRoot)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(copilotSessionStateRoot);
+
+        var copilotSourceFound = SessionDiscovery.Discover(copilotSessionStateRoot).RootFound;
+        var excludedRoots = ExclusionListSource.Load(
+            Path.Combine(store.Folder, ExclusionListSource.FileName));
+
+        return new SettingsEnvelope(
+            store.FilePath,
+            store.Exists,
+            store.SizeInBytes,
+            copilotSessionStateRoot,
+            copilotSourceFound,
+            excludedRoots);
+    }
+
+    /// <summary>
+    /// The Settings surface's first write action (Part B): the identical call the CLI's own
+    /// <c>ingest</c> command makes (<c>AecoPostMortem.Cli.CommandRunner.Ingest</c>) — the same
+    /// exclusion-list resolution, the same <see cref="IngestionRun.Run"/> entry point, populating RAW
+    /// and the derived layer together exactly as a terminal-driven ingest would. There is no request
+    /// body: the source directory served here is always <paramref name="copilotSessionStateRoot"/>,
+    /// the one <see cref="Build"/> was given (and <see cref="GetSettings"/> already reports) — this
+    /// surface has no path override the way the CLI's optional positional argument does, since an
+    /// operator driving the browser has no terminal to type one into.
+    /// </summary>
+    public static IngestResultEnvelope RunIngest(LocalStore store, string copilotSessionStateRoot)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(copilotSessionStateRoot);
+
+        var excludedRoots = ExclusionListSource.Load(
+            Path.Combine(store.Folder, ExclusionListSource.FileName));
+
+        using var context = store.Open();
+
+        var stopwatch = Stopwatch.StartNew();
+        var report = IngestionRun.Run(context, copilotSessionStateRoot, excludedRoots);
+        stopwatch.Stop();
+
+        return IngestResultEnvelope.From(report, stopwatch.Elapsed);
+    }
+
+    /// <summary>
+    /// The Settings surface's second write action (Part B): the identical sequence the CLI's own
+    /// <c>rebuild</c> command runs, through the one shared definition
+    /// <see cref="NormalizedLayerWriter.RebuildAll"/> gives both callers — see the "The API calls the
+    /// CLI's own underlying calls, not the CLI itself" non-obvious decision in <c>Api/CLAUDE.md</c>.
+    /// </summary>
+    public static RebuildResultEnvelope RunRebuild(LocalStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        using var context = store.Open();
+
+        var rawEventCount = context.RawEvents.Count();
+
+        var stopwatch = Stopwatch.StartNew();
+        var sessionIds = NormalizedLayerWriter.RebuildAll(context);
+        stopwatch.Stop();
+
+        return new RebuildResultEnvelope(rawEventCount, sessionIds.Count, stopwatch.Elapsed.TotalSeconds);
+    }
+
+    /// <summary>
+    /// Origin/Host validation for the two write routes (code review, follow-up round — see the
+    /// "Origin and Host validation close a live simple-request CSRF path" non-obvious decision in
+    /// <c>Api/CLAUDE.md</c> for the full reasoning and how this was verified against a running host).
+    /// A plain cross-origin <c>fetch(..., { method: 'POST' })</c> with a <c>text/plain</c> (or no)
+    /// body is a CORS <em>simple request</em> — no preflight, so nothing before this check ever
+    /// stopped the write from actually running. Two checks, both permissive toward a non-browser
+    /// caller (curl, the CLI, this suite's own <c>HttpClient</c>), since neither header is one a
+    /// non-browser client is required to send:
+    ///
+    /// 1. <c>Origin</c>, when present, must equal this host's own origin exactly. A browser adds
+    ///    <c>Origin</c> to every cross-origin request and to most same-origin state-changing
+    ///    requests too (the Fetch spec adds it for any non-GET/HEAD request) — this is the
+    ///    load-bearing check, since a real attacker page's own <c>Origin</c> can never be spoofed to
+    ///    read as this host's origin. Absent entirely (no browser involved), the request proceeds to
+    ///    the <c>Host</c> check below rather than being refused for a header non-browser callers never
+    ///    send.
+    /// 2. <c>Host</c> must resolve to this same connection's own real, actually-bound loopback
+    ///    address and port (<see cref="Microsoft.AspNetCore.Http.ConnectionInfo.LocalPort"/> — read
+    ///    per request, not the <c>port</c> parameter <see cref="Build"/> was originally given, which
+    ///    is <c>0</c> for every test using an OS-assigned ephemeral port). This is what actually
+    ///    closes DNS rebinding: a rebound page's own browser-set <c>Origin</c> still names its real
+    ///    origin (its hostname, not the IP the DNS answer was switched to), which check 1 already
+    ///    refuses — but the same attack could otherwise send <c>Host: evil.example:&lt;port&gt;</c>
+    ///    while physically connecting to <c>127.0.0.1</c>, and validating <c>Host</c> too closes that
+    ///    path independently of whatever <c>Origin</c> claims.
+    ///
+    /// Refusing either check answers <see cref="StatusCodes.Status403Forbidden"/> via
+    /// <see cref="RefusedOrigin"/>, never reaching <see cref="RunGated{T}"/> — the command underneath
+    /// it never runs.
+    /// </summary>
+    internal static bool IsAllowedWriteOrigin(HttpContext context)
+    {
+        var expectedAuthority = $"127.0.0.1:{context.Connection.LocalPort.ToString(CultureInfo.InvariantCulture)}";
+
+        var origin = context.Request.Headers.Origin.ToString();
+        if (!string.IsNullOrEmpty(origin) &&
+            !string.Equals(origin, $"http://{expectedAuthority}", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var host = context.Request.Headers.Host.ToString();
+        return string.Equals(host, expectedAuthority, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The refusal <see cref="IsAllowedWriteOrigin"/>'s own callers answer with — a stated
+    /// reason (<c>Results.Problem</c>, the same shape a caught exception in
+    /// <see cref="RunGated{T}"/> already uses), not a bare, unexplained 403.</summary>
+    static IResult RefusedOrigin() =>
+        Results.Problem(
+            detail: "This request's Origin or Host did not match this local server; refused.",
+            statusCode: StatusCodes.Status403Forbidden);
+
+    /// <summary>
+    /// The shared guard both <see cref="IngestRoute"/> and <see cref="RebuildRoute"/> are served
+    /// behind: <paramref name="gate"/>.Wait(0) never blocks the request thread — it either acquires
+    /// the gate immediately or reports the conflict immediately, so a second click (or a second tab)
+    /// gets an honest, instant "already running" rather than a request silently queued behind the
+    /// first. A caught exception is reported as a real failure (<c>Results.Problem</c>, its own
+    /// message on the wire) rather than surfacing as a bare, unexplained 500 — "a failed ingest must
+    /// show what failed" (the brief's own Scenario 2).
+    /// </summary>
+    internal static IResult RunGated<T>(SemaphoreSlim gate, Func<T> run)
+    {
+        if (!gate.Wait(0))
+        {
+            return Results.Conflict(new { message = "An ingest or rebuild is already running." });
+        }
+
+        try
+        {
+            return Results.Ok(run());
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>

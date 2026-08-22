@@ -1,7 +1,6 @@
 using System.Globalization;
 using AecoPostMortem.Api;
 using AecoPostMortem.Data;
-using AecoPostMortem.Data.Execution;
 using AecoPostMortem.Ingestion;
 using Microsoft.AspNetCore.Builder;
 
@@ -194,13 +193,11 @@ public static class CommandRunner
 
         var rawEventCount = context.RawEvents.Count();
 
-        DerivedSchema.Rebuild(context);
-
-        var sessionIds = context.RawEvents.Select(raw => raw.SessionId).Distinct().ToList();
-        foreach (var sessionId in sessionIds)
-        {
-            NormalizedLayerWriter.Derive(context, sessionId);
-        }
+        // NormalizedLayerWriter.RebuildAll (AecoPostMortem.Ingestion) is the one shared definition
+        // of "rebuild" — drop-and-recreate the derived schema, then re-derive every session RAW still
+        // holds — so this command and AecoPostMortem.Api's POST /api/rebuild can never disagree about
+        // what a rebuild does.
+        NormalizedLayerWriter.RebuildAll(context);
 
         stdout.WriteLine(string.Create(
             CultureInfo.InvariantCulture,

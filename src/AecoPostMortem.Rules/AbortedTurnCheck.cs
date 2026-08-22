@@ -50,7 +50,10 @@ public sealed record AbortedTurnOccurrence
     /// session.</summary>
     public required string EventId { get; init; }
 
-    /// <summary>Reporting only — see <see cref="TurnRecord.TurnId"/>.</summary>
+    /// <summary>The turn's display counter, carried through for a future reporting surface — no
+    /// consumer reads it today (the headline and suggestion both render
+    /// <see cref="Position"/>/<see cref="SessionTurnCount"/> instead). Never an identity; see
+    /// <see cref="TurnRecord.TurnId"/>.</summary>
     public required string TurnId { get; init; }
 
     public required string Reason { get; init; }
@@ -63,11 +66,12 @@ public sealed record AbortedTurnOccurrence
 /// <summary>
 /// FR-18's check shape (issue #28, S-16): finds every aborted turn and states where it fell among
 /// the turns of its own session. Turns are ordered by <see cref="TurnRecord.StartedAt"/>, with
-/// <see cref="TurnRecord.EventId"/> (ordinal string comparison) breaking a tie deterministically, so
-/// two runs over the same input always agree on position (PRD §3.8). The tiebreak is the event id
-/// rather than <see cref="TurnRecord.TurnId"/> precisely because a display counter is the field two
-/// turns of one session are most likely to share — tie-breaking on it can leave a genuine tie
-/// unbroken, which is the non-determinism the tiebreak exists to remove. Pure: takes every turn
+/// <see cref="TurnRecord.EventId"/> (ordinal string comparison) breaking a tie, so the result
+/// depends only on the data and never on the order the caller happened to supply (PRD §3.8). The
+/// tiebreak is the event id rather than <see cref="TurnRecord.TurnId"/> precisely because a display
+/// counter is the field two turns of one session are most likely to share: tie-breaking on it can
+/// leave a genuine tie unbroken, and an unbroken tie falls back to input order — which for the real
+/// caller is an unordered store read, not a guaranteed sequence. Pure: takes every turn
 /// considered, aborted or not, and reports only the ones that aborted — the invariant in this
 /// project's CLAUDE.md.
 /// </summary>

@@ -86,12 +86,13 @@ public sealed class AbortedTurnCheckTests
         Assert.Empty(AbortedTurnCheck.Run([]));
     }
 
-    /// <summary>Two turns sharing one <c>StartedAt</c> value must still order the same way on
-    /// every run (PRD §3.8) — <c>EventId</c>, compared ordinally, is the tiebreak. It replaced
-    /// <c>TurnId</c> because a display counter is exactly the field two turns of one session are
-    /// most likely to share: tie-breaking on it leaves a genuine tie unbroken, which is the
-    /// non-determinism this tiebreak exists to rule out. Both turns here share a <c>TurnId</c>, so
-    /// this fixture is unorderable under the old tiebreak and deterministic under the new one.</summary>
+    /// <summary>Two turns sharing one <c>StartedAt</c> value must order by the data rather than by
+    /// the sequence the caller happened to supply (PRD §3.8) — <c>EventId</c>, compared ordinally,
+    /// is the tiebreak. It replaced <c>TurnId</c> because a display counter is exactly the field two
+    /// turns of one session are most likely to share: tie-breaking on it leaves a genuine tie
+    /// unbroken, and an unbroken tie falls back to input order. Both turns here share a
+    /// <c>TurnId</c>, so this fixture is genuinely tied under the old tiebreak and ordered by the
+    /// data under the new one.</summary>
     [Fact]
     public void Turns_sharing_the_same_started_at_break_the_tie_by_event_id()
     {
@@ -163,6 +164,46 @@ public sealed class AbortedTurnCheckTests
         Assert.Equal(2, occurrences.Select(o => o.EventId).Distinct(StringComparer.Ordinal).Count());
         Assert.Contains(occurrences, o => o.EventId == "e-first" && o.Position == 1);
         Assert.Contains(occurrences, o => o.EventId == "e-second" && o.Position == 2);
+    }
+
+    /// <summary>
+    /// The case the tiebreak change actually turns on, which the fixture above does not reach:
+    /// two tied turns whose <c>TurnId</c> and <c>EventId</c> order them <em>differently</em>. Here
+    /// the aborted turn sorts first by <c>EventId</c> ("a" &lt; "b") but second by <c>TurnId</c>
+    /// ("9" &gt; "10" ordinally, since this is string comparison, not numeric) — so its reported
+    /// position is 1 under the current tiebreak and would have been 2 under the old one. Position
+    /// is user-visible (it reaches the headline, the suggestion and the evidence), so this pins
+    /// which of the two fields decides it rather than leaving the two orders indistinguishable.
+    /// </summary>
+    [Fact]
+    public void When_turn_id_and_event_id_disagree_on_order_the_event_id_decides()
+    {
+        var turns = new[]
+        {
+            new TurnRecord
+            {
+                SessionId = "s1",
+                EventId = "a",
+                TurnId = "9",
+                StartedAt = "2026-08-16T10:00:00Z",
+                Aborted = true,
+                AbortReason = "timeout",
+            },
+            new TurnRecord
+            {
+                SessionId = "s1",
+                EventId = "b",
+                TurnId = "10",
+                StartedAt = "2026-08-16T10:00:00Z",
+                Aborted = false,
+            },
+        };
+
+        var occurrence = Assert.Single(AbortedTurnCheck.Run(turns));
+
+        Assert.Equal("a", occurrence.EventId);
+        Assert.Equal(1, occurrence.Position);
+        Assert.Equal(2, occurrence.SessionTurnCount);
     }
 
     /// <summary>An occurrence carries the identity of the turn it came from, not merely its

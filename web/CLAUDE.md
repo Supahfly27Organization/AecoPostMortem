@@ -1122,3 +1122,21 @@ or a real error on completion (the brief's Scenario 2, verbatim) — so one hook
 with `SettingsPage` itself owning only the cross-cutting part neither instance can know about on its
 own: disabling *both* buttons whenever *either* is running (`anyRunning`), and calling
 `notifyStoreChanged()`/bumping `useSettings`'s own `refetchToken` after whichever one just finished.
+
+### An aborted-turn chip's label is now GUID-on-GUID, which raises the pressure on the `FindingChips` label gap
+
+`FindingChips` (`routes/SessionPage.tsx`) still renders `chip.finding.recurrence.key` as a chip's
+visible label — the known divergence "A finding chip's label is still `finding.recurrence.key`"
+above already records, unchanged and still open. One thing did change underneath it:
+`Findings.AbortedTurnFinding`'s recurrence key moved from `$"{SessionId}:{TurnId}"` to
+`$"{SessionId}:{EventId}"` (`AecoPostMortem.Findings/CLAUDE.md`), because the display counter it
+used was not an identity. So an aborted-turn chip's label went from roughly 38 characters (a GUID
+plus a short counter) to roughly 73 (a GUID plus a GUID).
+
+No information a reader was using is lost — the label was already a 36-character GUID and unreadable
+as prose either way — and it renders correctly (verified in a real browser on a session carrying two
+aborts, both chips distinct). But `.session-chips__chip` has no `max-width`, `text-overflow` or
+truncation of its own, only `flex-wrap` on the parent, so such a chip is now about twice as wide as
+it was. Whoever finally switches this label to `finding.headline` — the fix the entry above already
+names — should know the case for it got stronger, and that a width bound is the cheaper interim
+option if that switch is still deferred.

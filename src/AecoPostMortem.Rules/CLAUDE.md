@@ -244,8 +244,9 @@ pure function of its input and belongs where every other pure check-shape reduct
 ### Position is derived by ordering, not read off a field
 
 `AbortedTurnCheck.Run` groups `TurnRecord`s by `SessionId`, orders each session's turns by
-`StartedAt` (ties broken by `TurnId`, ordinal string comparison, for a deterministic result
-regardless of input order — PRD §3.8), and reports each aborted turn's 1-based index in that
+`StartedAt` (ties broken by `EventId`, ordinal string comparison, for a result independent of the
+order the caller supplied — PRD §3.8; this tiebreak was `TurnId` until the identity fix, see "The
+abort tiebreak is `EventId`" at the end of this file), and reports each aborted turn's 1-based index in that
 ordering alongside the session's total turn count. Copilot's own event log carries no ordinal turn
 number, so "position in the session" (issue #28, Scenario 1) only exists once every turn in the
 session — not only the aborted ones — has been placed in order; that is why `TurnRecord` covers
@@ -938,21 +939,39 @@ Repo Rule 6 is untouched. `EventId` is an opaque label this project only ever gr
 copies — it is never parsed, never compared against a literal, and nothing here knows which event
 type produced it. The vocabulary allowlist
 (`RulesProjectNamesNothingTests.The_rules_project_uses_only_a_reviewed_vocabulary_in_its_literals`)
-needed no new word, because this change adds no string literal at all; the provider-specific detail
-(that this is the `assistant.turn_start` envelope's own `id`) is stated one layer out in
-`AecoPostMortem.Findings`, where naming is permitted.
+needed no new word, because this change adds no string literal at all. Which concrete event supplies
+the value is deliberately not said in this project's own source; `AecoPostMortem.Findings` names it,
+where naming is permitted.
+
+Worth knowing about the evidence, though (code review): that containment test is weaker than it
+looks for a change like this one. It scans *literals* — its own regex matches doc comments and then
+discards them — and it never reads `.md` files at all. So "containment passes" says nothing about
+the new doc comments; they were read by hand instead, and name no tool, server or repository.
 
 ### The abort tiebreak is `EventId`, because the old one tie-broke on the colliding field
 
 `AbortedTurnCheck.Run` orders each session's turns by `StartedAt` and previously broke ties on
 `TurnId`. That is the one field two turns of a session are *most* likely to share — measured against
 the live reference corpus, 1,903 of 2,384 real turn rows share their `(SessionId, TurnId)` pair with
-another turn — so two turns sharing both a timestamp and a counter were left genuinely tied, and
-their reported positions could swap between runs over the same input. A tiebreak that can fail to
-break the tie is not a tiebreak; ordering by `EventId` restores the determinism PRD §3.8 requires and
-the old comment already claimed. `Turns_sharing_the_same_started_at_break_the_tie_by_event_id` pins
-it with a fixture whose two turns deliberately share a `TurnId`, so it is unorderable under the old
-rule and deterministic under this one.
+another turn — so two turns sharing both a timestamp and a counter were left genuinely tied.
+
+Be precise about what that costs, because an earlier draft of this entry overstated it (caught in
+code review): `OrderBy`/`ThenBy` is a *stable* sort, so the old code was perfectly reproducible for
+any **fixed** input sequence. The real exposure is that an unbroken tie falls through to input
+order, and this check's own input order is whatever the caller's store read produced —
+`AbortedTurnFinding.Build` takes an `IReadOnlyList<Turn>` from an EF query with no `OrderBy` of its
+own, and an unordered SQLite read guarantees no particular sequence. So the defect was never "the
+same input yields two answers"; it was "the answer depends on something other than the data." A
+tiebreak that can fail to break the tie is not a tiebreak, and `EventId` — unique by construction —
+cannot fail to.
+
+This matters for correctness rather than for any observed breakage: measured over the same corpus,
+**0 of 2,384 real turn rows share a `(SessionId, StartedAt)` pair with another turn**, so the
+tiebreak never fires on today's data at all and no reported `Position` changed when it moved.
+`Turns_sharing_the_same_started_at_break_the_tie_by_event_id` pins the behaviour with a fixture whose
+two turns deliberately share a `TurnId`, so it is genuinely tied under the old rule — the previous
+version of that test gave its two turns different `TurnId`s and therefore never exercised a tie at
+all.
 
 This is the same correction `AecoPostMortem.Findings/CLAUDE.md` records for `SessionTapeStep.StepId`
 ("the ordinal tiebreak is now over a genuinely unique key, not merely a deterministic one") — the

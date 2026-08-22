@@ -79,11 +79,13 @@ public sealed class AbortedTurnFindingTests
     }
 
     /// <summary>
-    /// A `Turn`'s own natural key is `(SessionId, TurnId)` (`PostMortemContext.MapTurn`) —
-    /// `TurnId` alone is not guaranteed unique across sessions. Two aborted turns in different
-    /// sessions that happen to share a bare `TurnId` must still resolve to two distinct
-    /// `Recurrence.Key`s, or they collide into what `Recurrence.cs` documents as impossible: "no
-    /// constructor that could produce a second `Finding` for the same key."
+    /// The cross-session half of the collision question, kept alongside the within-session case
+    /// below: a bare `TurnId` is not unique across sessions either, so two aborted turns in
+    /// different sessions sharing one must still resolve to two distinct `Recurrence.Key`s, or they
+    /// collide into what `Recurrence.cs` documents as impossible ("no constructor that could produce
+    /// a second `Finding` for the same key"). This case passed even under the old key, since that
+    /// was also session-prefixed — it is the within-session case that was broken. Real corpus
+    /// example: sessions `6375f298…` and `aeaa2e81…` both carry an abort at counter `0`.
     /// </summary>
     [Fact]
     public void The_recurrence_key_does_not_collide_across_sessions_sharing_a_bare_turn_id()

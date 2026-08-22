@@ -30,12 +30,13 @@ is the scope every other entity is keyed within.
 
 ## Turn — table `turn`
 
-PK: (`SessionId`, `TurnId`). One assistant turn, bounded by `assistant.turn_start` /
+PK: (`SessionId`, `EventId`). One assistant turn, bounded by `assistant.turn_start` /
 `assistant.turn_end`.
 
 | Property | Type | DB | Notes |
 |---|---|---|---|
-| `SessionId`, `TurnId` | `string` (each) | `session_id TEXT NOT NULL`, `turn_id TEXT NOT NULL` | key |
+| `SessionId`, `EventId` | `string` (each) | `session_id TEXT NOT NULL`, `event_id TEXT NOT NULL` | key — `EventId` is the `assistant.turn_start` envelope's own `id` |
+| `TurnId` | `string` | `turn_id TEXT NOT NULL` | the displayed turn number, **not** a key: a cycling counter that repeats within one session (measured, 1,903 of 2,384 rows share their `(SessionId, TurnId)` pair). Display only |
 | `StartedAt` | `string` | `started_at TEXT NOT NULL` | |
 | `EndedAt` | `string?` | `ended_at TEXT` | a measured 2,384 turn starts against 2,375 ends means unfinished is a real outcome state |
 | `Outcome` | `TurnOutcome` | `outcome TEXT NOT NULL` | `Unfinished`/`Completed`/`Aborted`, stored via `HasConversion<string>()` |

@@ -1171,9 +1171,16 @@ into one finding, which `Recurrence.cs` documents as impossible.
 
 **A second, quieter defect fixed in the same change.** `Rules.AbortedTurnCheck.Run` broke `StartedAt`
 ties on `TurnId` — precisely the colliding field — so two turns sharing both a timestamp and a counter
-were left *genuinely tied*, and their positions could swap between runs. The tiebreak is now `EventId`,
-the same "the ordinal tiebreak is now over a genuinely unique key" correction this file's own Prompt-step
-entry records. This restores PRD §3.8 determinism the old tiebreak only appeared to provide.
+were left *genuinely tied*, and an unbroken tie falls through to whatever order the caller's store read
+happened to produce (`Build` takes its `Turn` list from an EF query with no `OrderBy` of its own). Not
+"two runs over one input disagree" — `OrderBy`/`ThenBy` is a stable sort, so that was never the failure
+— but "the answer depends on something other than the data", which is the same PRD §3.8 problem by a
+more accurate name. The tiebreak is now `EventId`, the "ordinal tiebreak over a genuinely unique key"
+correction this file's own Prompt-step entry records. Measured: 0 of 2,384 real turn rows share a
+`(SessionId, StartedAt)` pair, so the tiebreak fires nowhere on today's corpus and not one reported
+`Position` moved — this is future-proofing, not a repair of visible damage. See
+`Rules/CLAUDE.md`'s "The abort tiebreak is `EventId`" for the fuller argument; this paragraph is the
+pointer, that one is canonical.
 
 **Consumer audit (every reader of `Recurrence.Key` in the repo; none broke).** Checked before changing
 the key, because a silent break here would be worse than the latent bug:
@@ -1189,11 +1196,24 @@ the key, because a silent break here would be worse than the latent bug:
 **Key versus headline — why an unreadable key is the right answer.** `Recurrence.Key` is an identity;
 `Finding.Headline` is the sentence. This file already draws that split at mockup parity item #5, and
 the headline already carries every legible fact — `A turn aborted ("user_initiated") at turn 12 of 47
-in session 47b8b3e3….` The objection that `session:3` reads better than `session:<uuid>` does not
-survive contact with the real value: the key was *already* a 36-character GUID followed by a counter,
-so nothing a human was reading is lost. Worse, the counter was actively misleading rather than merely
-unhelpful — it renders as "turn 3" while (per the 79.8% figure above) not identifying the turn it
-names. `FindingChips` (`web/src/routes/SessionPage.tsx`) is the one surface still showing a bare key,
-a known, documented divergence (`web/CLAUDE.md`, "A finding chip's label is still
-`finding.recurrence.key`") that predates this change and is untouched by it — that chip should read
-`finding.headline`, which is the existing gap, not this key's shape.
+in session 47b8b3e3….` The objection that `session:3` reads better than `session:<uuid>` mostly does
+not survive contact with the real value: the key was *already* a 36-character GUID with a counter
+stuck on the end, so it was never prose either way.
+
+Be honest about the part that *is* a real cost, though (both code reviews pushed back on an earlier
+draft that waved it away): `FindingChips` (`web/src/routes/SessionPage.tsx`) renders the bare key as a
+chip's **visible label**, so this is not purely opaque plumbing — an aborted-turn chip's label roughly
+doubles in width, from GUID-plus-counter to GUID-on-GUID. What is *not* lost is information, because
+the counter it replaces was actively misleading rather than merely unhelpful: it renders as "turn 3"
+while (per the 79.8% figure above) not identifying the turn it names. Trading a short wrong label for
+a long right one is the correct trade for an identity field, and the real fix for that chip is the
+one already on the books — render `finding.headline`, per `web/CLAUDE.md`'s "A finding chip's label
+is still `finding.recurrence.key`", a divergence that predates this change and is untouched by it.
+`web/CLAUDE.md` carries a matching note that the pressure on that gap has gone up.
+
+**A side benefit worth naming, since a future story can now collect it cheaply.** `Api/CLAUDE.md`
+records `AbortedTurnFinding` as one of the eight checks `SessionTapeStepFindingLookup` leaves
+uncovered, "arguably attachable to its own aborted `Turn`'s `Prompt` step" but deferred. That join is
+now an exact string match rather than a new lookup: this key's own suffix *is* the Prompt step's
+`StepId`, since PR #137 made that `Turn.EventId` too. Not built here — but it is no longer the open
+design question it was.

@@ -1820,15 +1820,28 @@ an unfiltered digest whose repository scope is itself empty (an empty store, or 
 sessions at all): `web/CLAUDE.md`'s "The pager is client-side" section calls that "a different,
 pre-existing case this task does not touch," written before this fix existed and now stale for the
 `silentChecks` field specifically — `SessionsInScope == 0` in that case too, so `SilentCheckEnvelope.
-From` refuses there as well, with no code change on either side needed. What this fix does *not*
-close: `Findings.Digest.cs`'s `DigestState` is still derived only from `checkRegistry.Entries.Any(entry
-=> entry.Status == CheckRunStatus.Ran)`, independent of `SessionsInScope` — so
-`GET /api/digest?from=2026-01-01&to=2026-01-31` still serves `state: "Analyzed"` alongside its now-empty
-`silentChecks`, `rankedFindings` and `inferredFindings`. A second client reading only `state` and
-`silentChecks.length === 0` could still misread "analysed, nothing to report" as "clean" rather than
-"nothing was in scope" — the served `masthead.repositoryScope.sessionIds` (empty) is the field that
-actually answers that question, the same field `DigestPage.tsx`'s own `noSessionsInRange` check reads.
-Giving `DigestState` a fourth, scope-aware value is a genuinely separate, wider decision (`ProcessDigest.
-Build` has no scope-size input today, and every other state this type distinguishes is about whether
-analysis ran at all, not how large its scope was) — recorded here as a known, deliberately out-of-scope
-remainder for this task, not an oversight (code review).
+From` refuses there as well, with no code change on either side needed. What this fix did *not* close at the time — **since closed**, see below:
+`Findings.Digest.cs`'s `DigestState` was still derived only from `checkRegistry.Entries.Any(entry
+=> entry.Status == CheckRunStatus.Ran)`, independent of `SessionsInScope`, so
+`GET /api/digest?from=2026-01-01&to=2026-01-31` served `state: "Analyzed"` alongside its now-empty
+`silentChecks`, and a second client reading only `state` and `silentChecks.length === 0` could still
+misread "analysed, nothing to report" as "clean" rather than "nothing was in scope".
+
+**`DigestState.NothingInScope` closes it.** The premise this paragraph rested on — "`ProcessDigest.
+Build` has no scope-size input today" — was already false when it was written: #144's own
+`CheckRegistry.SessionsInScope` is a required field on the registry `Build` receives, so the fact was
+in hand and simply unread. `Build` now derives a fourth state from it, above its `Any(Ran)` check
+(`Findings/CLAUDE.md`'s "Three designed 'nothing to show' states"), and the same zero-session range
+above now serves `state: "NothingInScope"`. Verified against the live corpus, all three probes: the
+unfiltered digest still serves `Analyzed` with 297 findings over 25 sessions and 3 silent checks;
+`from=2026-01-01&to=2026-01-31` serves `NothingInScope` with an empty scope; and a real 16-session
+sub-range (`from=2026-04-28&to=2026-05-10`) still serves `Analyzed` with 281 findings and 3 silent
+checks — that third probe is the one proving it does not over-suppress, the same discipline #144's own
+three-probe verification established.
+
+One honest consequence, recorded rather than buried: **an empty store now serves `NothingInScope`
+where it used to serve `Analyzed`** (`DigestRouteTests.An_empty_store_serves_nothing_in_scope_rather_
+than_a_clean_analyzed_digest`, renamed from a name that asserted the old, wrong behaviour), and
+`DigestState.NotYetAnalyzed` is confirmed to have no path through this endpoint at all — `BuildFindingsForScope`
+registers every check as `Ran` unconditionally, which is exactly why the empty-store case was wrong
+before.

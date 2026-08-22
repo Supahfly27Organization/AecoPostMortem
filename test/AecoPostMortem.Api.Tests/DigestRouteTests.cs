@@ -38,8 +38,16 @@ public sealed class DigestRouteTests
         Repository = repository,
     };
 
+    /// <summary>An empty store used to serve <see cref="DigestState.Analyzed"/> here — this test
+    /// asserted it, and <c>DigestPage.tsx</c> rendered "Every check ran and found nothing." for it.
+    /// Both were wrong in the same way: <c>BuildFindingsForScope</c> registers all ten checks as
+    /// <see cref="CheckRunStatus.Ran"/> unconditionally, so an empty store produced a full registry
+    /// of clean entries over a scope of nothing. It now serves
+    /// <see cref="DigestState.NothingInScope"/> — the "clean vs. never looked" distinction PRD §3.9
+    /// names, made a served fact rather than something a client has to infer from an empty
+    /// <c>sessionIds</c> list.</summary>
     [Fact]
-    public async Task An_empty_store_serves_an_analyzed_digest_with_no_findings()
+    public async Task An_empty_store_serves_nothing_in_scope_rather_than_a_clean_analyzed_digest()
     {
         using var temporary = new TemporaryStore();
         temporary.Store.Open().Dispose();
@@ -52,7 +60,7 @@ public sealed class DigestRouteTests
             var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
 
             Assert.NotNull(envelope);
-            Assert.Equal(DigestState.Analyzed, envelope!.State);
+            Assert.Equal(DigestState.NothingInScope, envelope!.State);
             Assert.Empty(envelope.RankedFindings);
             Assert.Equal(0, envelope.Masthead.SessionCount);
             Assert.Null(envelope.Masthead.SpanStart);
@@ -764,6 +772,9 @@ public sealed class DigestRouteTests
             // Nothing was looked at in this range, so nothing may be reported as "ran clean" — the
             // wire contract's own refusal, not only DigestPage.tsx's render-layer gate.
             Assert.Empty(envelope.SilentChecks);
+            // ...and the state itself says so, rather than leaving a second client to infer "nothing
+            // was in scope" from an empty sessionIds list beside a state that reads Analyzed.
+            Assert.Equal(DigestState.NothingInScope, envelope.State);
         }
         finally
         {

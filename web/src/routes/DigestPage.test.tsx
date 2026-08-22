@@ -498,6 +498,12 @@ describe('DigestPage', () => {
         return new Response(
           JSON.stringify(
             digestWith({
+              // The state the real server now serves for a range matching zero sessions — this
+              // fixture used to say `Analyzed`, which the server no longer produces for an empty
+              // scope. `silentChecks` is deliberately still non-empty here (the server would send
+              // `[]` since #144): it proves this page suppresses the clean-checks grid on the state
+              // alone, without relying on the list already being empty.
+              state: 'NothingInScope',
               rankedFindings: [],
               silentChecks: [
                 {
@@ -531,5 +537,47 @@ describe('DigestPage', () => {
     expect(await screen.findByText(/no sessions.*range/i)).toBeInTheDocument()
     expect(screen.queryByText(/every check ran and found nothing/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/checks that found nothing/i)).not.toBeInTheDocument()
+  })
+
+  // The case the date-range task explicitly left open ("an unfiltered digest with a truly empty
+  // repository scope is a different, pre-existing case this task does not touch"): reachable with no
+  // filter at all — an empty store, or a repository carrying no sessions — and it read "Every check
+  // ran and found nothing." about a scope nothing ever looked at. The server now says which it is
+  // (`DigestState.NothingInScope`), so this no longer depends on a filter being active.
+  it('states that nothing was in scope with no filter applied, rather than "found nothing"', async () => {
+    respondWith(
+      digestWith({
+        state: 'NothingInScope',
+        rankedFindings: [],
+        silentChecks: [],
+        masthead: {
+          ...digestWith().masthead,
+          repositoryScope: { ...digestWith().masthead.repositoryScope, sessionIds: [] },
+        },
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/no sessions.*repository/i)).toBeInTheDocument()
+    expect(screen.queryByText(/every check ran and found nothing/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/date range/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Findings pages' })).not.toBeInTheDocument()
+  })
+
+  // The distinction this whole state exists to protect: a real, non-empty scope where every check
+  // genuinely ran and found nothing must still say so.
+  it('still says every check ran and found nothing when the scope held real sessions', async () => {
+    respondWith(digestWith({ state: 'Analyzed', rankedFindings: [], silentChecks: [] }))
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/every check ran and found nothing/i)).toBeInTheDocument()
   })
 })

@@ -30,7 +30,7 @@ passing `--prefix`, for the same reason.
 | `src/routes/RulesInventoryPage.tsx` | FR-40's real content (S-22, issue #35): one rule-set version's statements, each with exactly one status, its source file, its carrying sessions, its in-force window and its retirement — plus the version scope, the status breakdown and the two designed "no rules found" states. Fetches `/api/rules-inventory` via `useRulesInventory`. Mockup parity item #7 added a "Violations" column (`ViolationCountCell`): a Watched row's real count, a stated "No check built" for a Watched row whose matched shape has no orchestrator, or a plain dash for every non-Watched row — three visually distinct states, never one collapsed into another |
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render. Mockup parity item #7 added `RuleViolationCountEnvelope` (`counted`/`notAvailable`) and `RulesInventoryRowEnvelope.violationCount` |
 | `src/api/useRulesInventory.ts` | the fetch-per-`versionHash` hook `RulesInventoryPage` reads, mirroring `useSession`'s re-fetch-on-change shape rather than `useDigest`'s fetch-once |
-| `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established. FR-48 (issue #52, S-42) added the "Judgment calls" section for `digest.inferredFindings` — renders nothing when that list is empty, the same "no section at all" discipline `SessionPage.tsx`'s `AgentLanes` already established for an empty `envelope.lanes`. Mockup parity item #6 (FR-42, issue #46) added `<CleanChecks checks={digest.silentChecks} />` below it, the same "no section at all when empty" discipline. Mockup parity item #9 added `<MethodologyFooter masthead={digest.masthead} />` at the very bottom. Digest session-naming Slice 2 threads `digest.masthead.repositoryScope.sessionLabels` down to each `FindingRow` alongside its existing `sessionIds` prop. The pager & date-range filter task added `<DateRangeFilter>` (below the repository selector) driving a `range` state passed to `useDigest`, and `<Pager>` beneath the ranked-findings list slicing `digest.rankedFindings` client-side at `PAGE_SIZE = 25`; `applyRange` resets `page` to 1 whenever the range changes, since a new range re-scopes the whole list server-side (see the non-obvious decision in `AecoPostMortem.Api/CLAUDE.md`, "A date-range filter re-scopes the whole analysis"). Code review round: a `<p role="status">Updating…</p>` renders while `query.isRefetching` is true rather than blanking the page; `rangeActive`/`noSessionsInRange` (derived from `range` and `scope.sessionIds.length`) gate a fourth designed-state sentence and suppress the ranked list, pager, judgment calls and clean-checks sections together — see the non-obvious decision below |
+| `src/routes/DigestPage.tsx` | FR-41's real content (S-36 + S-54, issues #44/#45): the masthead's repository selector plus the ranked findings, each an expandable `FindingRow`. Fetches `/api/digest` via `useDigest`; loading renders nothing, a failed fetch renders its own `role="alert"` message, the same shape `AppStateBanner` established. FR-48 (issue #52, S-42) added the "Judgment calls" section for `digest.inferredFindings` — renders nothing when that list is empty, the same "no section at all" discipline `SessionPage.tsx`'s `AgentLanes` already established for an empty `envelope.lanes`. Mockup parity item #6 (FR-42, issue #46) added `<CleanChecks checks={digest.silentChecks} />` below it, the same "no section at all when empty" discipline. Mockup parity item #9 added `<MethodologyFooter masthead={digest.masthead} />` at the very bottom. Digest session-naming Slice 2 threads `digest.masthead.repositoryScope.sessionLabels` down to each `FindingRow` alongside its existing `sessionIds` prop. The pager & date-range filter task added `<DateRangeFilter>` (below the repository selector) driving a `range` state passed to `useDigest`, and `<Pager>` beneath the ranked-findings list slicing `digest.rankedFindings` client-side at `PAGE_SIZE = 25`; `applyRange` resets `page` to 1 whenever the range changes, since a new range re-scopes the whole list server-side (see the non-obvious decision in `AecoPostMortem.Api/CLAUDE.md`, "A date-range filter re-scopes the whole analysis"). Code review round: a `<p role="status">Updating…</p>` renders while `query.isRefetching` is true rather than blanking the page. The fourth designed-state sentence and the suppression of the ranked list, pager, judgment calls and clean-checks sections are now gated on the **served** `digest.state === 'NothingInScope'` — `noSessionsInRange`, the old client-side derivation from `range` and `scope.sessionIds.length`, is gone, and `rangeActive` remains only to choose between the filtered and unfiltered wording; see the non-obvious decision below |
 | `src/api/digest.ts` | the `DigestEnvelope`/`FindingEnvelope`/`SuggestionEnvelope`/`RepositoryScopeEnvelope`/`AdherenceFigure`/`SilentCheckEnvelope` shapes and `fetchDigest`, hand-kept in sync with `AecoPostMortem.Api.DigestEnvelope` (`src/AecoPostMortem.Api/DigestEnvelope.cs`) — no generated client exists yet, the same gap `api/appState.ts` documents. `RepositoryScopeEnvelope.sessionIds` (mockup parity item #2) was added here in the same change that added the server field, once the prerequisite check found it missing — see the note below. FR-48 (issue #52, S-42) added `DigestEnvelope.inferredFindings` — real, served data that had silently gone undeclared (and therefore dropped on arrival) since `InferredFindings` shipped server-side; see "A missing wire field can hide even after its server-side story ships" below. Mockup parity item #5 added `FindingEnvelopeBase.headline` — a full written sentence naming the problem, mirroring `AecoPostMortem.Api.FindingEnvelope.Headline`. Mockup parity item #6 (FR-42, issue #46) added `SilentCheckEnvelope` and `DigestEnvelope.silentChecks`, added to the server contract in the same change. Mockup parity item #15 changed `RuleCoverageStatus` from `'NotYetAnalyzed'` (a bare string literal type) to a closed `{state:'notYetAnalyzed'}` / `{state:'analyzed'; counts: RulesInventoryStatusCountsEnvelope}` union, importing `RulesInventoryStatusCountsEnvelope` from `./rulesInventory` rather than redeclaring it — mirroring `AecoPostMortem.Api.RuleCoverageStatusEnvelope` exactly. Digest session-naming Slice 2 added `RepositoryScopeEnvelope.sessionLabels: Record<string, string>` — a session's own display label keyed by session id, mirroring `AecoPostMortem.Api.RepositoryScopeEnvelope.SessionLabels`. The pager & date-range filter task added `FromParameter`/`ToParameter` and the `DateRange` type (`{from, to}`, both `string \| null`, `yyyy-MM-dd`) — `fetchDigest`'s new optional first parameter, appended to the query string only when non-null, mirroring `AecoPostMortem.Api.ApiHost.FromParameter`/`ToParameter` exactly |
 | `src/digest/CleanChecks.tsx` | Mockup parity item #6 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, FR-42, issue #46): "Checks that found nothing" — a card per `SilentCheckEnvelope`, each naming the check (its abstract `CheckId` humanised, e.g. `hook-failure` → `Hook Failure` — a pure display transform, not a served display name), its population, its zero count, and a `ProvenanceBadge` reused verbatim from `FindingRow`'s own. Renders no section at all when `checks` is empty |
 | `src/digest/MethodologyFooter.tsx` | Mockup parity item #9 (`docs/product-superpowers/discovery/2026-08-21-ui-mockup-parity.md`, "Methodology footer"): states what was measured and how the per-finding session strip's positions are sourced. Unlike the mockup's own footer — one fixed set of numbers hand-typed for one frozen date (`~/.copilot/` on 2026-08-16) — every figure here is read straight off the `MastheadEnvelope` this page already fetched, the same "nothing on this page counts anything" discipline `Masthead.tsx` documents for its own figures; no separate fetch, no recomputation. Carries no "not measured, shown only to demonstrate the layout" caveat paragraph — that is the mockup admitting its own placeholder data, and this app's findings are all real. `formatSpan`/number formatting are reimplemented locally (not imported) rather than exported from `Masthead.tsx`, since this story's own scope kept that file untouched. Code review Important (both reviews): an optional `range` prop (`{from, to} | null`, default `null`) adds a second paragraph — "Ranked over N of M sessions, …" — and a clause on the session-strip sentence ("within the applied date range") whenever a filter is active, so this footer's own stated job ("what was measured") stays true instead of contradicting the corpus-wide first paragraph; `null` (no filter) renders neither, byte-for-byte the same as before the prop existed |
@@ -626,8 +626,12 @@ improvement `fetchDigest`/`useDigest` could still make for other 4xx cases this 
 but it closes the one path this task's own feature made newly, easily reachable.
 
 **A date range matching zero sessions rendered the wrong one of this app's own three designed
-states — a genuine fourth one, not a display bug.** See `AecoPostMortem.Api/CLAUDE.md`'s matching
-entry for why the server still honestly serves `DigestState.Analyzed` and non-empty `SilentChecks`
+states — a genuine fourth one, not a display bug.** (Written when the server still served
+`DigestState.Analyzed` for this case and this page had to compensate. Both halves have since moved
+server-side — `SilentChecks` by #144, the state itself by `DigestState.NothingInScope` — so the
+mechanism described below is history; see "The fourth designed state is served, not derived" above
+for what this page actually does now.) See `AecoPostMortem.Api/CLAUDE.md`'s matching
+entry for why the server then still honestly served `DigestState.Analyzed` and non-empty `SilentChecks`
 (every check population `0`) for this case — a real, checked fact, not a bug to suppress server-side.
 `DigestPage.tsx` is where the fourth sentence belongs, the same place the other three
 (`NotYetAnalyzed`/`Incomplete`/"found nothing") already live: `rangeActive` (`range.from !== null ||
@@ -1175,18 +1179,54 @@ this codebase already draws elsewhere and had blurred here: `FindingEnvelope.Hea
 legibility, `Recurrence.Key` carries uniqueness, and neither has to compromise for the other. The
 old key was the worst of both — it read as "turn 3" while not identifying the turn it named.
 
+### The fourth designed state is served, not derived — and it covers the unfiltered case too
+
+`DigestPage` used to decide "nothing was in scope" itself: `rangeActive && scope.sessionIds.length
+=== 0`. That derivation could only ever cover the *filtered* case, which is why the entry below had
+to record the unfiltered one (an empty store, or a repository carrying no sessions) as still saying
+"Every check ran and found nothing." about a scope nothing looked at.
+
+`digest.state === 'NothingInScope'` (`Findings/CLAUDE.md`) replaces it. `rangeActive` survives, but
+only to choose *which* sentence to render — the cause genuinely differs, and naming the real one is
+the difference between an operator clearing a filter and an operator wondering why their corpus looks
+clean:
+
+- filter active — "No sessions in the selected repository started in the applied date range …"
+- no filter — "No sessions in the selected repository have been ingested …"
+
+Both suppress the ranked list, `Pager`, judgment calls and `CleanChecks` together, exactly as the
+derived flag did. The suppression keys on the state alone, never on the served lists already being
+empty — `DigestPage.test.tsx`'s filtered case deliberately hands it a **non-empty** `silentChecks`
+to prove that (the real server sends `[]` since #144, so a test relying on the empty list would pass
+without the gate working at all).
+
+The risk this shape carries, stated because nothing in the build catches it: `DigestState` is a
+hand-kept TypeScript union with no exhaustive switch anywhere, so a *fifth* value added server-side
+would render as none of the four branches — silent, the same failure mode that once hid
+`inferredFindings` on the wire. The tests for each state are the only guard.
+
+Verified in a real browser against the live corpus: applying `2026-01-01`–`2026-01-31` through the
+real controls rendered exactly one state sentence, no finding cards, no pager and no clean-checks
+grid, with the footer reading "Ranked over 0 of 35 sessions". The unfiltered branch — which the real
+corpus cannot produce, since it always has sessions — was verified with `window.fetch` patched to
+serve the real response with an emptied scope and the state the server would really send, the same
+technique this file documents for `inferredFindings`: the no-filter sentence rendered, with no
+mention of a date range and no "found nothing".
+
 ### A stale note, corrected: the empty-repository-scope case is no longer entirely untouched
 
 The pager & date-range filter task's own "Code review round" note above (and the comment it left in
 `DigestPage.tsx`) called "an unfiltered digest with a truly empty repository scope" a different,
-pre-existing case that task did not touch. That is still literally true of this page's own rendering
-— an empty-scope unfiltered digest still shows "Every check ran and found nothing." (`DigestState.
-Analyzed`, no `noSessionsInRange` gate to suppress it, since that gate only fires for an *active*
-filter) — but a later task (the digest silent-check wire-contract fix, `AecoPostMortem.Api/CLAUDE.md`'s
+pre-existing case that task did not touch. That was true of this page's own rendering for two further
+tasks after it — an empty-scope unfiltered digest showed "Every check ran and found nothing."
+(`DigestState.Analyzed`, and the old `noSessionsInRange` gate could not suppress it, since that gate
+only fired for an *active* filter). A later task (the digest silent-check wire-contract fix, `AecoPostMortem.Api/CLAUDE.md`'s
 "`SilentCheckEnvelope.From` refuses on `CheckRegistry.SessionsInScope`...") closed the server-side half
 of exactly this case: `digest.silentChecks` is now genuinely `[]` for an empty-repository-scope
 unfiltered digest too, not ten `population: 0` "clean" entries — `<CleanChecks>` already rendered
-nothing for an empty list, so nothing here needed to change for that half to become honest. What is
-still open, precisely, is what that later task's own remarks record as a deliberate, separate
-remainder: `DigestState` itself carries no scope-size signal, so this exact case still says "found
-nothing" rather than a state naming that nothing was in scope to look at.
+nothing for an empty list, so nothing here needed to change for that half to become honest. What was
+still open at that point — `DigestState` carrying no scope-size signal, so this exact case still said
+"found nothing" rather than naming that nothing was in scope — **is now closed too**, by
+`DigestState.NothingInScope` and the entry above. Both halves of this case, wire contract and
+rendering, are therefore honest: an unfiltered digest over an empty repository scope serves
+`silentChecks: []` *and* a state that says nothing was looked at.

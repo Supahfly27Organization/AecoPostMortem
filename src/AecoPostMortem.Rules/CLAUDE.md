@@ -918,3 +918,44 @@ repositories (`MixedRuleSetVersionException`, reused), a hash the repository nev
 sitting between them in chronological order (`NonAdjacentRuleSetVersionsException`, naming every
 intervening version) — and returns the two full `RuleSetVersion` values on success, so a caller
 never has to look either back up by hash.
+
+### `TurnRecord`/`AbortedTurnOccurrence` carry an event id, and it is the only identity on them
+
+`AbortedTurnCheck`'s two shapes each carry a `required string EventId` — the id of the event that
+opened the turn — alongside the `TurnId` they already had. The distinction is load-bearing rather
+than cosmetic, and both fields' doc comments say so: `TurnId` is a small counter the session itself
+displays, which cycles and repeats *within* one session, so it can never tell two turns apart;
+`EventId`, paired with `SessionId`, can. Every ordering tiebreak here and every key a caller builds
+downstream comes from `EventId`.
+
+Both are `required`, so a caller that has only a display counter cannot construct either shape at
+all (CS9035) — the same structural-beats-conventional reasoning `HookFailureCounts` gives for its own
+paired denominators. That is what forced the review this change wanted: adding the field broke every
+existing construction site in this project's own tests, each of which had to state which value it
+meant, instead of silently inheriting a plausible default.
+
+Repo Rule 6 is untouched. `EventId` is an opaque label this project only ever groups, sorts and
+copies — it is never parsed, never compared against a literal, and nothing here knows which event
+type produced it. The vocabulary allowlist
+(`RulesProjectNamesNothingTests.The_rules_project_uses_only_a_reviewed_vocabulary_in_its_literals`)
+needed no new word, because this change adds no string literal at all; the provider-specific detail
+(that this is the `assistant.turn_start` envelope's own `id`) is stated one layer out in
+`AecoPostMortem.Findings`, where naming is permitted.
+
+### The abort tiebreak is `EventId`, because the old one tie-broke on the colliding field
+
+`AbortedTurnCheck.Run` orders each session's turns by `StartedAt` and previously broke ties on
+`TurnId`. That is the one field two turns of a session are *most* likely to share — measured against
+the live reference corpus, 1,903 of 2,384 real turn rows share their `(SessionId, TurnId)` pair with
+another turn — so two turns sharing both a timestamp and a counter were left genuinely tied, and
+their reported positions could swap between runs over the same input. A tiebreak that can fail to
+break the tie is not a tiebreak; ordering by `EventId` restores the determinism PRD §3.8 requires and
+the old comment already claimed. `Turns_sharing_the_same_started_at_break_the_tie_by_event_id` pins
+it with a fixture whose two turns deliberately share a `TurnId`, so it is unorderable under the old
+rule and deterministic under this one.
+
+This is the same correction `AecoPostMortem.Findings/CLAUDE.md` records for `SessionTapeStep.StepId`
+("the ordinal tiebreak is now over a genuinely unique key, not merely a deterministic one") — the
+third appearance in this codebase of one root cause, after `Data.Execution.Turn`'s own primary key
+and that Prompt-step id. See that file's own entry for the finding-side change and the corpus
+measurements.

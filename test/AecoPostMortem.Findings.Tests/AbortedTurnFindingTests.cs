@@ -100,6 +100,50 @@ public sealed class AbortedTurnFindingTests
         Assert.Equal(2, keys.Distinct(StringComparer.Ordinal).Count());
     }
 
+    /// <summary>
+    /// The defect this test exists for: <c>data.turnId</c> is a small display counter Copilot
+    /// reuses <em>within</em> one session — measured against the live 35-session reference corpus,
+    /// 1,903 of 2,384 real turn rows share their <c>(SessionId, TurnId)</c> pair with another turn,
+    /// across 27 of 35 sessions. A key built from it therefore merges two genuinely distinct aborts
+    /// in the same session into one <c>Recurrence.Key</c>, which <c>Recurrence.cs</c> documents as
+    /// impossible ("no constructor that could produce a second `Finding` for the same key"). The key
+    /// must come from <see cref="Turn.EventId"/> — the turn's own key, the same field
+    /// <c>PostMortemContext.MapTurn</c> keys the entity on.
+    /// </summary>
+    [Fact]
+    public void The_recurrence_key_does_not_collide_within_one_session_sharing_a_display_counter()
+    {
+        var turns = new[]
+        {
+            BuildTurn("s1", "3", "2026-08-16T10:00:00Z", TurnOutcome.Aborted, "user_interrupt", eventId: "e-first"),
+            BuildTurn("s1", "3", "2026-08-16T10:10:00Z", TurnOutcome.Aborted, "timeout", eventId: "e-second"),
+        };
+
+        var (findings, _) = AbortedTurnFinding.Build(turns);
+
+        Assert.Equal(2, findings.Count);
+        var keys = findings.Select(finding => finding.Recurrence.Key).ToArray();
+        Assert.Equal(2, keys.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>The key is the turn's own <c>(SessionId, EventId)</c> pair — the identical composite
+    /// <c>PostMortemContext.MapTurn</c> keys <c>Turn</c> on — never its display counter. Pinned as an
+    /// exact value, not merely as "distinct", so a future change cannot satisfy the collision test
+    /// above by inventing some third identifier that is unique but is not the entity's own key.</summary>
+    [Fact]
+    public void The_recurrence_key_is_the_turns_own_session_and_event_id()
+    {
+        var turns = new[]
+        {
+            BuildTurn("s1", "3", "2026-08-16T10:00:00Z", TurnOutcome.Aborted, "timeout", eventId: "e-first"),
+        };
+
+        var (findings, _) = AbortedTurnFinding.Build(turns);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("s1:e-first", finding.Recurrence.Key);
+    }
+
     [Fact]
     public void Every_finding_carries_derived_provenance()
     {
@@ -115,10 +159,13 @@ public sealed class AbortedTurnFindingTests
         string turnId,
         string startedAt,
         TurnOutcome outcome,
-        string? abortReason = null) => new()
+        string? abortReason = null,
+        string? eventId = null) => new()
     {
         SessionId = sessionId,
-        EventId = $"e-{turnId}",
+        // Defaulted from TurnId only for the cases that do not care which is which; a test about
+        // identity must state it explicitly, since the whole point is that the two can differ.
+        EventId = eventId ?? $"e-{turnId}",
         TurnId = turnId,
         StartedAt = startedAt,
         Outcome = outcome,

@@ -329,9 +329,10 @@ now say *how many* rule-set versions were in force between a rejected pair — a
 
 The cost, stated plainly: a non-adjacent selection now makes a request where it previously made none.
 That is what buys a single implementation of adjacency. See `Api/CLAUDE.md`'s matching entry for the
-server-side ordering decision this forced into the open, and for a pre-existing concurrency defect
+server-side ordering decision this forced into the open, and for the pre-existing concurrency defect
 (`500` on overlapping requests, on endpoints unrelated to this change) that the real-browser pass for
-this work uncovered and did not fix.
+this work uncovered — since fixed in `LocalStore`'s foreign-file guard, which was denying write
+sharing while reading 15 bytes of header (`Data/CLAUDE.md`).
 
 ### The Monitor's two refusals were resolved on the client, not the server (superseded — see above)
 

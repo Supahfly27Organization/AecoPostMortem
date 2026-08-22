@@ -28,7 +28,12 @@ public sealed class ProcessDigestTests
         SessionIds = ["session-1", "session-2"],
     };
 
-    static CheckRegistry EmptyRegistry() => new() { Entries = [] };
+    // SessionsInScope matches SingleRepoScope()'s own session count (2) — the field it mirrors in
+    // production (ApiHost.BuildFindingsForScope sets both from the same scopedSessionIds), not
+    // MastheadCounters.SessionCount, which some call sites here vary independently for their own
+    // reasons (code review: two prior fixtures stated a SessionsInScope that contradicted the
+    // RepositoryScope they were paired with).
+    static CheckRegistry EmptyRegistry() => new() { Entries = [], SessionsInScope = 2 };
 
     static CheckRegistry RanCleanRegistry() => new()
     {
@@ -43,6 +48,7 @@ public sealed class ProcessDigestTests
                 Provenance = Provenance.Derived,
             },
         ],
+        SessionsInScope = 2,
     };
 
     static Finding WasteFinding(string path, params string[] sessionIds) => new()

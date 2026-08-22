@@ -624,6 +624,10 @@ public static class ApiHost
                 useAAfterB.RegistryEntry,
                 alwaysPassParam.RegistryEntry,
             ],
+            // The same scope every check above actually ran over — see CheckRegistry.SessionsInScope's
+            // own remarks for why SilentCheckEnvelope.From needs this distinct from any one entry's own
+            // Population.
+            SessionsInScope = scopedSessionIds.Count,
         };
 
         return (findings, checkRegistry);

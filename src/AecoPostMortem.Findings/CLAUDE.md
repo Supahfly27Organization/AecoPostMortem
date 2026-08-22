@@ -1145,3 +1145,23 @@ this project — see "`Headline` is `required`, the same reason `Provenance` is"
 wording per check kind, the real-corpus verification, and the one deliberately unchanged consumer
 (`FindingChips`). `AecoPostMortem.Api.FindingEnvelope.Headline` carries it through unchanged
 (`Api/CLAUDE.md`), and `web/src/digest/FindingRow.tsx` is the real rendering consumer.
+
+### `CheckRegistry.SessionsInScope`: the analysis scope's own size, distinct from any one check's `Population`
+
+Added so `AecoPostMortem.Api.SilentCheckEnvelope.From` can tell "the whole analysis scope was empty"
+apart from "this one check's own narrower population happens to be zero" — see `Api/CLAUDE.md`'s
+"`SilentCheckEnvelope.From` refuses on `CheckRegistry.SessionsInScope`..." for the full real-corpus
+investigation and the wire-contract fix this enabled. The distinction matters because most checks'
+own `CheckRegistryEntry.Population` (`AbortedTurnFinding`, `BannedToolFinding`, `AlwaysPassParamFinding`,
+`NeverReadPathFinding`, `UseAAfterBFinding`, `RepeatedFileReadFindingCheck`, `PhaseChurnFinding`,
+`InterruptionLoadFinding`) counts distinct sessions among that check's own candidate items (tool
+calls, turns, permissions+questions, declared intents) — a strict subset of the whole scope, which
+can genuinely be zero within a real, non-empty scope without the scope itself being empty. Only
+`HookFailureFinding.Population` (`allSessionIds.Count`) is pinned to the whole scope size directly.
+`SessionsInScope` is the one corpus-level fact that holds for every check in a given registry
+regardless of which of those two shapes its own `Population` takes — set once, by
+`ApiHost.BuildFindingsForScope` (the registry's one production call site), to `scopedSessionIds.Count`,
+the same session count `Findings.RepositoryScope.SessionIds` already carries for that exact scope.
+Required, the same "a caller-stated fact, never guessed" discipline `CheckRegistryEntry.Provenance`
+already uses — `CheckRegistryTests.SessionsInScope_is_a_required_member` proves it the same way
+`Provenance_is_a_required_member` does.

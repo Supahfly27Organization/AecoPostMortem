@@ -1689,3 +1689,54 @@ trade-off, not an oversight. The frontend still treats the wait as real (`Settin
 ingest…"/"Running rebuild…" `role="status"` text, `web/CLAUDE.md`) rather than assuming it is
 instant, so a corpus large enough to take noticeably longer than this still reads as "working," not as
 a hung page.
+
+### `SilentCheckEnvelope.From` refuses on `CheckRegistry.SessionsInScope`, not on any individual entry's own zero population
+
+PR #138 (the pager & date-range filter task) closed "a range matching zero sessions reads as ten
+clean checks" only at the render layer — `DigestPage.tsx`'s own `noSessionsInRange` gate hides the
+ranked list, pager, judgment calls and clean-checks sections together, all client-side. Verified
+directly against the live corpus before this fix: `GET /api/digest?from=2026-01-01&to=2026-01-31` (a
+window matching zero sessions) served all ten checks as clean, every one carrying `population: 0` —
+honest per entry, misleading as a collection, and a second client reading this endpoint directly
+(bypassing `DigestPage.tsx`) had no way to tell "ten checks ran clean" from "nothing was analysed".
+FR-33's own precedent (`web/CLAUDE.md`'s "one component owns both halves of an adherence figure" —
+"a second client bypassing the UI must be equally unable to get a bare figure, the server contract
+handles that half") is the standard this fix applies to `SilentCheckEnvelope`.
+
+The real design question this task had to settle: is a zero `CheckRegistryEntry.Population` always
+"never looked"? Verified against the live 35-session reference corpus — the unfiltered digest serves
+3 silent checks (`banned-tool-used`, `use-a-after-b`, `always-pass-param`), each with population 24,
+never 0 for any of the ten checks while real sessions are in scope. But the codebase's own per-check
+`Population` formulas (`Findings/CLAUDE.md`'s "checks that found nothing" section) show this is not
+guaranteed to hold everywhere: most checks count *distinct sessions among their own candidate items*
+(tool calls, turns, permissions+questions, declared intents) rather than the whole session scope —
+`phase-churn`'s population is sessions with at least one declared intent, for instance, which could
+genuinely be zero in a real, non-empty session scope where no session ever called `report_intent`.
+Only `HookFailureFinding.Population` (`allSessionIds.Count`) is structurally pinned to the whole scope
+size. That means a check's own zero population and "the whole analysis scope was empty" are genuinely
+different situations that happen to share a number, and a blanket `Population == 0` filter on
+`SilentCheckEnvelope.From` would suppress a real, honest clean result the narrower way (a check that
+ran over real sessions and genuinely found no candidates of its own kind).
+
+The fix: `Findings.CheckRegistry` gained a new required field, `SessionsInScope` — the size of the
+whole analysis scope every entry in that registry was drawn from, set once by
+`ApiHost.BuildFindingsForScope` to `scopedSessionIds.Count`, the same count `RepositoryScope.
+SessionIds` already carries for this exact scope (`GetDigest`'s own remarks above, on
+`servedRepositoryScope`). `SilentCheckEnvelope.From(CheckRegistry)` keeps its single-parameter,
+"pure filter over one input" shape (this file's own pre-existing remarks on it) — it now refuses
+structurally, returning `[]` unconditionally, when `registry.SessionsInScope == 0`, before ever
+looking at any individual entry's own `Population`. When the scope is non-empty, the existing
+per-entry filter (`Status == Ran && FindingCount == 0`) is untouched: a check whose own narrower
+population happens to be zero within a real, non-empty scope still serves as a genuine clean result,
+by design — `SilentCheckEnvelopeTests`'s own
+`A_single_checks_own_zero_population_still_serves_as_clean_when_real_sessions_were_in_scope` proves
+this distinction holds, alongside its sibling proving the zero-scope refusal
+(`No_checks_are_served_as_clean_when_the_analysis_scope_itself_had_zero_sessions`).
+
+Verified against the live corpus after the fix: the unfiltered digest still serves the identical 3
+silent checks at population 24 each (unaffected — `SessionsInScope` is 25 there, unchanged), and
+`GET /api/digest?from=2026-01-01&to=2026-01-31` now serves `silentChecks: []` instead of ten
+misleadingly-clean entries — `DigestRouteTests.A_range_matching_zero_sessions_serves_an_empty_but_
+honest_scope` is the regression test for exactly this. `DigestPage.tsx` needed no change: its own
+`noSessionsInRange` gate already hid `<CleanChecks>` for this exact case, so the fix is invisible to
+the one client that already handled it correctly, and closes the gap for every client that doesn't.

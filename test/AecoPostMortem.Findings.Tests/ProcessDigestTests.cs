@@ -28,7 +28,7 @@ public sealed class ProcessDigestTests
         SessionIds = ["session-1", "session-2"],
     };
 
-    static CheckRegistry EmptyRegistry() => new() { Entries = [] };
+    static CheckRegistry EmptyRegistry() => new() { Entries = [], SessionsInScope = 0 };
 
     static CheckRegistry RanCleanRegistry() => new()
     {
@@ -43,6 +43,7 @@ public sealed class ProcessDigestTests
                 Provenance = Provenance.Derived,
             },
         ],
+        SessionsInScope = 35,
     };
 
     static Finding WasteFinding(string path, params string[] sessionIds) => new()

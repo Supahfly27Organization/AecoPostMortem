@@ -723,7 +723,20 @@ public sealed class DigestRouteTests
     /// <summary>Code review gap: a range matching zero sessions in the selected repository must still
     /// serve an honest, non-crashing digest — an empty session strip, corpus-wide masthead unaffected,
     /// and (per <c>DigestPage.tsx</c>'s own fix) the frontend renders a distinct message for this case
-    /// rather than "every check ran and found nothing".</summary>
+    /// rather than "every check ran and found nothing".
+    ///
+    /// Follow-on gap, closed here: every check still reports <c>Ran</c> unconditionally (a check runs
+    /// regardless of population size — still pre-existing, unchanged behaviour), which used to mean
+    /// <c>SilentChecks</c> came back non-empty for this exact request — ten entries, each honestly
+    /// stating its own population of 0, but the collection as a whole read as "ten checks ran clean"
+    /// when nothing was analysed at all (verified against the live corpus before this fix: this exact
+    /// request served all ten checks as clean). PR #138 only suppressed that reading at the render
+    /// layer (<c>DigestPage.tsx</c>'s own <c>noSessionsInRange</c> gate) — a second client reading this
+    /// endpoint directly, bypassing the UI, still received the misleading shape. <c>SilentCheckEnvelope.
+    /// From</c> now refuses structurally, on <c>CheckRegistry.SessionsInScope</c>, so this wire contract
+    /// defends itself the same way FR-33's own adherence figure does (<c>web/CLAUDE.md</c>'s "one
+    /// component owns both halves of an adherence figure" — "a second client bypassing the UI must be
+    /// equally unable to get a bare figure").</summary>
     [Fact]
     public async Task A_range_matching_zero_sessions_serves_an_empty_but_honest_scope()
     {
@@ -748,14 +761,9 @@ public sealed class DigestRouteTests
             Assert.Empty(envelope.RankedFindings);
             // The masthead is corpus-wide, unaffected by the filter.
             Assert.Equal(1, envelope.Masthead.SessionCount);
-            // Every check still reports Ran (a check runs unconditionally, regardless of population
-            // size — pre-existing behaviour this task does not change), so SilentChecks is non-empty
-            // here: each entry honestly states its own population of 0. This is exactly why
-            // DigestPage.tsx renders its own "no sessions in range" message ahead of the ranked list,
-            // clean-checks grid and inferred-findings section for this case — see
-            // DigestPage.test.tsx's own coverage of that branch — rather than this endpoint trying to
-            // suppress a check that genuinely did run, just over an empty population.
-            Assert.All(envelope.SilentChecks, check => Assert.Equal(0, check.Population));
+            // Nothing was looked at in this range, so nothing may be reported as "ran clean" — the
+            // wire contract's own refusal, not only DigestPage.tsx's render-layer gate.
+            Assert.Empty(envelope.SilentChecks);
         }
         finally
         {

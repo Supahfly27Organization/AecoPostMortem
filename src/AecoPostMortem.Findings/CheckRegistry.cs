@@ -45,4 +45,18 @@ public sealed record CheckRegistryEntry
 public sealed record CheckRegistry
 {
     public required IReadOnlyList<CheckRegistryEntry> Entries { get; init; }
+
+    /// <summary>The size of the whole analysis scope every entry's own <see cref="CheckRegistryEntry.
+    /// Population"/> was drawn from — e.g. sessions in the selected repository, further narrowed by a
+    /// date-range filter — not a per-check number. FR-42's silent-check surface (issue #46, mockup
+    /// parity item #6) needs this distinct fact: a date range matching zero sessions drives every
+    /// entry's own <see cref="CheckRegistryEntry.Population"/> to zero simultaneously (nothing existed
+    /// to build a candidate set from), which is a structurally different situation from one specific
+    /// check's own narrower population happening to be zero within a real, non-empty scope (e.g. no
+    /// session in scope ever called <c>report_intent</c>, so <c>phase-churn</c>'s own population is
+    /// zero even though real sessions were genuinely examined). Both share the number zero; only the
+    /// first is "nothing was looked at". Required, the same "a caller-stated fact, never guessed"
+    /// discipline <see cref="CheckRegistryEntry.Provenance"/> already uses — a registry built without
+    /// stating its own scope size is a compile error, not a silently-defaulted zero.</summary>
+    public required int SessionsInScope { get; init; }
 }

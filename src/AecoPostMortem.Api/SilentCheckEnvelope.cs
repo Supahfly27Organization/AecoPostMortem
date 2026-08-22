@@ -22,6 +22,19 @@ namespace AecoPostMortem.Api;
 /// <item>A check that ran and found something (<see cref="CheckRegistryEntry.FindingCount"/> &gt; 0)
 /// is also excluded: it is reported through the finding surface, not implied "found nothing" here.</item>
 /// </list>
+/// A fourth failure mode, closed separately: when <see cref="CheckRegistry.SessionsInScope"/> is
+/// zero, <see cref="From"/> serves no entries at all, regardless of what any individual entry states.
+/// A zero-session analysis scope (e.g. a date-range filter matching no sessions) drives every check's
+/// own <see cref="CheckRegistryEntry.Population"/> to zero simultaneously — every check technically
+/// satisfies <c>Ran</c> with <c>FindingCount == 0</c>, which would otherwise read as "ten checks ran
+/// clean" when in fact nothing was analysed (PRD §3.9's exact "silence reads as compliance" failure,
+/// verified against the live corpus: a date range matching zero sessions served all ten checks as
+/// clean before this refusal existed). This is deliberately not a blanket
+/// <c>Population == 0</c> filter on individual entries — a specific check's own narrower population
+/// can genuinely be zero within a real, non-empty scope (e.g. no session in scope ever declared an
+/// intent, so <c>phase-churn</c> alone reports zero) without the corpus being unanalysed, and that is
+/// still a real, checked zero worth serving. <see cref="CheckRegistry.SessionsInScope"/>'s own remarks
+/// state why these are structurally different situations that happen to share a number.
 /// </remarks>
 public sealed record SilentCheckEnvelope
 {
@@ -48,15 +61,17 @@ public sealed record SilentCheckEnvelope
     public required string ProvenanceLabel { get; init; }
 
     public static IReadOnlyList<SilentCheckEnvelope> From(CheckRegistry registry) =>
-        registry.Entries
-            .Where(entry => entry.Status == CheckRunStatus.Ran && entry.FindingCount == 0)
-            .Select(entry => new SilentCheckEnvelope
-            {
-                CheckId = entry.CheckId,
-                Population = entry.Population,
-                FindingCount = entry.FindingCount!.Value,
-                Provenance = entry.Provenance,
-                ProvenanceLabel = Findings.ProvenanceLabel.For(entry.Provenance),
-            })
-            .ToList();
+        registry.SessionsInScope == 0
+            ? []
+            : registry.Entries
+                .Where(entry => entry.Status == CheckRunStatus.Ran && entry.FindingCount == 0)
+                .Select(entry => new SilentCheckEnvelope
+                {
+                    CheckId = entry.CheckId,
+                    Population = entry.Population,
+                    FindingCount = entry.FindingCount!.Value,
+                    Provenance = entry.Provenance,
+                    ProvenanceLabel = Findings.ProvenanceLabel.For(entry.Provenance),
+                })
+                .ToList();
 }

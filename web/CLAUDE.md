@@ -1128,6 +1128,26 @@ with `SettingsPage` itself owning only the cross-cutting part neither instance c
 own: disabling *both* buttons whenever *either* is running (`anyRunning`), and calling
 `notifyStoreChanged()`/bumping `useSettings`'s own `refetchToken` after whichever one just finished.
 
+### An aborted-turn finding's recurrence key is GUID-on-GUID, and no longer reaches a chip label
+
+`Findings.AbortedTurnFinding`'s recurrence key moved from `$"{SessionId}:{TurnId}"` to
+`$"{SessionId}:{EventId}"` (`AecoPostMortem.Findings/CLAUDE.md`), because the display counter it
+used was not an identity — the same root cause `Data.Execution.Turn`'s own primary key and the
+session tape's `StepId` (PR #137) each had to fix. That roughly doubles the key's length: a GUID
+plus a short counter becomes a GUID plus a GUID.
+
+That would once have been visible. `FindingChips` (`routes/SessionPage.tsx`) used to render
+`chip.finding.recurrence.key` as a chip's own visible label, so an aborted-turn chip would have
+grown about twice as wide. It no longer does: the chip renders `chip.finding.headline` behind a
+bounded `.session-chips__label` (`max-width` plus ellipsis, with the full sentence kept in the DOM
+and in `title`, so the accessible name stays untruncated), and `recurrence.key` survives there only
+as React's own `key` prop, where length is irrelevant.
+
+The key is therefore now free to be as opaque as identity requires. That is the division of labour
+this codebase already draws elsewhere and had blurred here: `FindingEnvelope.Headline` carries
+legibility, `Recurrence.Key` carries uniqueness, and neither has to compromise for the other. The
+old key was the worst of both — it read as "turn 3" while not identifying the turn it named.
+
 ### A stale note, corrected: the empty-repository-scope case is no longer entirely untouched
 
 The pager & date-range filter task's own "Code review round" note above (and the comment it left in

@@ -612,21 +612,13 @@ optional `violationCounts` parameter both set (`Api/CLAUDE.md`), so the dozens o
 ### `AbortedTurnFinding`'s recurrence key is the turn itself, not the abort reason
 
 FR-57 names a class-specific key, but an abort has no recurring *cause* the way a hook or a tool
-does — `AbortedTurnFinding.ToFinding` keys `Recurrence` on `$"{SessionId}:{TurnId}"`, not
-`AbortedTurnOccurrence.TurnId` alone: a bare `TurnId` is not unique across sessions — two unrelated
-aborts that happened to share one would otherwise collide into the same `Recurrence.Key`, which
-`Recurrence.cs` documents as impossible ("no constructor that could produce a second `Finding` for
-the same key").
+does — `AbortedTurnFinding.ToFinding` keys `Recurrence` on `$"{SessionId}:{EventId}"`, not
+`AbortedTurnOccurrence.EventId` alone, mirroring the composite `PostMortemContext.MapTurn` keys
+`Turn` itself on.
 
-**Known, still-open weakness (recorded, not fixed here).** This composite is *not* `Turn`'s own key.
-`PostMortemContext.MapTurn` keys `Turn` on `(SessionId, EventId)`, because `data.turnId` also repeats
-*within* one session — the same cycling-display-counter fact that this file's own "A `Prompt` step's
-`StepId` is `Turn.EventId`" entry measures at 20 of 25 real sessions. So two aborts in the *same*
-session sharing a counter still collide. Measured against the live 35-session reference corpus this
-does not currently happen (6 aborted-turn findings, 6 distinct recurrence keys), which is why it is
-recorded rather than fixed in passing: moving this key onto `Turn.EventId` means widening
-`Rules.AbortedTurnCheck`'s `TurnRecord`/`AbortedTurnOccurrence` shapes and changing an established
-FR-57 finding identity — its own scoped change, not a drive-by.
+**The weakness this entry used to record as still-open is closed** — see "`AbortedTurnFinding`'s
+recurrence key is `Turn.EventId`, never `Turn.TurnId`" at the end of this file for the change, the
+before/after corpus measurements and the consumer audit.
 
 Two aborts that happen to share reason text
 (`"user_interrupt"`, say) in two different sessions still stay two distinct findings, each with
@@ -1145,6 +1137,86 @@ this project — see "`Headline` is `required`, the same reason `Provenance` is"
 wording per check kind, the real-corpus verification, and the one deliberately unchanged consumer
 (`FindingChips`). `AecoPostMortem.Api.FindingEnvelope.Headline` carries it through unchanged
 (`Api/CLAUDE.md`), and `web/src/digest/FindingRow.tsx` is the real rendering consumer.
+
+### `AbortedTurnFinding`'s recurrence key is `Turn.EventId`, never `Turn.TurnId`
+
+`Recurrence.Key` is now `$"{SessionId}:{EventId}"` — the identical composite
+`PostMortemContext.MapTurn` keys `Turn` itself on — so a finding's identity *is* the identity of the
+entity that produced it, rather than a plausible-looking near-miss. It was `$"{SessionId}:{TurnId}"`,
+which made this the **third** instance of one root cause in this codebase, after `Data.Execution.Turn`'s
+own primary key (`Data/CLAUDE.md`, "`Turn` is keyed by its own event id") and `SessionTapeStep.StepId`
+for a Prompt step (PR #137, this file's own entry above). `data.turnId` is a small display counter
+Copilot reuses *within* one session; it is not an identity.
+
+**The collision was latent, not live — and re-measured here rather than taken on trust.** Against the
+live 35-session reference corpus, before and after:
+
+| | before | after |
+|---|---|---|
+| aborted-turn findings, corpus-wide | 9 | 9 |
+| distinct `Recurrence.Key`s among them | 9 | **9** |
+| same two figures, dominant repository (the scope the digest defaults to) | 6 / 6 | **6 / 6** |
+
+Identical on both sides, which is the expected result for a latent defect and is why this change is
+safe to land on an established FR-57 identity: no existing finding splits or merges.
+
+**What makes it worth fixing anyway is the hazard the key was drawn from, which is emphatically not
+latent.** Measured over the same corpus: **1,903 of 2,384 real turn rows (79.8%), across 27 of 35
+sessions, share their `(SessionId, TurnId)` pair with another turn.** The key was built from a field
+that collides on four fifths of the rows it is meant to identify; the only reason no finding collided
+is that aborts are rare and exactly **one** session in the corpus has more than one aborted turn at
+all (`47b8b3e3…`, at counters 1 and 12 — a near miss, not a designed guarantee). One extra abort in
+any of the 27 collision-carrying sessions turns this into data loss: two real abandonments merged
+into one finding, which `Recurrence.cs` documents as impossible.
+
+**A second, quieter defect fixed in the same change.** `Rules.AbortedTurnCheck.Run` broke `StartedAt`
+ties on `TurnId` — precisely the colliding field — so two turns sharing both a timestamp and a counter
+were left *genuinely tied*, and an unbroken tie falls through to whatever order the caller's store read
+happened to produce (`Build` takes its `Turn` list from an EF query with no `OrderBy` of its own). Not
+"two runs over one input disagree" — `OrderBy`/`ThenBy` is a stable sort, so that was never the failure
+— but "the answer depends on something other than the data", which is the same PRD §3.8 problem by a
+more accurate name. The tiebreak is now `EventId`, the "ordinal tiebreak over a genuinely unique key"
+correction this file's own Prompt-step entry records. Measured: 0 of 2,384 real turn rows share a
+`(SessionId, StartedAt)` pair, so the tiebreak fires nowhere on today's corpus and not one reported
+`Position` moved — this is future-proofing, not a repair of visible damage. See
+`Rules/CLAUDE.md`'s "The abort tiebreak is `EventId`" for the fuller argument; this paragraph is the
+pointer, that one is canonical.
+
+**Consumer audit (every reader of `Recurrence.Key` in the repo; none broke).** Checked before changing
+the key, because a silent break here would be worse than the latent bug:
+
+| consumer | why it is unaffected |
+|---|---|
+| `Api.ApiHost.CountsByRecurrenceKey` (PR #122) | called only with the four piece-3 `RuleAdherenceToolChoice` results (`BannedToolFinding`/`NeverReadPathFinding`/`UseAAfterBFinding`/`AlwaysPassParamFinding`); an aborted-turn finding never reaches it |
+| `Api.SessionTapeStepFindingLookup` (PR #132) | reads the key only inside its `HasHookFailureEvidence` branch, where it equals a hook name; `AbortedTurnFinding` is one of the eight checks that file explicitly leaves uncovered |
+| `OperatorResponseLog.Apply`/`.CurrentResponses` | matches on `(Class, RecurrenceKey)`, but the log is in-memory only — nothing in this repository persists an `OperatorResponseRecord`, so there is no stored adjudication to orphan |
+| `web/src/routes/DigestPage.tsx` | uses `${finding.class}:${finding.recurrence.key}` as a React key only, opaque; the change strictly *improves* it, since duplicate React keys for this class become impossible |
+| `web/src/routes/SessionPage.tsx` (`FindingChips`) | uses the key as a React key and as the chip's visible label, opaque either way — see the legibility note below |
+
+**Key versus headline — why an unreadable key is the right answer.** `Recurrence.Key` is an identity;
+`Finding.Headline` is the sentence. This file already draws that split at mockup parity item #5, and
+the headline already carries every legible fact — `A turn aborted ("user_initiated") at turn 12 of 47
+in session 47b8b3e3….` The objection that `session:3` reads better than `session:<uuid>` mostly does
+not survive contact with the real value: the key was *already* a 36-character GUID with a counter
+stuck on the end, so it was never prose either way.
+
+Be honest about the part that *is* a real cost, though (both code reviews pushed back on an earlier
+draft that waved it away): `FindingChips` (`web/src/routes/SessionPage.tsx`) renders the bare key as a
+chip's **visible label**, so this is not purely opaque plumbing — an aborted-turn chip's label roughly
+doubles in width, from GUID-plus-counter to GUID-on-GUID. What is *not* lost is information, because
+the counter it replaces was actively misleading rather than merely unhelpful: it renders as "turn 3"
+while (per the 79.8% figure above) not identifying the turn it names. Trading a short wrong label for
+a long right one is the correct trade for an identity field, and the real fix for that chip is the
+one already on the books — render `finding.headline`, per `web/CLAUDE.md`'s "A finding chip's label
+is still `finding.recurrence.key`", a divergence that predates this change and is untouched by it.
+`web/CLAUDE.md` carries a matching note that the pressure on that gap has gone up.
+
+**A side benefit worth naming, since a future story can now collect it cheaply.** `Api/CLAUDE.md`
+records `AbortedTurnFinding` as one of the eight checks `SessionTapeStepFindingLookup` leaves
+uncovered, "arguably attachable to its own aborted `Turn`'s `Prompt` step" but deferred. That join is
+now an exact string match rather than a new lookup: this key's own suffix *is* the Prompt step's
+`StepId`, since PR #137 made that `Turn.EventId` too. Not built here — but it is no longer the open
+design question it was.
 
 ### `CheckRegistry.SessionsInScope`: the analysis scope's own size, distinct from any one check's `Population`
 

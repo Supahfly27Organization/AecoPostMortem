@@ -434,7 +434,7 @@ describe('The finding chips summarise the session', () => {
     renderAtSession('session-1')
 
     const chips = await screen.findByRole('list', { name: 'Findings' })
-    expect(chips).toHaveTextContent('path:/repo/a.cs')
+    expect(chips).toHaveTextContent('/repo/a.cs was read repeatedly')
     expect(chips).toHaveTextContent('3')
   })
 })

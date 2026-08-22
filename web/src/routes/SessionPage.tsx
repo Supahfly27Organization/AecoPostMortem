@@ -189,7 +189,7 @@ function FindingChips({ chips }: { chips: SessionFindingChip[] }) {
       {chips.map((chip) => (
         <li key={chip.finding.recurrence.key} className="session-chips__chip" data-provenance={chip.finding.provenance}>
           <b>{chip.sessionsAffected}×</b>
-          <span>{chip.finding.recurrence.key}</span>
+          <span className="session-chips__label" title={chip.finding.headline}>{chip.finding.headline}</span>
         </li>
       ))}
     </ul>

@@ -108,7 +108,14 @@ public abstract record RuleRetirementEnvelope
 }
 
 /// <summary>FR-27's version identity and window on the wire — served for the selected version and for
-/// each one a client may switch to, never as a container of a second version's statements.</summary>
+/// each one a client may switch to, never as a container of a second version's statements.
+///
+/// <para>The Monitor comparison's missing-door task (<c>web/CLAUDE.md</c>) added
+/// <see cref="FirstSessionStartedAt"/>: <c>web/src/api/useMonitorComparison.ts</c>'s client-side
+/// adjacency pre-check needs the identical sort key <see cref="Rules.RuleSetVersionAdjacency.
+/// RequireAdjacentPair"/> itself orders by (ordinal string comparison — ISO-8601 timestamps sort
+/// correctly as plain strings) to be a real port of that check rather than a client that merely
+/// trusts <c>availableVersions</c>' own array order was never disturbed in transit.</para></summary>
 public sealed record RuleSetVersionEnvelope
 {
     public required string? Repository { get; init; }
@@ -118,6 +125,8 @@ public sealed record RuleSetVersionEnvelope
     public required string FirstSessionId { get; init; }
 
     public required string LastSessionId { get; init; }
+
+    public required string FirstSessionStartedAt { get; init; }
 
     public required int SessionCount { get; init; }
 
@@ -131,6 +140,7 @@ public sealed record RuleSetVersionEnvelope
             Hash = version.Hash,
             FirstSessionId = version.FirstSessionId,
             LastSessionId = version.LastSessionId,
+            FirstSessionStartedAt = version.FirstSessionStartedAt,
             SessionCount = version.SessionCount,
         };
     }

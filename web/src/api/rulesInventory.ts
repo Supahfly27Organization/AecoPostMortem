@@ -38,11 +38,17 @@ export type RuleRetirementEnvelope = { state: 'inForce' } | { state: 'retired'; 
  * from. Never a fabricated or zero-by-default number for that second case. */
 export type RuleViolationCountEnvelope = { kind: 'counted'; count: number } | { kind: 'notAvailable' }
 
+/** `firstSessionStartedAt` (the Monitor comparison's missing-door task) is the identical sort key
+ * `Rules.RuleSetVersionAdjacency.RequireAdjacentPair` itself orders by (ordinal string comparison —
+ * ISO-8601 timestamps sort correctly as plain strings), added so `api/useMonitorComparison.ts`'s
+ * client-side adjacency check is a real port of that ordering rather than a client that merely
+ * trusts this array's own order was never disturbed in transit. */
 export interface RuleSetVersionEnvelope {
   repository: string | null
   hash: string
   firstSessionId: string
   lastSessionId: string
+  firstSessionStartedAt: string
   sessionCount: number
 }
 

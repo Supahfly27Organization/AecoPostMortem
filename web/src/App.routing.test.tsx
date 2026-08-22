@@ -19,6 +19,7 @@ describe('App routing', () => {
       hash: 'hash-1',
       firstSessionId: 'session-1',
       lastSessionId: 'session-3',
+      firstSessionStartedAt: '2026-05-01T09:00:00Z',
       sessionCount: 3,
     },
     availableVersions: [
@@ -27,6 +28,7 @@ describe('App routing', () => {
         hash: 'hash-1',
         firstSessionId: 'session-1',
         lastSessionId: 'session-3',
+        firstSessionStartedAt: '2026-05-01T09:00:00Z',
         sessionCount: 3,
       },
       {
@@ -34,6 +36,7 @@ describe('App routing', () => {
         hash: 'hash-2',
         firstSessionId: 'session-4',
         lastSessionId: 'session-7',
+        firstSessionStartedAt: '2026-05-23T09:00:00Z',
         sessionCount: 4,
       },
     ],

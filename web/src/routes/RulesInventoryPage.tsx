@@ -19,9 +19,10 @@ import './RulesInventoryPage.css'
  * recent session, so the union-of-all-versions table the digest mockup showed would render three
  * quarters of its rows as though they were still in force (PRD Part 4).
  *
- * `/api/rules-inventory` is not served by `ApiHost` yet (`web/src/api/rulesInventory.ts` documents
- * why), so against a real browser this page renders its own "could not reach the local API" state —
- * the same seam `DigestPage` uses for `/api/digest`.
+ * `/api/rules-inventory` is served for real by `ApiHost.GetRulesInventory`
+ * (`web/src/api/rulesInventory.ts` documents the wiring); this page's own "could not reach the local
+ * API" state below still exists for a genuinely unreachable host, the same seam `DigestPage` uses
+ * for `/api/digest`.
  */
 export function RulesInventoryPage() {
   const [requestedVersion, setRequestedVersion] = useState<string | null>(null)

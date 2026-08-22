@@ -1,15 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRulesInventory } from '../api/useRulesInventory'
 import { useMonitorComparison } from '../api/useMonitorComparison'
 import type { RuleSetVersionEnvelope } from '../api/rulesInventory'
 import { MonitorComparisonBlock } from '../digest/MonitorComparisonBlock'
 import './MonitorPage.css'
-
-// A stable, shared reference for "no version list yet" -- a fresh `[]` literal inline at the call
-// site would change identity every render, and `useMonitorComparison`'s effect depends on this
-// array by reference, so a new array every render would re-run that effect (and its own `setQuery`)
-// forever.
-const NoVersions: readonly RuleSetVersionEnvelope[] = []
 
 /**
  * FR-39's Monitor comparison (S-35, issue #43), given its own reachable door: a fourth routed
@@ -27,29 +21,35 @@ const NoVersions: readonly RuleSetVersionEnvelope[] = []
  * recent versions (the newest edit). `useMonitorComparison` resolves adjacency locally before ever
  * calling the server -- see its own doc comment for why that is what lets this page state two
  * honest, distinct refusals rather than one bare 404 collapsing both.
+ *
+ * Code review (round 2) caught a third, real 404 cause this page has to rule out itself before
+ * trusting `useMonitorComparison`'s `'noComparableRule'` label: `ApiHost.GetMonitorComparison`
+ * refuses unconditionally, before checking adjacency or any rule, when the whole store resolves no
+ * repository at all (`repositoryScope.SelectedRepository is null`) -- a real, if rare, scope
+ * `GetRulesInventory` happily serves (`RuleSetVersionEnvelope.repository: null`, "no recorded
+ * repository" in `RulesInventoryPage`), which would otherwise reach this page's version picker and
+ * mislabel every pair's refusal as "no comparable rule" when the real reason is this repository-less
+ * scope. See `repositoryIsUnrecorded` below.
  */
 export function MonitorPage() {
   const inventoryQuery = useRulesInventory(null)
   const [beforeHash, setBeforeHash] = useState<string | null>(null)
   const [afterHash, setAfterHash] = useState<string | null>(null)
 
-  // Defaults to the two most recent versions the moment the version list first loads, and never
-  // again once a selection exists -- an operator's own choice is never overwritten by this effect
-  // re-running for an unrelated reason (e.g. a future re-fetch of the inventory).
-  useEffect(() => {
-    if (inventoryQuery.status !== 'loaded') return
-    if (beforeHash !== null || afterHash !== null) return
+  // Defaults derived at render time, not via an effect + extra state: the previous version needed
+  // a `useEffect` plus a `beforeHash !== null || afterHash !== null` guard to set the default
+  // exactly once, which also forced a stable-reference workaround downstream in
+  // `useMonitorComparison` (see that file's own doc comment, code review round 1). Deriving here
+  // instead removes both -- an explicit operator selection (`beforeHash`/`afterHash` state) always
+  // wins over the derived default, and there is no render where the two selects could show a stale
+  // or mismatched value the way an effect-driven default briefly can.
+  const versions = inventoryQuery.status === 'loaded' ? inventoryQuery.inventory.availableVersions : []
+  const defaultBeforeHash = versions.length >= 2 ? versions[versions.length - 2].hash : null
+  const defaultAfterHash = versions.length >= 2 ? versions[versions.length - 1].hash : null
+  const effectiveBeforeHash = beforeHash ?? defaultBeforeHash
+  const effectiveAfterHash = afterHash ?? defaultAfterHash
 
-    const versions = inventoryQuery.inventory.availableVersions
-    if (versions.length < 2) return
-
-    setBeforeHash(versions[versions.length - 2].hash)
-    setAfterHash(versions[versions.length - 1].hash)
-  }, [inventoryQuery, beforeHash, afterHash])
-
-  const availableVersions =
-    inventoryQuery.status === 'loaded' ? inventoryQuery.inventory.availableVersions : NoVersions
-  const comparisonQuery = useMonitorComparison(availableVersions, beforeHash, afterHash)
+  const comparisonQuery = useMonitorComparison(versions, effectiveBeforeHash, effectiveAfterHash)
 
   if (inventoryQuery.status === 'loading') {
     return (
@@ -70,8 +70,6 @@ export function MonitorPage() {
     )
   }
 
-  const { availableVersions: versions } = inventoryQuery.inventory
-
   if (versions.length < 2) {
     return (
       <div className="monitor-page">
@@ -84,14 +82,31 @@ export function MonitorPage() {
     )
   }
 
+  // `repository: null` means no session anywhere in the store resolved a repository name at all
+  // (`ApiHost.BuildRepositoryScope`'s own fallback) -- `GetMonitorComparison` refuses unconditionally
+  // for that scope, before ever checking adjacency or a comparable rule, so stating that plainly here
+  // is the honest state; letting the page fall through to a real request would only ever produce a
+  // 404 this page would otherwise mislabel as "no comparable rule" (code review, round 2).
+  if (inventoryQuery.inventory.selectedVersion.repository === null) {
+    return (
+      <div className="monitor-page">
+        <h2>Monitor</h2>
+        <p className="monitor-page__empty">
+          No repository is recorded for any session in this store, so the Monitor has nothing to
+          scope a comparison to.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="monitor-page">
       <h2>Monitor</h2>
 
       <VersionPairPicker
         versions={versions}
-        beforeHash={beforeHash}
-        afterHash={afterHash}
+        beforeHash={effectiveBeforeHash}
+        afterHash={effectiveAfterHash}
         onSelectBefore={setBeforeHash}
         onSelectAfter={setAfterHash}
       />
@@ -100,7 +115,7 @@ export function MonitorPage() {
         <p className="monitor-page__refusal" role="status">
           These two versions are not adjacent. The Monitor only compares a rule-set edit directly
           against the version immediately before it — pick two versions next to each other in the
-          lists above.
+          lists above (the numbering states each one's own chronological position).
         </p>
       )}
 
@@ -127,7 +142,13 @@ export function MonitorPage() {
 /** Two independent selects, both populated from the identical ordered `availableVersions` list --
  * mirroring `RulesInventoryPage`'s own single version picker, applied twice, so the operator can
  * freely explore any pair (including a deliberately non-adjacent one, to see the honest refusal)
- * rather than being restricted to a derived "previous version" the page alone chooses. */
+ * rather than being restricted to a derived "previous version" the page alone chooses.
+ *
+ * Each option is numbered by its own chronological position (code review, round 2, Minor): hashes
+ * are opaque, and the whole premise of this page is adjacency, so leaving the operator to guess
+ * which pairs are next to each other by trial and error is a real, avoidable gap -- the same
+ * "hashes are opaque without a marker" reasoning `RulesInventoryPage`'s own "— most recent" suffix
+ * already states for its single picker. */
 function VersionPairPicker({
   versions,
   beforeHash,
@@ -135,7 +156,7 @@ function VersionPairPicker({
   onSelectBefore,
   onSelectAfter,
 }: {
-  versions: RuleSetVersionEnvelope[]
+  versions: readonly RuleSetVersionEnvelope[]
   beforeHash: string | null
   afterHash: string | null
   onSelectBefore: (hash: string) => void
@@ -143,35 +164,40 @@ function VersionPairPicker({
 }) {
   return (
     <section className="monitor-page__picker" aria-label="Rule-set version pair">
-      <label className="monitor-page__picker-field">
-        <span>Before</span>
-        <select
-          aria-label="Before"
-          value={beforeHash ?? ''}
-          onChange={(event) => onSelectBefore(event.target.value)}
-        >
-          {versions.map((version) => (
-            <option key={version.hash} value={version.hash}>
-              {version.hash} ({version.sessionCount} session{version.sessionCount === 1 ? '' : 's'})
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="monitor-page__picker-field">
-        <span>After</span>
-        <select
-          aria-label="After"
-          value={afterHash ?? ''}
-          onChange={(event) => onSelectAfter(event.target.value)}
-        >
-          {versions.map((version) => (
-            <option key={version.hash} value={version.hash}>
-              {version.hash} ({version.sessionCount} session{version.sessionCount === 1 ? '' : 's'})
-            </option>
-          ))}
-        </select>
-      </label>
+      <VersionSelect
+        label="Before"
+        versions={versions}
+        value={beforeHash}
+        onSelect={onSelectBefore}
+      />
+      <VersionSelect label="After" versions={versions} value={afterHash} onSelect={onSelectAfter} />
     </section>
+  )
+}
+
+function VersionSelect({
+  label,
+  versions,
+  value,
+  onSelect,
+}: {
+  label: string
+  versions: readonly RuleSetVersionEnvelope[]
+  value: string | null
+  onSelect: (hash: string) => void
+}) {
+  return (
+    <label className="monitor-page__picker-field">
+      <span>{label}</span>
+      <select aria-label={label} value={value ?? ''} onChange={(event) => onSelect(event.target.value)}>
+        {versions.map((version, index) => (
+          <option key={version.hash} value={version.hash}>
+            {index + 1}. {version.hash} ({version.sessionCount} session
+            {version.sessionCount === 1 ? '' : 's'})
+            {index === versions.length - 1 ? ' — most recent' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }

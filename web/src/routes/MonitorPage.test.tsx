@@ -5,12 +5,23 @@ import { MonitorPage } from './MonitorPage'
 import { RulesInventoryRoute, type RulesInventoryEnvelope } from '../api/rulesInventory'
 import { MonitorComparisonRoute, type MonitorComparisonEnvelope } from '../api/monitor'
 
+// One ascending timestamp per hash, the same real sort key `useMonitorComparison.ts`'s `isAdjacent`
+// sorts by -- not merely relying on array order the way an earlier version of this fixture did.
+const startedAt: Record<string, string> = {
+  v1: '2026-04-01T09:00:00Z',
+  v2: '2026-04-15T09:00:00Z',
+  v3: '2026-05-01T09:00:00Z',
+  v4: '2026-05-15T09:00:00Z',
+  only: '2026-05-01T09:00:00Z',
+}
+
 function version(hash: string, sessionCount = 3) {
   return {
     repository: 'supahfly27/UpFront',
     hash,
     firstSessionId: `${hash}-first`,
     lastSessionId: `${hash}-last`,
+    firstSessionStartedAt: startedAt[hash],
     sessionCount,
   }
 }
@@ -61,6 +72,7 @@ function stubFetch(handlers: {
   inventory?: RulesInventoryEnvelope
   comparisonStatus?: number
   comparisonBody?: MonitorComparisonEnvelope
+  comparisonThrows?: boolean
 }) {
   vi.stubGlobal(
     'fetch',
@@ -72,6 +84,9 @@ function stubFetch(handlers: {
       }
 
       if (url.includes(MonitorComparisonRoute)) {
+        if (handlers.comparisonThrows) {
+          throw new TypeError('Failed to fetch')
+        }
         const status = handlers.comparisonStatus ?? 200
         const body = handlers.comparisonBody ?? referenceComparison
         return new Response(status === 200 ? JSON.stringify(body) : '', { status })
@@ -133,14 +148,39 @@ describe('MonitorPage (FR-39, S-35, issue #43)', () => {
     expect(screen.queryByText(/not adjacent/i)).not.toBeInTheDocument()
   })
 
-  it('offers every version in both selects without rendering more than one comparison at a time', async () => {
+  // The comparison fetch itself failing (a genuinely unreachable API mid-comparison, distinct from
+  // both the initial inventory load and either designed refusal) is its own state -- this needed a
+  // dedicated fixture, since the "API cannot be reached" test below 404s the inventory fetch first
+  // and never reaches this branch at all.
+  it('states plainly when the comparison request itself fails, distinctly from either refusal', async () => {
+    stubFetch({ comparisonThrows: true })
+
+    render(<MonitorPage />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/could not reach the local api/i)
+    expect(screen.queryByText(/no comparable rule/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not adjacent/i)).not.toBeInTheDocument()
+  })
+
+  it('offers every version, numbered, in both selects without rendering more than one comparison at a time', async () => {
     stubFetch({})
 
     render(<MonitorPage />)
     await screen.findByText('41.8%')
 
     const beforeSelect = screen.getByRole('combobox', { name: 'Before' })
+    const afterSelect = screen.getByRole('combobox', { name: 'After' })
     expect(within(beforeSelect).getAllByRole('option')).toHaveLength(4)
+    expect(within(afterSelect).getAllByRole('option')).toHaveLength(4)
+
+    // Numbered by chronological position, and the last option names itself the most recent --
+    // the adjacency hint code review (round 2) asked for, since hashes alone give no way to tell
+    // which pairs are next to each other.
+    const options = within(afterSelect).getAllByRole('option')
+    expect(options[0]).toHaveTextContent('1. v1')
+    expect(options.at(-1)).toHaveTextContent('4. v4')
+    expect(options.at(-1)).toHaveTextContent(/most recent/i)
   })
 
   it('states plainly when the repository has fewer than two versions to compare', async () => {
@@ -150,6 +190,27 @@ describe('MonitorPage (FR-39, S-35, issue #43)', () => {
 
     expect(await screen.findByText(/not enough rule-set versions/i)).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Before' })).not.toBeInTheDocument()
+  })
+
+  // ApiHost.GetMonitorComparison refuses unconditionally, before checking adjacency or any rule,
+  // when the whole store resolves no repository at all -- a real scope GetRulesInventory happily
+  // serves (`repository: null`). Reaching this page's picker in that scope would otherwise produce a
+  // false "no comparable rule" explanation for every pair, since that refusal reason is genuinely
+  // unrelated to adjacency or the rule shape (code review, round 2).
+  it('states plainly when no repository is recorded, rather than attempting a comparison', async () => {
+    const noRepoVersion = { ...version('v1'), repository: null }
+    stubFetch({
+      inventory: inventoryWith({
+        selectedVersion: noRepoVersion,
+        availableVersions: [noRepoVersion, { ...version('v2'), repository: null }],
+      }),
+    })
+
+    render(<MonitorPage />)
+
+    expect(await screen.findByText(/no repository is recorded/i)).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Before' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/no comparable rule/i)).not.toBeInTheDocument()
   })
 
   it('renders its own message when the API cannot be reached', async () => {

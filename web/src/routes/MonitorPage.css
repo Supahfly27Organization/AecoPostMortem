@@ -29,9 +29,9 @@
 }
 
 /* Both refusals read as a stated fact, not an error -- the operator's own selection produced them,
-   there is nothing broken to alarm about. `role="status"` (an implicit live region) rather than
-   `role="alert"`, mirroring `DateRangeFilter`'s own distinction between a caller mistake and an
-   unreachable API. */
+   there is nothing broken to alarm about. `role="status"` (an implicit live region, announced
+   without stealing focus) rather than `role="alert"`, the same choice `Pager`'s own page-count
+   status and `DigestPage`'s `Updating…` note already make for a state that isn't an error. */
 .monitor-page__refusal {
   padding: 1rem;
   border: 1px dashed var(--rule-2);

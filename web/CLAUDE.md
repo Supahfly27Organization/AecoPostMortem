@@ -20,7 +20,7 @@ passing `--prefix`, for the same reason.
 | `src/AppStateBanner.tsx` | S-48 Scenarios 2 and 3: fetches `/api/app-state` and renders its diagnosis, distinctly per state — no-source-found, empty-store, and a fourth state (unreachable API) neither Gherkin scenario names but a real machine can hit |
 | `src/api/appState.ts` | the `AppStateReport`/`AppStateKind` shapes and `fetchAppState`, hand-kept in sync with `AecoPostMortem.Api.AppStateReport` (`src/AecoPostMortem.Api/AppStateReport.cs`) — no generated client exists yet |
 | `src/api/useAppState.ts` | the fetch-once-on-mount hook `AppStateBanner` reads; loading renders nothing rather than a message that might not apply a moment later |
-| `src/routes/ComingSoon.tsx` | the placeholder a surface with no real content yet renders — naming its own story and release rather than sharing one generic message. **Currently unreferenced**: all three surfaces are built as of S-22. Kept because the playbook below still points a new route at it, so the next one does not invent a second placeholder shape |
+| `src/routes/ComingSoon.tsx` | the placeholder a surface with no real content yet renders — naming its own story and release rather than sharing one generic message. **Currently unreferenced**: all four routed surfaces (Digest, Rules Inventory, session view, Monitor) are built as of the Monitor comparison's missing-door task. Kept because the playbook below still points a new route at it, so the next one does not invent a second placeholder shape |
 | `src/routes/RulesInventoryPage.tsx` | FR-40's real content (S-22, issue #35): one rule-set version's statements, each with exactly one status, its source file, its carrying sessions, its in-force window and its retirement — plus the version scope, the status breakdown and the two designed "no rules found" states. Fetches `/api/rules-inventory` via `useRulesInventory`. Mockup parity item #7 added a "Violations" column (`ViolationCountCell`): a Watched row's real count, a stated "No check built" for a Watched row whose matched shape has no orchestrator, or a plain dash for every non-Watched row — three visually distinct states, never one collapsed into another |
 | `src/api/rulesInventory.ts` | the `RulesInventoryEnvelope` shapes and `fetchRulesInventory`, hand-kept in sync with `AecoPostMortem.Api.RulesInventoryEnvelope` (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) — the same no-generated-client gap `api/appState.ts` documents. `VersionParameter` is the query parameter naming which version to render. Mockup parity item #7 added `RuleViolationCountEnvelope` (`counted`/`notAvailable`) and `RulesInventoryRowEnvelope.violationCount` |
 | `src/api/useRulesInventory.ts` | the fetch-per-`versionHash` hook `RulesInventoryPage` reads, mirroring `useSession`'s re-fetch-on-change shape rather than `useDigest`'s fetch-once |
@@ -42,8 +42,8 @@ passing `--prefix`, for the same reason.
 | `src/digest/RepositorySelector.tsx` | Scenario 3 / PRD Part 8 Q5: shows the selected repository and offers every available one — the seam for a later cross-repository view, not that view itself |
 | `src/api/monitor.ts` | FR-39's `MonitorComparisonEnvelope` shape and `fetchMonitorComparison`, hand-kept in sync with `AecoPostMortem.Api.MonitorComparisonEnvelope` (`src/AecoPostMortem.Api/MonitorComparisonEnvelope.cs`) — reuses `AdherenceFigure` from `digest.ts` and `RuleSetVersionEnvelope` from `rulesInventory.ts` rather than redeclaring either |
 | `src/digest/MonitorComparisonBlock.tsx` | FR-39 (S-35, issue #43): renders a `MonitorComparisonEnvelope` as two sides, Before and After, each an `AdherenceFigureBlock` preceded by its own session count at the identical visual weight (`adherence-figure__percentage`'s own class plus `data-emphasis="prominent"`) — Scenario 2's "as visible as the percentage". Mounted for real by `routes/MonitorPage.tsx` |
-| `src/api/useMonitorComparison.ts` | The Monitor comparison's own reachable-surface task: the fetch-per-`(before, after)` hook `MonitorPage` reads, mirroring `useRulesInventory`'s re-fetch-on-change shape. Resolves adjacency locally — against the identical ordered `availableVersions` list `Rules.RuleSetVersionAdjacency.RequireAdjacentPair` itself sorts by — *before* ever calling `fetchMonitorComparison`, so a non-adjacent pair never reaches the network (`'notAdjacent'`) and a 404 for a pair already confirmed adjacent is unambiguous (`'noComparableRule'`) — see the non-obvious decision below for why the server alone cannot be asked to distinguish the two |
-| `src/routes/MonitorPage.tsx` | The Monitor comparison's own reachable-surface task (FR-39, S-35, issue #43): a fourth routed page, `/monitor`. Fetches `/api/rules-inventory` (no version — the default fetch already carries the full, chronologically ordered `availableVersions`) via `useRulesInventory`, defaults to the two most recent versions, and offers two independent selects (`VersionPairPicker`) so the operator can freely choose any pair — including a deliberately non-adjacent one, to see the honest refusal. Renders `MonitorComparisonBlock` on success, and one of two distinct, stated refusal sentences otherwise — never a blank area for either |
+| `src/api/useMonitorComparison.ts` | The Monitor comparison's own reachable-surface task: the fetch-per-`(before, after)` hook `MonitorPage` reads, mirroring `useRulesInventory`'s re-fetch-on-change shape. Resolves adjacency locally — a real sort of `availableVersions` by `firstSessionStartedAt`, the identical key `Rules.RuleSetVersionAdjacency.RequireAdjacentPair` sorts by — *before* ever calling `fetchMonitorComparison`, so a non-adjacent pair never reaches the network (`'notAdjacent'`) and a 404 for a pair already confirmed adjacent is unambiguous (`'noComparableRule'`) — see the non-obvious decision below for why the server alone cannot be asked to distinguish the two, and for the code-review round that made the sort real rather than a trust in array order |
+| `src/routes/MonitorPage.tsx` | The Monitor comparison's own reachable-surface task (FR-39, S-35, issue #43): a fourth routed page, `/monitor`. Fetches `/api/rules-inventory` (no version — the default fetch already carries the full, chronologically ordered `availableVersions`) via `useRulesInventory`, defaults to the two most recent versions (derived at render time, not via an effect), and offers two independent, numbered selects (`VersionPairPicker`/`VersionSelect`) so the operator can freely choose any pair — including a deliberately non-adjacent one, to see the honest refusal. States a distinct message when the selected repository is `null` (no repository recorded anywhere in the store) *before* ever reaching `useMonitorComparison`, since that scope's own 404 would otherwise be mislabelled `'noComparableRule'`. Renders `MonitorComparisonBlock` on success, and one of three distinct, stated states otherwise (not adjacent / no comparable rule / unreachable API) — never a blank area for any of them |
 | `src/api/session.ts` | the `SessionEnvelope`/`SessionMasthead`/`SessionTapeStep`/`SessionFindingChip`/`SessionRecordingStatus` shapes and `fetchSession`, hand-kept in sync with `AecoPostMortem.Api.SessionEnvelope` (`src/AecoPostMortem.Api/SessionEnvelope.cs`). FR-21 part 2 of 3 (S-52, issue #16) added `ThinkingEnvelope`/`RawStepEventEnvelope`/`StepEvidenceEnvelope` and `fetchStepEvidence`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope`; FR-21 part 3 of 3 (S-53, issue #17) added `SessionRecordingStatus`; FR-22 (S-09, issue #18) added `AgentOutcome`, `SubagentOutputEnvelope` and `SessionAgentLane`, plus the required `SessionEnvelope.lanes` field; FR-23 (S-10, issue #19) added `ModelReasoningReadability` and `ThinkingEnvelope.Unavailable.readabilityByModel` (optional, unlike the server's `required`-but-nullable field, so pre-existing test literals still type-check). Mockup parity item #14 added `SessionMasthead.startedAt`/`.endedAt`, mirroring `AecoPostMortem.Api.SessionMastheadEnvelope`'s own two new fields. Mockup parity item #17 added `SessionTapeStep.findings?: FindingEnvelope[]`, mirroring `AecoPostMortem.Api.SessionTapeStepEnvelope.Findings` — deliberately `?:` (optional) rather than a required field the way the server's own field is: the server always sends it, but three engineers' worktrees touch `Tape.test.tsx`'s many literal step fixtures this same round, and a required field would force an edit to every one of them for a field their own tests never exercise (see the note below). A tool call's own result added `StepEvidenceEnvelope.result: RawStepEventEnvelope`, mirroring `AecoPostMortem.Api.StepEvidenceEnvelope.Result` — required, matching the server's own `required`ness (this file is not touched by other concurrent worktrees the way `Tape.test.tsx`'s fixtures are), reusing the identical `RawStepEventEnvelope` union rather than a new type. What triggered a hook added `SessionTapeStep.triggeredBy?: string \| null` (optional, the same "existing test literals still type-check" convention `promptText`/`findings`/`thinking` already establish), plus `HookTriggerArguments`/`HookTriggerEnvelope` and the required `StepEvidenceEnvelope.trigger: HookTriggerEnvelope`, mirroring `AecoPostMortem.Api.HookTriggerArguments`/`HookTriggerEnvelope`/`StepEvidenceEnvelope.Trigger` — see `AecoPostMortem.Api/CLAUDE.md`'s matching non-obvious decision for the full shape and the real-corpus verification behind it |
 | `src/api/useSession.ts` | the fetch-per-`sessionId` hook `SessionPage` reads; loading renders nothing, an error (404 or unreachable API) is one explicit state |
 | `src/api/useStepEvidence.ts` | FR-21 part 2 of 3 (S-52, issue #16): the fetch-per-`(sessionId, stepId, kind)` hook the inspector reads once a step is selected, mirroring `useSession`'s loading/error/loaded shape |
@@ -320,27 +320,64 @@ wire (`AecoPostMortem.Api/CLAUDE.md`'s `GetMonitorComparison` remarks). The task
 comparison its first real door had two ways to close that gap: widen the server's response to carry
 a reason, or resolve the ambiguity entirely on the client. This picked the second, deliberately —
 `api/useMonitorComparison.ts`'s `isAdjacent` re-implements the identical adjacency check
-`Rules.RuleSetVersionAdjacency.RequireAdjacentPair` performs server-side (immediately-next-to-each-
-other in the same ordered `availableVersions` list, itself sorted the identical way
-`RuleSetVersioning.Compute` orders a repository's own versions — `AecoPostMortem.Rules/CLAUDE.md`'s
-own remarks on the PR #108/#112 chronology fix) against the exact list `RulesInventoryPage` already
-fetches, and runs it *before* ever calling `fetchMonitorComparison`. A pair the check calls
-non-adjacent therefore never reaches the network at all (`'notAdjacent'`, confirmed via
-`read_network_requests` in a real browser: zero `/api/monitor-comparison` calls), and a 404 for a
-pair the check already confirmed adjacent can only be the other refusal (`'noComparableRule'`) — the
-request that would have produced the first kind of 404 was structurally never sent.
+`Rules.RuleSetVersionAdjacency.RequireAdjacentPair` performs server-side: sorted by
+`RuleSetVersionEnvelope.firstSessionStartedAt` (ordinal string comparison), tied-broken by
+`firstSessionId` — a real sort over `availableVersions`, computed fresh from that array every time,
+never a trust that the array's own order already matches. A pair the check calls non-adjacent
+therefore never reaches the network at all (`'notAdjacent'`, confirmed via `read_network_requests`
+in a real browser: zero `/api/monitor-comparison` calls), and a 404 for a pair the check already
+confirmed adjacent can only be the other refusal reachable through this UI (`'noComparableRule'`) —
+the request that would have produced the first kind of 404 was structurally never sent.
 
-This was the smaller, more honest change available: it needed no change to `ApiHost`,
-`MonitorComparisonEnvelope`, or any C# test, and it does not risk the two sides' adjacency logic ever
-disagreeing, since the client's own check is a direct port of the server's rather than a heuristic
-guess at "probably adjacent." The trade-off is real and stated here rather than hidden: if a future
-change ever moves `RuleSetVersionAdjacency`'s own ordering rule (the same kind of defect PR #108 once
-shipped, `AecoPostMortem.Rules/CLAUDE.md`), `isAdjacent` has to be updated to match by hand — there is
-no shared code path enforcing the two stay identical, only this comment and `useMonitorComparison.
-test.ts`'s own coverage of both the adjacent and non-adjacent cases. Widening the server's response
-with an explicit reason field remains the more robust fix if a second client (a future CLI report, a
-second frontend) ever needs the same distinction without re-deriving it — deliberately deferred, not
-proposed as out of scope by oversight.
+This was the smaller, more honest change available: it needed no change to `MonitorComparisonEnvelope`
+or any C# test beyond one new field, and it does not risk the two sides' adjacency logic ever
+disagreeing, since the client's own check is a real port of the server's rather than a heuristic guess
+at "probably adjacent." Widening the server's response with an explicit reason field remains the more
+robust fix if a second client (a future CLI report, a second frontend) ever needs the same distinction
+without re-deriving it — deliberately deferred, not proposed as out of scope by oversight.
+
+**Code review (round 2) caught three real gaps in this design's first pass, all fixed in the same
+round rather than a later story:**
+
+1. **The adjacency port initially trusted array order, not real chronology.** The first version of
+   `isAdjacent` compared array *position* only, silently assuming `availableVersions` always arrived
+   pre-sorted — a claim this file's own prose asserted but nothing on the TypeScript side enforced,
+   since the wire envelope carried no sort key at all. `RuleSetVersionEnvelope.firstSessionStartedAt`
+   (`src/AecoPostMortem.Api/RulesInventoryEnvelope.cs`) is the fix — `Rules.RuleSetVersion` already
+   carried the field (the PR #108/#112 chronology fix, `AecoPostMortem.Rules/CLAUDE.md`), it simply
+   never travelled onto the wire before this task. `isAdjacent` now sorts a copy of the array by that
+   field before checking indices, so the claim "a real port, not a trust" is now literally true, and
+   `useMonitorComparison.test.ts`'s `judges adjacency by real chronological order, not by the array
+   order it is handed` hands the hook a deliberately scrambled array to prove it.
+
+2. **`'noComparableRule'` had one real, reachable mislabel: no repository resolved at all.**
+   `ApiHost.GetMonitorComparison` refuses unconditionally, before checking adjacency or any rule,
+   when the whole store resolves no repository (`repositoryScope.SelectedRepository is null`) — a
+   real scope `GetRulesInventory` happily serves (`RuleSetVersionEnvelope.repository: null`, "no
+   recorded repository" in `RulesInventoryPage`). Reaching this page's picker in that scope would
+   have fired a real request and mislabelled every resulting 404 as "no comparable rule," a false
+   explanation neither this hook nor the page could actually verify. `MonitorPage.tsx` now checks
+   `inventory.selectedVersion.repository === null` and states that fact plainly, before ever reaching
+   `useMonitorComparison` with a real selection — the third, structurally unreachable-from-the-UI 404
+   cause is now genuinely unreachable, not merely assumed to be.
+
+3. **The array-identity dependency in `useMonitorComparison`'s effect was a foot-gun waiting for a
+   second caller.** The first version depended on `availableVersions` by reference — safe only
+   because `MonitorPage.tsx` had to introduce a module-level stable `NoVersions` constant to avoid an
+   infinite render loop a fresh `[]` literal would otherwise cause. `useMonitorComparison` now computes
+   `adjacent` (a plain boolean) during render and depends on that instead of the array itself —
+   `NoVersions` is gone entirely, and no future caller passing a freshly-constructed array can
+   reintroduce the loop, since the effect no longer looks at the array's identity at all.
+
+`MonitorPage.tsx` was also simplified in the same round, beyond what review asked for: the
+`useEffect` + `beforeHash !== null || afterHash !== null` guard that used to set the default pair
+once is gone, replaced by deriving `defaultBeforeHash`/`defaultAfterHash` at render time
+(`beforeHash ?? defaultBeforeHash`) — an explicit operator selection always wins, and there is no
+render where the two selects can show a stale or mismatched default the way an effect-driven one
+briefly could. `VersionPairPicker`'s two option lists are also numbered by chronological position now
+(`1.`, `2.`, …, with `— most recent` on the last), the same "hashes are opaque without a marker"
+reasoning `RulesInventoryPage`'s own single picker already applies — review named this the whole
+premise of the page (adjacency) being otherwise undiscoverable from two bare hash lists.
 
 ### No status count is styled as a problem count
 
@@ -926,7 +963,11 @@ the same real 2-of-22 "no comparable rule" pair, selected via the two dropdowns,
 sentence; and a deliberately non-adjacent pair (picked freely from the two dropdowns) as "not
 adjacent," with `read_network_requests` confirming zero `/api/monitor-comparison` calls for that
 last case — the client-side adjacency check works as designed, never asking the server a question it
-can already answer itself.
+can already answer itself. The third designed state (`MonitorPage`'s "no repository is recorded"
+message, added in code review round 2) has no real-corpus case to trigger it against — every session
+in the live reference corpus resolves a repository — so it is verified only at the unit level
+(`MonitorPage.test.tsx`'s dedicated fixture), the same "mechanism real, corpus doesn't happen to
+exercise it yet" pattern this project has hit before for other genuinely rare states.
 
 Mockup parity item #14 added the session masthead's own real wall-clock start→end range: `Masthead`
 gained a new "Wall clock" field (`formatWallClockRange`, above `Elapsed`), reading `startedAt`/

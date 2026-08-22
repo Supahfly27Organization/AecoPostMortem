@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { AppStateRoute, type AppStateReport } from './api/appState'
 import { DigestRoute } from './api/digest'
+import { MonitorComparisonRoute, type MonitorComparisonEnvelope } from './api/monitor'
 import { RulesInventoryRoute, type RulesInventoryEnvelope } from './api/rulesInventory'
 
 /** S-48, Scenario 1: "The three surfaces are routable." Every route resolves under a shared
@@ -18,6 +19,7 @@ describe('App routing', () => {
       hash: 'hash-1',
       firstSessionId: 'session-1',
       lastSessionId: 'session-3',
+      firstSessionStartedAt: '2026-05-01T09:00:00Z',
       sessionCount: 3,
     },
     availableVersions: [
@@ -26,7 +28,16 @@ describe('App routing', () => {
         hash: 'hash-1',
         firstSessionId: 'session-1',
         lastSessionId: 'session-3',
+        firstSessionStartedAt: '2026-05-01T09:00:00Z',
         sessionCount: 3,
+      },
+      {
+        repository: 'supahfly27/UpFront',
+        hash: 'hash-2',
+        firstSessionId: 'session-4',
+        lastSessionId: 'session-7',
+        firstSessionStartedAt: '2026-05-23T09:00:00Z',
+        sessionCount: 4,
       },
     ],
     state: 'Listed',
@@ -46,6 +57,35 @@ describe('App routing', () => {
     statusCounts: { watched: 1, checkableNotYetBuilt: 0, notCheckable: 0, notARule: 0, total: 1 },
   }
 
+  const comparison: MonitorComparisonEnvelope = {
+    beforeVersion: inventory.availableVersions[0],
+    afterVersion: inventory.availableVersions[1],
+    before: {
+      ruleVersion: { repository: 'supahfly27/UpFront', hash: 'hash-1' },
+      adherent: { operandText: 'rg', layer: 'exactToolName', callCount: 23 },
+      divergent: [{ operandText: 'grep', layer: 'exactToolName', callCount: 32 }],
+      operands: [
+        { operandText: 'rg', layer: 'exactToolName', callCount: 23 },
+        { operandText: 'grep', layer: 'exactToolName', callCount: 32 },
+      ],
+      adherentCalls: 23,
+      totalCalls: 55,
+      percentage: 41.8,
+    },
+    after: {
+      ruleVersion: { repository: 'supahfly27/UpFront', hash: 'hash-2' },
+      adherent: { operandText: 'rg', layer: 'exactToolName', callCount: 76 },
+      divergent: [{ operandText: 'grep', layer: 'exactToolName', callCount: 30 }],
+      operands: [
+        { operandText: 'rg', layer: 'exactToolName', callCount: 76 },
+        { operandText: 'grep', layer: 'exactToolName', callCount: 30 },
+      ],
+      adherentCalls: 76,
+      totalCalls: 106,
+      percentage: 71.7,
+    },
+  }
+
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
@@ -56,15 +96,20 @@ describe('App routing', () => {
           return new Response(JSON.stringify(ready), { status: 200 })
         }
 
+        if (url.includes(MonitorComparisonRoute)) {
+          // Routing only cares that MonitorPage renders its own content for a real comparison.
+          return new Response(JSON.stringify(comparison), { status: 200 })
+        }
+
         if (url.includes(RulesInventoryRoute)) {
-          // No real /api/rules-inventory endpoint exists yet (web/src/api/rulesInventory.ts) —
-          // routing only cares that RulesInventoryPage renders its own content.
+          // Routing only cares that RulesInventoryPage/MonitorPage render their own content.
           return new Response(JSON.stringify(inventory), { status: 200 })
         }
 
         if (url.includes(DigestRoute)) {
-          // No real /api/digest endpoint exists yet (web/src/api/digest.ts) — routing only cares
-          // that DigestPage renders its own content, not that a digest loads successfully here.
+          // /api/digest is served for real (S-36), but this suite only cares that DigestPage
+          // renders its own content at the right route — a 404 here keeps that assertion (the
+          // heading) independent of a digest actually loading successfully.
           return new Response('', { status: 404 })
         }
 
@@ -159,7 +204,21 @@ describe('App routing', () => {
     expect(await screen.findByRole('region', { name: /rule-set version/i })).toHaveTextContent('hash-1')
   })
 
-  it('exposes navigation to the Digest and Rules Inventory from every route', () => {
+  // FR-39 (S-35, issue #43): the Monitor comparison, previously built on both sides but reachable
+  // from neither the nav nor any route — see `routes/MonitorPage.tsx`'s own doc comment.
+  it('reaches the Monitor comparison at /monitor', async () => {
+    render(
+      <MemoryRouter initialEntries={['/monitor']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Monitor' })).toBeInTheDocument()
+    expect(await screen.findByText('41.8%')).toBeInTheDocument()
+    expect(screen.getByText('71.7%')).toBeInTheDocument()
+  })
+
+  it('exposes navigation to the Digest, Rules Inventory and Monitor from every route', () => {
     render(
       <MemoryRouter initialEntries={['/rules']}>
         <App />
@@ -169,6 +228,7 @@ describe('App routing', () => {
     const nav = screen.getByRole('navigation', { name: 'Surfaces' })
     expect(nav).toHaveTextContent('Digest')
     expect(nav).toHaveTextContent('Rules Inventory')
+    expect(nav).toHaveTextContent('Monitor')
     expect(nav).not.toHaveTextContent('Session view')
   })
 })

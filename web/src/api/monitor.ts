@@ -3,11 +3,14 @@
 // in sync until a generated client exists -- the same gap `web/src/api/appState.ts`, `digest.ts` and
 // `rulesInventory.ts` document.
 //
-// `/api/monitor-comparison` is not served by `ApiHost` yet: resolving a whole store's RawEvents into
-// SessionRuleSets at scale, then picking the two adjacent versions and the operand pair to compare, is
-// wiring no story has done (the same not-yet-wired gap `/api/digest` and `/api/rules-inventory`
-// document). `fetchMonitorComparison` targets the route ahead of it, the same seam those two
-// established.
+// `/api/monitor-comparison` is served for real by `ApiHost.GetMonitorComparison` (piece 4, wired in
+// PR #108, its version-ordering defect fixed in PR #112) -- resolving a whole store's RawEvents into
+// SessionRuleSets, then picking a real PreferAOverB statement and a real ToolInvocationShape corpus
+// per side. `routes/MonitorPage.tsx` (`web/CLAUDE.md`) is the caller: it fetches this route through
+// `api/useMonitorComparison.ts`'s hook, which resolves the endpoint's own two distinct refusals
+// (a non-adjacent pair vs. an adjacent pair with no comparable rule -- both collapse to a bare 404 on
+// the wire, `AecoPostMortem.Api/CLAUDE.md`'s `GetMonitorComparison` remarks) before ever calling
+// `fetchMonitorComparison` below.
 
 import type { AdherenceFigure } from './digest'
 import type { RuleSetVersionEnvelope } from './rulesInventory'
@@ -29,7 +32,7 @@ export interface MonitorComparisonEnvelope {
   after: AdherenceFigure
 }
 
-/** Throws on a non-2xx response or a network failure; a future `useMonitorComparison` hook turns
+/** Throws on a non-2xx response or a network failure; `api/useMonitorComparison.ts`'s hook turns
  * that into a state a component can render, the same shape `useDigest`/`useRulesInventory` use. */
 export async function fetchMonitorComparison(
   before: string,

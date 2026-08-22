@@ -11,6 +11,7 @@ const referenceEdit: MonitorComparisonEnvelope = {
     hash: '1a47450a',
     firstSessionId: 's1',
     lastSessionId: 's3',
+    firstSessionStartedAt: '2026-05-01T09:00:00Z',
     sessionCount: 3,
   },
   afterVersion: {
@@ -18,6 +19,7 @@ const referenceEdit: MonitorComparisonEnvelope = {
     hash: '9579a981',
     firstSessionId: 's4',
     lastSessionId: 's7',
+    firstSessionStartedAt: '2026-05-23T09:00:00Z',
     sessionCount: 4,
   },
   before: {

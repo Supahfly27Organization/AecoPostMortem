@@ -13,6 +13,7 @@ const olderVersion = {
   hash: 'hash-older',
   firstSessionId: 'session-1',
   lastSessionId: 'session-3',
+  firstSessionStartedAt: '2026-05-01T09:00:00Z',
   sessionCount: 3,
 }
 
@@ -21,6 +22,7 @@ const newerVersion = {
   hash: 'hash-newer',
   firstSessionId: 'session-4',
   lastSessionId: 'session-7',
+  firstSessionStartedAt: '2026-05-23T09:00:00Z',
   sessionCount: 4,
 }
 

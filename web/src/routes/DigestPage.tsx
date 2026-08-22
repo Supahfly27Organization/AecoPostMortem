@@ -73,16 +73,15 @@ export function DigestPage() {
   // this story implements the default and keeps the control itself real and selectable.
   const displayedScope = { ...scope, selectedRepository: pendingRepository ?? scope.selectedRepository }
 
-  // Code review Important #3: every check reports `Ran` unconditionally, even over a population of
-  // zero (a pre-existing fact this task does not change — see `Api/CLAUDE.md`'s own remarks on the
-  // `A_range_matching_zero_sessions_serves_an_empty_but_honest_scope` test). A date range that
-  // matches no sessions in the selected repository would otherwise render "Every check ran and
-  // found nothing." and a clean-checks grid reading "0 found · 0 checked" — indistinguishable from
-  // a genuinely clean corpus, exactly the "clean" vs. "never looked" conflation PRD §3.9 names. This
-  // state is only reachable through an *active* filter: an unfiltered digest with a truly empty
-  // repository scope is a different, pre-existing case this task does not touch.
+  // "Nothing was in scope" is now a served fact (`DigestState.NothingInScope`), not something this
+  // page derives. It used to be `rangeActive && scope.sessionIds.length === 0` — a client-side
+  // derivation that necessarily missed the unfiltered case (an empty store, or a repository carrying
+  // no sessions), which therefore still rendered "Every check ran and found nothing." about a scope
+  // nothing ever looked at. `rangeActive` survives only to choose *which* sentence to say: the cause
+  // differs, and naming the real one is the difference between an operator clearing a filter and an
+  // operator wondering why their corpus looks clean.
   const rangeActive = range.from !== null || range.to !== null
-  const noSessionsInRange = rangeActive && scope.sessionIds.length === 0
+  const nothingInScope = digest.state === 'NothingInScope'
 
   // Clamped rather than trusted outright: a stale `page` (e.g. a shrinking list under a new range,
   // even though `applyRange` already resets to 1) never indexes past the end of what is actually
@@ -128,20 +127,25 @@ export function DigestPage() {
           Analysis is incomplete — ingestion is still under way, so this ranking is not final.
         </p>
       )}
-      {digest.state === 'Analyzed' && noSessionsInRange && (
+      {nothingInScope && rangeActive && (
         <p className="digest-page__state">
           No sessions in the selected repository started in the applied date range — nothing was
           looked at, which is a different fact from every check running clean.
         </p>
       )}
+      {nothingInScope && !rangeActive && (
+        <p className="digest-page__state">
+          No sessions in the selected repository have been ingested — nothing was looked at, which is
+          a different fact from every check running clean.
+        </p>
+      )}
       {digest.state === 'Analyzed' &&
-        !noSessionsInRange &&
         digest.rankedFindings.length === 0 &&
         digest.inferredFindings.length === 0 && (
           <p className="digest-page__state">Every check ran and found nothing.</p>
         )}
 
-      {!noSessionsInRange && (
+      {!nothingInScope && (
         <>
           <ul className="digest-page__findings">
             {pagedFindings.map((finding) => (

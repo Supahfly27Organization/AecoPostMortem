@@ -38,7 +38,10 @@ export type OperatorResponse = 'ignored' | 'accepted' | 'rejected'
 
 /** `DigestState` carries its own `[JsonConverter(typeof(JsonStringEnumConverter))]` with no naming
  * policy (`DigestEnvelope.cs`), so it serialises as its exact member name, not camelCase. */
-export type DigestState = 'NotYetAnalyzed' | 'Incomplete' | 'Analyzed'
+/** Mirrors `AecoPostMortem.Findings.DigestState`. `NothingInScope` (the analysis scope itself held
+ * no sessions) is distinct from `Analyzed` with no findings (every check ran over real sessions and
+ * found nothing) — the clean-versus-never-looked distinction this whole product exists to draw. */
+export type DigestState = 'NotYetAnalyzed' | 'Incomplete' | 'Analyzed' | 'NothingInScope'
 
 /**
  * Mockup parity item #15: `RuleCoverageStatusEnvelope`'s closed two-shape union

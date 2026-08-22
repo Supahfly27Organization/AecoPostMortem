@@ -35,6 +35,33 @@ public sealed class ProcessDigestTests
     // RepositoryScope they were paired with).
     static CheckRegistry EmptyRegistry() => new() { Entries = [], SessionsInScope = 2 };
 
+    /// <summary>A scope with no sessions in it at all — a date range matching none, or a repository
+    /// carrying none. The entries are still <see cref="CheckRunStatus.Ran"/>, because every real
+    /// orchestrator sets that unconditionally; that is exactly what makes this case indistinguishable
+    /// from a clean corpus without <see cref="CheckRegistry.SessionsInScope"/>.</summary>
+    static CheckRegistry EmptyScopeRegistry() => new()
+    {
+        Entries =
+        [
+            new CheckRegistryEntry
+            {
+                CheckId = "repeated-file-read",
+                Status = CheckRunStatus.Ran,
+                Population = 0,
+                FindingCount = 0,
+                Provenance = Provenance.Derived,
+            },
+        ],
+        SessionsInScope = 0,
+    };
+
+    static RepositoryScope EmptyScope() => new()
+    {
+        SelectedRepository = "aeco/AecoPostMortem",
+        AvailableRepositories = ["aeco/AecoPostMortem"],
+        SessionIds = [],
+    };
+
     static CheckRegistry RanCleanRegistry() => new()
     {
         Entries =
@@ -192,11 +219,19 @@ public sealed class ProcessDigestTests
         Assert.Equal(RuleCoverageStatus.NotYetAnalyzed, digest.Masthead.RuleCoverage);
     }
 
+    /// <summary>A scope holding real sessions that no check has run against yet. Named for the store
+    /// being empty until the <c>NothingInScope</c> state landed, which made that name wrong: a
+    /// genuinely empty store has <see cref="CheckRegistry.SessionsInScope"/> zero and now reads
+    /// <see cref="DigestState.NothingInScope"/> (and, through <c>ApiHost.GetDigest</c>, always did
+    /// reach that branch with a registry full of Ran entries — see
+    /// <c>A_scope_with_no_sessions_reads_nothing_in_scope_rather_than_analyzed</c>). What this still
+    /// proves is the contract-level distinction it was written for: no Ran entry means analysis has
+    /// not happened, which is not the same as it having happened and found nothing.</summary>
     [Fact]
-    public void An_empty_store_reads_as_not_yet_analyzed_not_as_finding_nothing()
+    public void A_scope_no_check_has_run_against_reads_as_not_yet_analyzed_not_as_finding_nothing()
     {
         // No check has ever run — CheckRegistry has no Ran entry.
-        var digest = ProcessDigest.Build(Counters(sessionCount: 0), EmptyRegistry(), [], SingleRepoScope());
+        var digest = ProcessDigest.Build(Counters(), EmptyRegistry(), [], SingleRepoScope());
 
         Assert.Equal(DigestState.NotYetAnalyzed, digest.State);
         Assert.Empty(digest.RankedFindings);
@@ -210,6 +245,67 @@ public sealed class ProcessDigestTests
 
         Assert.Equal(DigestState.Analyzed, digest.State);
         Assert.Empty(digest.RankedFindings);
+    }
+
+    /// <summary>The gap #144 closed for <c>SilentChecks</c> but deliberately left open on this type:
+    /// every check orchestrator sets <see cref="CheckRunStatus.Ran"/> unconditionally, so an analysis
+    /// scope with no sessions in it still produces a registry full of Ran entries and used to read
+    /// <see cref="DigestState.Analyzed"/> — "every check ran and found nothing" about a scope nothing
+    /// ever looked at, the exact clean-versus-never-looked conflation PRD §3.9 names.</summary>
+    [Fact]
+    public void A_scope_with_no_sessions_reads_nothing_in_scope_rather_than_analyzed()
+    {
+        var digest = ProcessDigest.Build(
+            Counters(sessionCount: 0),
+            EmptyScopeRegistry(),
+            [],
+            EmptyScope());
+
+        Assert.Equal(DigestState.NothingInScope, digest.State);
+    }
+
+    /// <summary>The distinction that makes this state worth having: a check whose own narrower
+    /// population is zero inside a real, non-empty scope is a genuine clean result, not "nothing was
+    /// looked at" — the same three-population-shapes investigation #144 recorded for
+    /// <c>SilentCheckEnvelope</c>, applied here.</summary>
+    [Fact]
+    public void A_checks_own_zero_population_inside_a_real_scope_still_reads_analyzed()
+    {
+        var registry = new CheckRegistry
+        {
+            Entries =
+            [
+                new CheckRegistryEntry
+                {
+                    CheckId = "phase-churn",
+                    Status = CheckRunStatus.Ran,
+                    Population = 0,
+                    FindingCount = 0,
+                    Provenance = Provenance.Derived,
+                },
+            ],
+            SessionsInScope = 2,
+        };
+
+        var digest = ProcessDigest.Build(Counters(), registry, [], SingleRepoScope());
+
+        Assert.Equal(DigestState.Analyzed, digest.State);
+    }
+
+    /// <summary>Precedence, the same "the more urgent, more specific claim wins" ordering this type
+    /// already applies to <see cref="DigestState.Incomplete"/> over
+    /// <see cref="DigestState.NotYetAnalyzed"/>: while ingestion is still running, an empty scope may
+    /// simply not have been filled yet, so nothing about it can be stated as final.</summary>
+    [Fact]
+    public void Incomplete_ingest_takes_precedence_over_an_empty_scope()
+    {
+        var digest = ProcessDigest.Build(
+            Counters(sessionCount: 0, ingestInProgress: true),
+            EmptyScopeRegistry(),
+            [],
+            EmptyScope());
+
+        Assert.Equal(DigestState.Incomplete, digest.State);
     }
 
     [Fact]

@@ -515,6 +515,32 @@ proves the "no scan" guarantee structurally, the same way `SuggestionRendererStr
 for an `IQueryable` or a `DbContext`, so a method that cannot accept a live data source cannot issue
 a query when it runs.
 
+### Three designed "nothing to show" states, and they do not collapse into each other
+
+`DigestState.NothingInScope` is the third, and it closes the half of the clean-versus-never-looked
+conflation #144 deliberately left open (`Api/CLAUDE.md`'s own `SilentCheckEnvelope.From` entry named
+it as a known remainder): the analysis scope itself held no sessions, so nothing was looked at. It is
+derived from `CheckRegistry.SessionsInScope == 0` — a field #144 already made required on the
+registry `Build` receives, so this needed no new parameter, only the fact being read.
+
+It sits **above** the `Any(Ran)` check on purpose. Every check orchestrator sets `CheckRunStatus.Ran`
+unconditionally, so an empty scope reaches `Build` with a registry full of clean entries and, before
+this state existed, read `Analyzed` — "every check ran and found nothing" about a scope nothing ever
+examined. It sits **below** `Incomplete` for the same reason `NotYetAnalyzed` does: while ingestion is
+running, an empty scope may simply not have been filled yet.
+
+Two consequences worth stating plainly rather than leaving to be rediscovered:
+
+- **A check's own zero `Population` is still `Analyzed`.** The distinction is the one #144 measured:
+  eight of the ten orchestrators count distinct sessions among their *own* candidates, which can
+  genuinely be zero inside a real, non-empty scope. Only `SessionsInScope` bounds "was the scope
+  itself empty", which is why this state keys on it and not on any entry's own population.
+- **`NotYetAnalyzed` has no production path, and did not have one before this change either.**
+  `ApiHost.BuildFindingsForScope` always registers all ten checks as `Ran`, so no digest served by
+  `GetDigest` has ever reached the no-Ran branch — which is precisely why an empty store used to
+  serve `Analyzed`. It remains a real contract-level state (`Build` is a public API with other
+  callers and tests), just not one this app's own endpoint produces.
+
 ### Two designed "nothing to show" states, and they do not collapse into each other
 
 `DigestState.NotYetAnalyzed` (no check has ever run — reusing `CheckRegistryEntry`'s own

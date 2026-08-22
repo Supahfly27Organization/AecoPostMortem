@@ -88,8 +88,16 @@ public abstract record RuleCoverageStatus
 /// (<see cref="MastheadCounters.IngestInProgress"/>). Takes precedence over
 /// <see cref="NotYetAnalyzed"/>: a mid-ingest corpus answers a different question than a corpus that
 /// was never analysed at all, and the two must not collapse into one when both happen to hold.</item>
-/// <item><see cref="Analyzed"/> — ingestion is complete and at least one check has run.
-/// <see cref="ProcessDigest.RankedFindings"/> is the final answer, even when it is empty.</item>
+/// <item><see cref="NothingInScope"/> — the analysis scope itself held no sessions
+/// (<see cref="CheckRegistry.SessionsInScope"/> is zero), so nothing was looked at. Distinct from
+/// <see cref="Analyzed"/> with no findings, which says every check ran over real sessions and found
+/// nothing — the clean-versus-never-looked conflation PRD §3.9 names. Takes precedence over
+/// <see cref="Analyzed"/> and <see cref="NotYetAnalyzed"/> alike: every check orchestrator sets
+/// <see cref="CheckRunStatus.Ran"/> unconditionally, so an empty scope always produces a registry
+/// full of Ran entries and would otherwise be indistinguishable from a clean corpus.</item>
+/// <item><see cref="Analyzed"/> — ingestion is complete, the scope held real sessions, and at least
+/// one check has run. <see cref="ProcessDigest.RankedFindings"/> is the final answer, even when it is
+/// empty.</item>
 /// </list>
 /// </summary>
 public enum DigestState
@@ -97,6 +105,11 @@ public enum DigestState
     NotYetAnalyzed,
     Incomplete,
     Analyzed,
+
+    /// <summary>Declared last so the three values that existed before it keep their ordinals — this
+    /// enum is serialised by name (<c>Api.DigestEnvelope.State</c>), so nothing on the wire depends
+    /// on the order, but a stored or logged ordinal elsewhere would.</summary>
+    NothingInScope,
 }
 
 /// <summary>
@@ -202,11 +215,19 @@ public sealed record ProcessDigest
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(repositoryScope);
 
+        // Ordered by "the more urgent, more specific claim wins" — the same precedence rule this
+        // type already applied to Incomplete over NotYetAnalyzed. Incomplete stays first: while
+        // ingestion is running, an empty scope may simply not have been filled yet, so nothing about
+        // it can be stated as final. NothingInScope then sits above the Ran check deliberately —
+        // every orchestrator registers Ran unconditionally, so an empty scope reaches here with a
+        // registry full of Ran entries and would otherwise read Analyzed.
         var state = counters.IngestInProgress
             ? DigestState.Incomplete
-            : checkRegistry.Entries.Any(entry => entry.Status == CheckRunStatus.Ran)
-                ? DigestState.Analyzed
-                : DigestState.NotYetAnalyzed;
+            : checkRegistry.SessionsInScope == 0
+                ? DigestState.NothingInScope
+                : checkRegistry.Entries.Any(entry => entry.Status == CheckRunStatus.Ran)
+                    ? DigestState.Analyzed
+                    : DigestState.NotYetAnalyzed;
 
         var ranked = findings
             .Where(finding => finding.Provenance != Provenance.Inferred)

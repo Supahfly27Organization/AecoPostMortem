@@ -453,8 +453,24 @@ public sealed class DigestEnvelopeTests
         Assert.Equal("absent", suggestion.GetProperty("state").GetString());
     }
 
+    /// <summary>
+    /// Two of the four states' conditions both hold for this fixture — no check has run
+    /// (<see cref="DigestState.NotYetAnalyzed"/>) and the scope held no sessions
+    /// (<see cref="DigestState.NothingInScope"/>) — and the more specific one wins, the same
+    /// precedence rule <see cref="ProcessDigest.Build"/> already applies to
+    /// <see cref="DigestState.Incomplete"/>: "nothing was in scope" explains *why* no check ran,
+    /// where the reverse says nothing about scope at all.
+    ///
+    /// This exact pairing is not reachable through <c>ApiHost.GetDigest</c> in either direction:
+    /// <c>BuildFindingsForScope</c> registers all ten checks as <see cref="CheckRunStatus.Ran"/>
+    /// unconditionally, so a real empty store arrives here with a full registry and zero
+    /// <c>SessionsInScope</c>. <see cref="DigestState.NotYetAnalyzed"/> therefore has no production
+    /// path today — a pre-existing fact this state did not create, and the reason an empty store used
+    /// to serve <see cref="DigestState.Analyzed"/> rather than the "not yet analysed" this test's own
+    /// name assumed.
+    /// </summary>
     [Fact]
-    public void An_empty_store_serialises_as_not_yet_analyzed()
+    public void An_empty_store_serialises_as_nothing_in_scope_the_more_specific_of_the_two_states_that_apply()
     {
         var digest = ProcessDigest.Build(
             new MastheadCounters
@@ -474,7 +490,7 @@ public sealed class DigestEnvelopeTests
 
         var envelope = DigestEnvelope.From(digest, FindingEnvelope.From);
 
-        Assert.Equal(DigestState.NotYetAnalyzed, envelope.State);
+        Assert.Equal(DigestState.NothingInScope, envelope.State);
         Assert.Empty(envelope.RankedFindings);
     }
 

@@ -31,6 +31,7 @@ public sealed class CheckRegistryTests
                     Provenance = Provenance.Derived,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         Assert.Equal(2, registry.Entries.Count);
@@ -105,5 +106,18 @@ public sealed class CheckRegistryTests
         };
 
         Assert.Equal(Provenance.Observed, entry.Provenance);
+    }
+
+    /// <summary>FR-42 (issue #46), the follow-on gap fixed here: <c>SessionsInScope</c> is the size of
+    /// the whole analysis scope every entry's own <c>Population</c> was drawn from — distinct from any
+    /// one check's narrower population — required the same "a caller-stated fact, never guessed"
+    /// discipline <see cref="CheckRegistryEntry.Provenance"/> already uses.</summary>
+    [Fact]
+    public void SessionsInScope_is_a_required_member()
+    {
+        var property = typeof(CheckRegistry).GetProperty(nameof(CheckRegistry.SessionsInScope));
+
+        Assert.NotNull(property);
+        Assert.NotNull(property!.GetCustomAttribute<RequiredMemberAttribute>());
     }
 }

@@ -445,20 +445,24 @@ that gets cut under pressure" — a client that only mounts the active panel cou
 later change that never mounts Raw at all if some future gate short-circuits before reaching it; a
 component tree where all three tabs unconditionally exist has no such gap to introduce by accident.
 
-### A finding chip's label is still `finding.recurrence.key` — `FindingRow`'s own label moved on, this one deliberately did not
+### A finding chip's label now reads `finding.headline`, matching `FindingRow`'s own move
 
-`FindingChips` (`routes/SessionPage.tsx`) renders `chip.finding.recurrence.key` as a session chip's
-visible label (FR-21 part 2 of 3), the same convention `digest/FindingRow.tsx` established for its
-own row before mockup parity item #5 (below) gave it a real `headline` field to read instead. The
-two surfaces now show two different labels for the same finding — a raw recurrence key on the chip
-row, a full written sentence on the digest row — a real, known divergence this story's own scope cut
-left open rather than a rendering bug: item #5's brainstorming pass scoped the change to
-`FindingRow.tsx`/`api/digest.ts` only ("does NOT need to touch `SessionPage.tsx`"), and `FindingChips`
-reads `SessionFindingChipEnvelope`, not `FindingEnvelope`, through `api/session.ts` rather than
-`api/digest.ts` — `SessionFindingChip.finding` does carry the same `FindingEnvelope` shape
-(`Api/CLAUDE.md`'s `SessionFindingChipEnvelope` remarks), including the new `headline` field, so
-pointing this chip at `chip.finding.headline` instead is a small, well-scoped follow-up whenever a
-story picks the chip row back up, not a new gap to close.
+`FindingChips` (`routes/SessionPage.tsx`) renders `chip.finding.headline` — the same full written
+sentence mockup parity item #5 (below) gave `digest/FindingRow.tsx`'s own row — rather than the bare
+`chip.finding.recurrence.key` it originally shipped with (FR-21 part 2 of 3). Item #5's own
+brainstorming pass had scoped its change to `FindingRow.tsx`/`api/digest.ts` only ("does NOT need to
+touch `SessionPage.tsx`"), leaving this chip row on the old convention as a real, known divergence;
+closing it needed no API change, since `FindingChips` reads `SessionFindingChipEnvelope` through
+`api/session.ts`, not `api/digest.ts`, and `SessionFindingChip.finding` already carried the same
+`FindingEnvelope` shape (`Api/CLAUDE.md`'s `SessionFindingChipEnvelope` remarks) — headline included
+— before this chip ever read it. The chip itself stays a compact control: `.session-chips__label`
+truncates a long sentence visually (`max-width`/`overflow: hidden`/`text-overflow: ellipsis`) and
+carries a `title` attribute repeating the same sentence for a hover tooltip, the identical pairing
+`session/Tape.tsx`'s `StepFlag` already uses for its own compact marker. The truncation is CSS-only —
+the `<span>`'s text content is the untruncated headline, so its accessible name (computed from that
+content, the "name from content" rule a plain text element gets for free, unlike the `role="img"`
+glyphs `SessionStrip`/`StepFlag` need an explicit `aria-label` to name at all) still carries the whole
+sentence to assistive technology regardless of the visual ellipsis.
 
 ### A missing wire field can hide even after its server-side story ships
 
@@ -781,7 +785,8 @@ violation) renders its own real sentence — `BannedToolFinding`/`UseAAfterBFind
 gap unrelated to this change, `AecoPostMortem.Api/CLAUDE.md`'s own status notes), so their headline
 text is proven only at the unit level, the same "mechanism real, corpus doesn't happen to exercise it
 yet" pattern those checks already carry. `FindingChips` (`routes/SessionPage.tsx`) was left
-unchanged, on purpose — see "A finding chip's label is still `finding.recurrence.key`" above.
+unchanged at the time, on purpose — since closed, see "A finding chip's label now reads
+`finding.headline`, matching `FindingRow`'s own move" above.
 
 Mockup parity item #6 (FR-42, issue #46, `docs/product-superpowers/discovery/2026-08-21-ui-mockup-
 parity.md`) added `digest/CleanChecks.tsx` and `api/digest.ts`'s `SilentCheckEnvelope`/
@@ -1142,3 +1147,19 @@ The key is therefore now free to be as opaque as identity requires. That is the 
 this codebase already draws elsewhere and had blurred here: `FindingEnvelope.Headline` carries
 legibility, `Recurrence.Key` carries uniqueness, and neither has to compromise for the other. The
 old key was the worst of both — it read as "turn 3" while not identifying the turn it named.
+
+### A stale note, corrected: the empty-repository-scope case is no longer entirely untouched
+
+The pager & date-range filter task's own "Code review round" note above (and the comment it left in
+`DigestPage.tsx`) called "an unfiltered digest with a truly empty repository scope" a different,
+pre-existing case that task did not touch. That is still literally true of this page's own rendering
+— an empty-scope unfiltered digest still shows "Every check ran and found nothing." (`DigestState.
+Analyzed`, no `noSessionsInRange` gate to suppress it, since that gate only fires for an *active*
+filter) — but a later task (the digest silent-check wire-contract fix, `AecoPostMortem.Api/CLAUDE.md`'s
+"`SilentCheckEnvelope.From` refuses on `CheckRegistry.SessionsInScope`...") closed the server-side half
+of exactly this case: `digest.silentChecks` is now genuinely `[]` for an empty-repository-scope
+unfiltered digest too, not ten `population: 0` "clean" entries — `<CleanChecks>` already rendered
+nothing for an empty list, so nothing here needed to change for that half to become honest. What is
+still open, precisely, is what that later task's own remarks record as a deliberate, separate
+remainder: `DigestState` itself carries no scope-size signal, so this exact case still says "found
+nothing" rather than a state naming that nothing was in scope to look at.

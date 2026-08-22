@@ -25,6 +25,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Inferred,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -59,6 +60,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Observed,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -86,6 +88,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Observed,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -109,6 +112,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Derived,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -134,6 +138,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Derived,
                 },
             ],
+            SessionsInScope = 40,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -183,6 +188,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Derived,
                 },
             ],
+            SessionsInScope = 470,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -216,6 +222,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Observed,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -244,6 +251,7 @@ public sealed class SilentCheckEnvelopeTests
                     Provenance = Provenance.Inferred,
                 },
             ],
+            SessionsInScope = 35,
         };
 
         var silent = SilentCheckEnvelope.From(registry);
@@ -251,5 +259,75 @@ public sealed class SilentCheckEnvelopeTests
         var entry = Assert.Single(silent);
         Assert.Equal(ProvenanceLabel.For(Provenance.Inferred), entry.ProvenanceLabel);
         Assert.Contains("hypothesis", entry.ProvenanceLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The follow-on gap this task closes (PR #138 only fixed this at the render layer,
+    /// `DigestPage.tsx` — a second client reading `/api/digest` directly still saw "ten checks ran
+    /// clean" for a date range matching zero sessions). Verified against the live corpus before this
+    /// fix: a range matching zero sessions served all ten checks as clean, each with `population: 0`
+    /// — indistinguishable, on the wire, from a genuinely clean corpus. `SessionsInScope == 0` is the
+    /// signal this surface refuses on: nothing was looked at, so no "ran clean" claim can be made for
+    /// any entry, regardless of what each one individually states.</summary>
+    [Fact]
+    public void No_checks_are_served_as_clean_when_the_analysis_scope_itself_had_zero_sessions()
+    {
+        var registry = new CheckRegistry
+        {
+            Entries =
+            [
+                new CheckRegistryEntry
+                {
+                    CheckId = "hook-failure",
+                    Status = CheckRunStatus.Ran,
+                    Population = 0,
+                    FindingCount = 0,
+                    Provenance = Provenance.Observed,
+                },
+                new CheckRegistryEntry
+                {
+                    CheckId = "banned-tool-used",
+                    Status = CheckRunStatus.Ran,
+                    Population = 0,
+                    FindingCount = 0,
+                    Provenance = Provenance.Derived,
+                },
+            ],
+            SessionsInScope = 0,
+        };
+
+        var silent = SilentCheckEnvelope.From(registry);
+
+        Assert.Empty(silent);
+    }
+
+    /// <summary>The narrower distinction this task's own design question turned on: a specific check's
+    /// own population can genuinely be zero within a real, non-empty analysis scope (e.g. no session
+    /// in scope ever declared an intent, so `phase-churn` alone finds no candidates) without the
+    /// corpus itself being unanalysed. That is a real, checked zero — still honestly served, not
+    /// swept up by a blanket `Population == 0` filter the way the zero-scope case above is.</summary>
+    [Fact]
+    public void A_single_checks_own_zero_population_still_serves_as_clean_when_real_sessions_were_in_scope()
+    {
+        var registry = new CheckRegistry
+        {
+            Entries =
+            [
+                new CheckRegistryEntry
+                {
+                    CheckId = "phase-churn",
+                    Status = CheckRunStatus.Ran,
+                    Population = 0,
+                    FindingCount = 0,
+                    Provenance = Provenance.Derived,
+                },
+            ],
+            SessionsInScope = 24,
+        };
+
+        var silent = SilentCheckEnvelope.From(registry);
+
+        var entry = Assert.Single(silent);
+        Assert.Equal("phase-churn", entry.CheckId);
+        Assert.Equal(0, entry.Population);
     }
 }

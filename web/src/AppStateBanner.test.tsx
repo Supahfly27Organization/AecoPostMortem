@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { AppStateRoute, type AppStateReport } from './api/appState'
 import { DigestRoute } from './api/digest'
+import { notifyStoreChanged } from './api/storeChangeEvents'
 
 function respondWith(report: AppStateReport) {
   vi.stubGlobal(
@@ -82,6 +83,43 @@ describe('Once the app is ready, the diagnosis banner steps aside', () => {
   it('renders no banner once the store has been ingested and a source exists', async () => {
     respondWith({ kind: 'ready', message: 'Ready.', fixCommand: null })
     renderApp()
+
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe('A completed write on the Settings page refreshes this banner (storeChangeEvents)', () => {
+  it('refetches app-state when the store-changed event fires, without a route change', async () => {
+    let call = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+
+        if (url.includes(AppStateRoute)) {
+          call += 1
+          const report: AppStateReport =
+            call === 1
+              ? { kind: 'emptyStore', message: 'Nothing has been ingested yet.', fixCommand: 'aecopostmortem ingest' }
+              : { kind: 'ready', message: 'Ready.', fixCommand: null }
+          return new Response(JSON.stringify(report), { status: 200 })
+        }
+
+        if (url.includes(DigestRoute)) {
+          return new Response('', { status: 404 })
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`)
+      }),
+    )
+
+    renderApp()
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Nothing has been ingested yet.')
+
+    notifyStoreChanged()
 
     await waitFor(() => {
       expect(screen.queryByRole('status')).not.toBeInTheDocument()

@@ -218,7 +218,7 @@ describe('App routing', () => {
     expect(screen.getByText('71.7%')).toBeInTheDocument()
   })
 
-  it('exposes navigation to the Digest, Rules Inventory and Monitor from every route', () => {
+  it('exposes navigation to the Digest, Rules Inventory, Monitor and Settings from every route', () => {
     render(
       <MemoryRouter initialEntries={['/rules']}>
         <App />
@@ -229,6 +229,45 @@ describe('App routing', () => {
     expect(nav).toHaveTextContent('Digest')
     expect(nav).toHaveTextContent('Rules Inventory')
     expect(nav).toHaveTextContent('Monitor')
+    expect(nav).toHaveTextContent('Settings')
     expect(nav).not.toHaveTextContent('Session view')
+  })
+
+  it('reaches the Settings page at /settings', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.includes(AppStateRoute)) {
+          return new Response(JSON.stringify(ready), { status: 200 })
+        }
+
+        if (url.includes('/api/settings')) {
+          return new Response(
+            JSON.stringify({
+              storePath: 'C:\\store.db',
+              storeExists: true,
+              storeSizeBytes: 1024,
+              copilotSourceRoot: 'C:\\.copilot\\session-state',
+              copilotSourceFound: true,
+              excludedRoots: [],
+            }),
+            { status: 200 },
+          )
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`)
+      }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run ingest' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run rebuild' })).toBeInTheDocument()
   })
 })

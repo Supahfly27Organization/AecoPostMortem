@@ -31,7 +31,7 @@ volume control (FR-10, FR-12, FR-13), rule-statement resolution from the store (
 | `SkillBuilder.cs` | builds one `Data.Execution.Skill` row per `skill.invoked` event, keyed by that event's own envelope id |
 | `HookBuilder.cs` | builds one `Data.Execution.Hook` row per `hook.start`/`hook.end` pair, matched by their shared `data.hookInvocationId` |
 | `PermissionBuilder.cs` | builds one `Data.Execution.Permission` row per `permission.requested`/`permission.completed` pair, matched by their shared `data.requestId` — the pair's own natural key, unlike `Hook`'s `hookInvocationId` correlation |
-| `NormalizedLayerWriter.cs` | ties `SessionBuilder`, `ExecutionRecordBuilder`, `SkillBuilder`, `HookBuilder` and `PermissionBuilder` together: derives one session's rows across seven of the eight derived tables, deleting whatever that session already carried first — what `ingest` and `rebuild` both call |
+| `NormalizedLayerWriter.cs` | ties `SessionBuilder`, `ExecutionRecordBuilder`, `SkillBuilder`, `HookBuilder` and `PermissionBuilder` together: derives one session's rows across seven of the eight derived tables, deleting whatever that session already carried first — what `ingest` and `rebuild` both call. `RebuildAll` (Settings surface task) is the one shared definition of "rebuild" itself — `Data.Execution.DerivedSchema.Rebuild` plus a loop over `Derive` for every distinct session RAW holds — factored out of what used to be `AecoPostMortem.Cli.CommandRunner.Rebuild`'s own inline sequence so `AecoPostMortem.Api`'s `POST /api/rebuild` (`Api/CLAUDE.md`) can call the identical sequence rather than a second copy |
 
 ## References
 

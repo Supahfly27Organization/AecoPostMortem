@@ -4,6 +4,7 @@ import { DigestPage } from './routes/DigestPage'
 import { MonitorPage } from './routes/MonitorPage'
 import { RulesInventoryPage } from './routes/RulesInventoryPage'
 import { SessionPage } from './routes/SessionPage'
+import { SettingsPage } from './routes/SettingsPage'
 
 /** Every URL this app does not route, including the bare `/sessions` this change retired — an
  * operator arriving from a stale bookmark or a hand-typed URL gets a stated dead end and a way
@@ -18,11 +19,13 @@ function NotFound() {
   )
 }
 
-/** S-48's three routable surfaces (Scenario 1), plus FR-39's Monitor comparison (a fourth,
- * `/monitor` — see `MonitorPage.tsx`'s own doc comment for why it is a routed page rather than a
- * section on the Digest or the Rules Inventory), each under the shared shell so the app-state
- * banner and the navigation are present regardless of which one is active. Router-agnostic on
- * purpose: `main.tsx` supplies `BrowserRouter` for the real app, tests supply `MemoryRouter`. */
+/** S-48's three routable surfaces (Scenario 1), FR-39's Monitor comparison (a fourth, `/monitor` —
+ * see `MonitorPage.tsx`'s own doc comment for why it is a routed page rather than a section on the
+ * Digest or the Rules Inventory), and the Settings surface (a fifth, `/settings` — see
+ * `SettingsPage.tsx`'s own doc comment: it earns a direct nav entry the same way Monitor did, rather
+ * than being reachable only from elsewhere), each under the shared shell so the app-state banner and
+ * the navigation are present regardless of which one is active. Router-agnostic on purpose:
+ * `main.tsx` supplies `BrowserRouter` for the real app, tests supply `MemoryRouter`. */
 export function App() {
   return (
     <Routes>
@@ -31,6 +34,7 @@ export function App() {
         <Route path="sessions/:sessionId" element={<SessionPage />} />
         <Route path="rules" element={<RulesInventoryPage />} />
         <Route path="monitor" element={<MonitorPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

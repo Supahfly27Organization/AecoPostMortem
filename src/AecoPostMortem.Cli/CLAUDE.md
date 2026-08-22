@@ -25,13 +25,18 @@ throwaway one; without that argument the only way to test `purge` would be to de
 
 ### `rebuild` drops, recreates, and repopulates the derived layer, and takes no arguments
 
-`rebuild` calls `DerivedSchema.Rebuild` (unconditional drop-and-recreate, distinct from the
-version-gated rebuild `LocalStore.Open` already runs via `EnsureCurrent`), then calls
-`AecoPostMortem.Ingestion.NormalizedLayerWriter.Derive` once for every distinct `SessionId` RAW still
-holds, so the six NORMALIZED tables come back populated rather than empty. It opens the store and
-nothing else — there is no path argument on its `CommandSpec` (`Arguments` is `""`, unlike
-`ingest [path]`), so "the source directory is not read" holds structurally rather than by a runtime
-check (S-46, issue #24): repopulation reads only RAW, already in the store.
+`rebuild` calls `AecoPostMortem.Ingestion.NormalizedLayerWriter.RebuildAll` — the one shared
+definition of "rebuild" (Settings surface task): unconditional drop-and-recreate
+(`Data.Execution.DerivedSchema.Rebuild`, distinct from the version-gated rebuild `LocalStore.Open`
+already runs via `EnsureCurrent`) followed by `NormalizedLayerWriter.Derive` for every distinct
+`SessionId` RAW still holds, so the six NORMALIZED tables come back populated rather than empty. This
+used to be inlined directly in `CommandRunner.Rebuild`; it moved to `Ingestion` so
+`AecoPostMortem.Api`'s `POST /api/rebuild` (`Api/CLAUDE.md`'s own remarks on why the API calls
+`Ingestion` directly rather than reaching into this project) can call the identical sequence rather
+than a second copy. `CommandRunner.Rebuild` itself still opens the store and nothing else — there is
+no path argument on its `CommandSpec` (`Arguments` is `""`, unlike `ingest [path]`), so "the source
+directory is not read" holds structurally rather than by a runtime check (S-46, issue #24):
+repopulation reads only RAW, already in the store.
 
 ### `ingest` writes RAW, populates the derived layer, and reports the coverage report
 

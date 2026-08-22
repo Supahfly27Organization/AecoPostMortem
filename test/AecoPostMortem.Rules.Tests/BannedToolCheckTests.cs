@@ -2,7 +2,7 @@ namespace AecoPostMortem.Rules.Tests;
 
 /// <summary>Piece 3's ToolIsBanned adherence check: a prohibition names one tool, and the only
 /// adherence-worthy question is whether that tool was actually called — never a role comparison
-/// (see the design note on why <see cref="ToolVocabularyMismatchCheck"/> does not fit a
+/// (see <c>Rules/CLAUDE.md</c>'s design note on why a role-comparison check does not fit a
 /// prohibition).</summary>
 public sealed class BannedToolCheckTests
 {

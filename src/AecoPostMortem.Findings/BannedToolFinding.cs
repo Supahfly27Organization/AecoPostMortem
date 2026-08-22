@@ -7,7 +7,7 @@ namespace AecoPostMortem.Findings;
 /// <summary>
 /// Piece 3's second slice: orchestrates <see cref="BannedToolCheck"/> into
 /// <see cref="FindingClass.RuleAdherenceToolChoice"/> findings — <c>Rules/CLAUDE.md</c>'s own
-/// remarks on why <c>ToolVocabularyMismatchCheck</c> does not fit a prohibition. Every
+/// remarks on why a role-comparison check does not fit a prohibition. Every
 /// <see cref="BannedToolUsage"/> the check returns is already a violation (its own remarks), so this
 /// orchestration does no further filtering — unlike <see cref="FailedToolCallsFinding"/>'s
 /// <c>Failures &gt; 0</c> filter over a check that reports every candidate, clean or not.

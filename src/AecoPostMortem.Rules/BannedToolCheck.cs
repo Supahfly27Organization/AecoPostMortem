@@ -1,10 +1,8 @@
 namespace AecoPostMortem.Rules;
 
 /// <summary>Plain input to <see cref="BannedToolCheck"/>: one rule statement's own text and the one
-/// tool it names as banned. Unlike <see cref="RuleToolMention"/>, this carries no
-/// <see cref="ToolRole"/> — a prohibition does not target a role the way a recommendation does (see
-/// <see cref="BannedToolCheck"/>'s own remarks for why <see cref="ToolVocabularyMismatchCheck"/> does
-/// not fit this shape).</summary>
+/// tool it names as banned. It carries no <see cref="ToolRole"/> — a prohibition does not target a
+/// role the way a recommendation does; see <see cref="BannedToolCheck"/>'s own remarks.</summary>
 public sealed record BannedToolMention
 {
     public required string RuleText { get; init; }
@@ -34,8 +32,10 @@ public sealed record BannedToolUsage
 /// <summary>
 /// Piece 3's adherence check for <see cref="RuleShapeKind.ToolIsBanned"/>: a prohibition names one
 /// tool, and the only fact worth reporting is whether that tool was actually called — never a role
-/// comparison. <see cref="ToolVocabularyMismatchCheck"/> was built for a recommendation ("prefer /
-/// always use tool X for role Y"), where "X is not the dominant tool for Y" is a real mismatch; for a
+/// comparison. This check exists because a role-comparison check — a since-deleted
+/// <c>ToolVocabularyMismatchCheck</c>, built for a recommendation ("prefer /
+/// always use tool X for role Y"), where "X is not the dominant tool for Y" is a real mismatch — does
+/// not fit a prohibition at all: for a
 /// prohibition, "the banned tool is not the dominant tool of the role it happens to classify into"
 /// would fire on nearly every real ban and say nothing, and "the banned tool was never called" would
 /// misreport a ban being honored as a finding. Every <see cref="BannedToolUsage"/> this returns is

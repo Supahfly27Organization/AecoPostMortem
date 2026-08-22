@@ -170,6 +170,50 @@ public sealed class PurgeRouteTests
         Assert.True(File.Exists(temporary.Store.FilePath));
     }
 
+    /// <summary>
+    /// Purge is served behind the *same* write gate as ingest and rebuild — a purge landing
+    /// mid-ingest is exactly as unsafe as two ingests overlapping. <c>RunGatedTests</c> proves the
+    /// gate's own refusal logic, but nothing proved which routes actually consult it; this holds the
+    /// very gate the host was built with and asserts all three refuse, which is the wiring claim
+    /// itself rather than a re-test of <c>RunGated</c>.
+    ///
+    /// Deterministic by construction: the gate is held before any request is made, and
+    /// <c>RunGated</c> uses <c>Wait(0)</c>, so nothing blocks and no race has to be reproduced over a
+    /// real socket — the same reasoning <c>RunGatedTests</c> records for testing the gate directly.
+    /// </summary>
+    [Fact]
+    public async Task Every_write_route_including_purge_is_served_behind_the_one_shared_gate()
+    {
+        using var temporary = new TemporaryStore();
+        temporary.Store.Open().Dispose();
+
+        using var writeGate = new SemaphoreSlim(1, 1);
+        await writeGate.WaitAsync(Cancellation);
+
+        await using var app = ApiHost.Build(
+            temporary.Store, MissingCopilotRoot(temporary), port: 0, webRootPath: null, writeGate);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+
+            var purge = await client.SendAsync(ConfirmedPurge(), Cancellation);
+            var ingest = await client.PostAsync(ApiHost.IngestRoute, content: null, Cancellation);
+            var rebuild = await client.PostAsync(ApiHost.RebuildRoute, content: null, Cancellation);
+
+            Assert.Equal(HttpStatusCode.Conflict, purge.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, ingest.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, rebuild.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+
+        // The refusal happened before LocalStore.Purge, not after it.
+        Assert.True(File.Exists(temporary.Store.FilePath));
+    }
+
     static HttpRequestMessage ConfirmedPurge()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, ApiHost.PurgeRoute);

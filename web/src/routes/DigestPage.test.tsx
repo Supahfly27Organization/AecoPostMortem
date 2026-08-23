@@ -356,6 +356,115 @@ describe('DigestPage', () => {
     expect(requestedUrls[1]).toContain('to=2026-06-30')
   })
 
+  // The repository filter: `RepositorySelector` used to be a display-only seam — selecting another
+  // repository changed the `<select>` and nothing else, so every repository but the server's own
+  // most-sessions default was unreachable through the whole product. It now re-scopes the analysis
+  // server-side, exactly as the date range above does.
+  it('re-fetches the digest with the selected repository as a query parameter', async () => {
+    const user = userEvent.setup()
+    const requestedUrls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        requestedUrls.push(url)
+        return new Response(JSON.stringify(digestWith()), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('src/hot.cs was read repeatedly')
+    expect(requestedUrls).toHaveLength(1)
+    expect(requestedUrls[0]).not.toContain('repository=')
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Repository' }),
+      'aeco/AecoLedger',
+    )
+
+    await vi.waitFor(() => expect(requestedUrls).toHaveLength(2))
+    // Read through URLSearchParams rather than asserting on the encoded text: a repository name
+    // always contains a `/`, so a raw substring check would be asserting percent-encoding, not the
+    // value actually sent.
+    expect(new URL(requestedUrls[1], 'http://localhost').searchParams.get('repository')).toBe(
+      'aeco/AecoLedger',
+    )
+  })
+
+  // The re-fetch keeps the *previous* digest on screen (Important #4 above), so a selector driven
+  // purely off the served scope would snap back to the old repository for the whole request and read
+  // as having rejected the click. `DateRangeFilter` already shows the requested values rather than
+  // the served ones for the same reason; the selector has to match.
+  it('keeps the newly selected repository shown while its digest is still loading', async () => {
+    const user = userEvent.setup()
+    let callCount = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        callCount += 1
+        if (callCount === 1) {
+          return Promise.resolve(
+            new Response(JSON.stringify(digestWith()), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        }
+        // Never resolves: the assertions below are all about the in-flight window.
+        return new Promise<Response>(() => {})
+      }),
+    )
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('src/hot.cs was read repeatedly')
+    const selector = screen.getByRole('combobox', { name: 'Repository' })
+    await user.selectOptions(selector, 'aeco/AecoLedger')
+
+    expect(selector).toHaveValue('aeco/AecoLedger')
+    expect(screen.getByRole('status')).toHaveTextContent(/updating/i)
+  })
+
+  // The same reasoning `applyRange` already follows: a new repository re-scopes the whole ranked
+  // list server-side, so the previous repository's page position has no meaning against the new one.
+  it('returns to the first page when the repository changes', async () => {
+    const user = userEvent.setup()
+    const template = digestWith().rankedFindings[0]
+    const manyFindings = Array.from({ length: 30 }, (_, index) => ({
+      ...template,
+      headline: `Finding number ${index + 1}`,
+      recurrence: { key: `key-${index + 1}`, occurrences: [] },
+    }))
+    respondWith(digestWith({ rankedFindings: manyFindings }))
+    render(
+      <MemoryRouter>
+        <DigestPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Finding number 1')
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('Page 2 of 2')).toBeInTheDocument()
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Repository' }),
+      'aeco/AecoLedger',
+    )
+
+    expect(await screen.findByText('Page 1 of 2')).toBeInTheDocument()
+    expect(screen.getByText('Finding number 1')).toBeInTheDocument()
+  })
+
   // Real corpus check: the dominant repository serves 297 ranked findings, well past one page —
   // the pager slices the already-served list rather than the server sending only one page's worth.
   it('paginates the ranked findings list once it exceeds one page', async () => {

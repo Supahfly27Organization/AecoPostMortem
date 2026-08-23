@@ -615,6 +615,28 @@ public sealed class DigestRouteTests
         Assert.Equal("from", ex.ParamName);
     }
 
+    /// <summary>The repository counterpart of
+    /// <see cref="GetDigest_throws_ArgumentException_for_an_inverted_range"/>, and for the same
+    /// reason: the throw lives in <c>BuildRepositoryScope</c> and only becomes a 400 through the
+    /// route's own <c>catch</c>, so the throw path is asserted directly rather than left provable
+    /// only through HTTP. <c>ParamName</c> is deliberately the query parameter's own name, so the
+    /// refusal names the thing the caller actually supplied.</summary>
+    [Fact]
+    public void GetDigest_throws_ArgumentException_for_a_repository_not_in_the_store()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1", "org/majority"));
+            context.SaveChanges();
+        }
+
+        var ex = Assert.Throws<ArgumentException>(() => ApiHost.GetDigest(
+            temporary.Store, repository: "org/no-such-repository"));
+
+        Assert.Equal(ApiHost.RepositoryParameter, ex.ParamName);
+    }
+
     /// <summary>Code review gap: a malformed <c>from</c> query value must not reach <see cref="ApiHost.GetDigest"/>
     /// at all — ASP.NET Core's own <c>DateOnly?</c> minimal-API binding refuses it with 400 before the
     /// route delegate runs, an assumption this test makes explicit rather than leaving untested.</summary>
@@ -830,6 +852,283 @@ public sealed class DigestRouteTests
 
         Assert.Equal(TimeSpan.Zero, parsed.Offset);
         Assert.Equal(new DateTime(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc), parsed.UtcDateTime);
+    }
+
+    /// <summary>The repository filter (the counterpart of the date filter above): until this landed,
+    /// <c>BuildRepositoryScope</c> took no caller input at all and always picked whichever repository
+    /// carried the most sessions, so every repository but that one was unreachable through the whole
+    /// product — <c>RepositorySelector</c> changed only what the <c>&lt;select&gt;</c> displayed
+    /// (<c>web/CLAUDE.md</c>'s own "seam, not a working cross-repository switch" note). A requested
+    /// repository re-scopes the analysis exactly as a date range does: which sessions every check runs
+    /// over, never a display filter over findings already computed against the default one.</summary>
+    [Fact]
+    public async Task A_requested_repository_scopes_the_digest_to_it_rather_than_the_default()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("majority-1", "org/majority"));
+            context.Sessions.Add(ASession("majority-2", "org/majority"));
+            context.Sessions.Add(ASession("minority-1", "org/minority"));
+
+            for (var i = 0; i < 4; i++)
+            {
+                context.ToolCalls.Add(new ToolCall
+                {
+                    SessionId = "majority-1",
+                    ToolCallId = $"maj-tc{i}",
+                    ToolName = "view",
+                    Path = "/majority-only.cs",
+                    StartedAt = "2026-08-16T10:00:01Z",
+                    OwnerKind = OwnerKind.Main,
+                });
+                context.ToolCalls.Add(new ToolCall
+                {
+                    SessionId = "minority-1",
+                    ToolCallId = $"min-tc{i}",
+                    ToolName = "view",
+                    Path = "/minority-only.cs",
+                    StartedAt = "2026-08-16T10:00:01Z",
+                    OwnerKind = OwnerKind.Main,
+                });
+            }
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?repository=org%2Fminority", ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal("org/minority", envelope!.Masthead.RepositoryScope.SelectedRepository);
+            Assert.Equal(new[] { "minority-1" }, envelope.Masthead.RepositoryScope.SessionIds);
+            var finding = Assert.Single(envelope.RankedFindings);
+            Assert.Contains(finding.Evidence, item => item.Field == "data.path" && item.Value == "/minority-only.cs");
+            Assert.DoesNotContain(finding.Evidence, item => item.Value == "/majority-only.cs");
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The selector has to be able to switch <em>back</em>. <c>AvailableRepositories</c> is
+    /// the whole corpus's list, never narrowed to whichever one is currently selected — narrowing it
+    /// would collapse the <c>&lt;select&gt;</c> to a single option after the first switch and strand
+    /// the operator in the repository they just moved to.</summary>
+    [Fact]
+    public async Task A_requested_repository_still_serves_every_available_repository()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("majority-1", "org/majority"));
+            context.Sessions.Add(ASession("majority-2", "org/majority"));
+            context.Sessions.Add(ASession("minority-1", "org/minority"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?repository=org%2Fminority", ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal("org/minority", envelope!.Masthead.RepositoryScope.SelectedRepository);
+            Assert.Equal(
+                new[] { "org/majority", "org/minority" },
+                envelope.Masthead.RepositoryScope.AvailableRepositories);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>A repository no session in the store belongs to is a caller error, answered the same
+    /// honest way an inverted date range already is
+    /// (<see cref="An_inverted_date_range_answers_400"/>) — never a silently empty digest that reads
+    /// as "this repository has no findings" instead of "there is no such repository".</summary>
+    [Fact]
+    public async Task An_unknown_repository_answers_400()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("s1", "org/majority"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var response = await client.GetAsync(
+                $"{ApiHost.DigestRoute}?repository=org%2Fno-such-repository", Cancellation);
+
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The corpus-wide masthead ignores a repository request exactly as it already ignores a
+    /// date range (<see cref="Masthead_counters_stay_corpus_wide_when_a_date_filter_is_applied"/>) —
+    /// both are ranking-scope lenses, not facts about the store.</summary>
+    [Fact]
+    public async Task Masthead_counters_stay_corpus_wide_when_a_repository_is_requested()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("majority-1", "org/majority"));
+            context.Sessions.Add(ASession("majority-2", "org/majority"));
+            context.Sessions.Add(ASession("minority-1", "org/minority"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?repository=org%2Fminority", ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal(3, envelope!.Masthead.SessionCount);
+            Assert.Equal(2, envelope.Masthead.RepositoryCount);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>The two filters are independent and compose: the repository request picks the session
+    /// set, the date range narrows it further. Neither may quietly override the other.</summary>
+    [Fact]
+    public async Task A_requested_repository_and_a_date_range_narrow_the_scope_together()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASessionStartedAt("majority-in-range", "org/majority", "2026-06-15T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("majority-other", "org/majority", "2026-06-16T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("minority-in-range", "org/minority", "2026-06-15T10:00:00Z"));
+            context.Sessions.Add(ASessionStartedAt("minority-out-of-range", "org/minority", "2026-01-01T10:00:00Z"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?repository=org%2Fminority" +
+                $"&{ApiHost.FromParameter}=2026-06-01&{ApiHost.ToParameter}=2026-06-30",
+                ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal("org/minority", envelope!.Masthead.RepositoryScope.SelectedRepository);
+            Assert.Equal(new[] { "minority-in-range" }, envelope.Masthead.RepositoryScope.SessionIds);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    const string TwoStatementPrompt = """
+        <custom_instruction>
+        CLAUDE.md
+        - Never use grep.
+        - Never use sed.
+        </custom_instruction>
+        """;
+
+    /// <summary>The masthead's rule-coverage figure is resolved through
+    /// <c>repositoryScope.SelectedRepository</c> (<c>BuildRuleCoverageStatus</c>), so it has to follow
+    /// a repository request too — a coverage bar describing the default repository's rules while the
+    /// ranking below it describes another repository's sessions would be the same
+    /// figure-contradicts-its-own-scope defect the methodology footer had to be corrected for once
+    /// already.</summary>
+    [Fact]
+    public async Task Rule_coverage_follows_the_requested_repository()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("majority-1", "org/majority"));
+            context.Sessions.Add(ASession("majority-2", "org/majority"));
+            context.Sessions.Add(ASession("minority-1", "org/minority"));
+            context.RawEvents.Add(SystemMessage("majority-1", BannedToolPrompt));
+            context.RawEvents.Add(SystemMessage("minority-1", TwoStatementPrompt));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(
+                $"{ApiHost.DigestRoute}?repository=org%2Fminority", ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            var coverage = Assert.IsType<RuleCoverageStatusEnvelope.AnalyzedCoverage>(
+                envelope!.Masthead.RuleCoverage);
+            // org/minority's own rule set carries two statements; org/majority's carries one, so a
+            // coverage figure still resolved against the default repository would read Total 1 here.
+            Assert.Equal(2, coverage.Counts.Total);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
+    }
+
+    /// <summary>No <c>repository</c> supplied must behave exactly as before this filter existed — the
+    /// most-sessions default, unchanged. The regression guard every other test in this file relies on
+    /// implicitly, stated explicitly for this code path.</summary>
+    [Fact]
+    public async Task No_repository_supplied_still_defaults_to_the_one_with_the_most_sessions()
+    {
+        using var temporary = new TemporaryStore();
+        using (var context = temporary.Store.Open())
+        {
+            context.Sessions.Add(ASession("majority-1", "org/majority"));
+            context.Sessions.Add(ASession("majority-2", "org/majority"));
+            context.Sessions.Add(ASession("minority-1", "org/minority"));
+            context.SaveChanges();
+        }
+
+        await using var app = ApiHost.Build(temporary.Store, MissingCopilotRoot(temporary), port: 0);
+        await app.StartAsync(Cancellation);
+        try
+        {
+            using var client = HttpClientFor(app);
+            var envelope = await client.GetFromJsonAsync<DigestEnvelope>(ApiHost.DigestRoute, ClientOptions, Cancellation);
+
+            Assert.NotNull(envelope);
+            Assert.Equal("org/majority", envelope!.Masthead.RepositoryScope.SelectedRepository);
+            Assert.Equal(2, envelope.Masthead.RepositoryScope.SessionIds.Count);
+        }
+        finally
+        {
+            await app.StopAsync(Cancellation);
+        }
     }
 
     static Session ASessionStartedAt(string sessionId, string repository, string startedAt) => new()

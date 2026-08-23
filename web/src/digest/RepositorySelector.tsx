@@ -7,10 +7,16 @@ interface RepositorySelectorProps {
 }
 
 /** Scenario 3 (issue #45) / PRD Part 8 Q5: the digest shows one repository at a time, selectable.
- * `availableRepositories` is the seam a later cross-repository view switches through — selecting a
- * different one reports the choice to the caller, who decides what (if anything) happens next; no
- * caller re-fetches cross-repository data yet, so the seam is exercised without a live re-fetch
- * behind it (this story's own edge case: implement the default, keep the selector as a seam). */
+ *
+ * This shipped as a display-only seam — `onSelect` reported the choice and `DigestPage` overlaid it
+ * on the served scope, so the `<select>` changed and nothing else did. That left every repository
+ * but the server's own most-sessions default unreachable through the whole product, behind a control
+ * that looked live. `DigestPage` now re-fetches on the reported choice
+ * (`ApiHost.RepositoryParameter`), so this component is unchanged but no longer a seam.
+ *
+ * It stays a pure presenter — `DigestPage` decides which repository name to show. During a re-fetch
+ * that is the *requested* one rather than the served one, so the control never snaps back to the
+ * previous repository while the new digest is in flight; see `DigestPage`'s own remarks. */
 export function RepositorySelector({ scope, onSelect }: RepositorySelectorProps) {
   if (scope.availableRepositories.length === 0) {
     return null

@@ -36,14 +36,24 @@ const PAGE_SIZE = 25
  */
 export function DigestPage() {
   const [range, setRange] = useState<DateRange>({ from: null, to: null })
-  const query = useDigest(range.from, range.to)
-  const [pendingRepository, setPendingRepository] = useState<string | null>(null)
+  // `null` means "whichever repository the server picks by default" (the one with the most
+  // sessions) — this page deliberately holds no opinion about which that is, so it never has to
+  // guess a default before the first response arrives.
+  const [selectedRepository, setSelectedRepository] = useState<string | null>(null)
+  const query = useDigest(range.from, range.to, selectedRepository)
   const [page, setPage] = useState(1)
 
   // A new range re-scopes the whole analysis server-side (see `useDigest`'s own remarks), so the
   // previous range's page position has no meaning against the new list — always back to page 1.
   function applyRange(from: string | null, to: string | null) {
     setRange({ from, to })
+    setPage(1)
+  }
+
+  // A repository change re-scopes the analysis for exactly the same reason a range change does, so
+  // it resets the page for exactly the same reason too.
+  function selectRepository(repository: string) {
+    setSelectedRepository(repository)
     setPage(1)
   }
 
@@ -68,10 +78,19 @@ export function DigestPage() {
 
   const { digest, isRefetching } = query
   const scope = digest.masthead.repositoryScope
-  // The seam PRD Part 8 Q5 names: selecting another repository updates which one the selector
-  // shows, but no caller here re-fetches a cross-repository digest yet (that view is later work) —
-  // this story implements the default and keeps the control itself real and selectable.
-  const displayedScope = { ...scope, selectedRepository: pendingRepository ?? scope.selectedRepository }
+  // The selector shows the *requested* repository, not the served one — the same choice
+  // `DateRangeFilter` makes for its own two inputs, and for the same reason. A re-fetch deliberately
+  // keeps the previous digest mounted (`useDigest`'s `isRefetching`), so a selector reading straight
+  // off `scope` would snap back to the old repository for the whole request and read as having
+  // rejected the click. `selectedRepository` is null until the operator picks something, so an
+  // untouched page still shows exactly what the server chose.
+  //
+  // `availableRepositories` is always the served list: the server never narrows it to the selection
+  // (`ApiHost.BuildRepositoryScope`), so the control can always switch back.
+  const displayedScope = {
+    ...scope,
+    selectedRepository: selectedRepository ?? scope.selectedRepository,
+  }
 
   // "Nothing was in scope" is now a served fact (`DigestState.NothingInScope`), not something this
   // page derives. It used to be `rangeActive && scope.sessionIds.length === 0` — a client-side
@@ -98,7 +117,7 @@ export function DigestPage() {
 
       <Masthead masthead={digest.masthead} state={digest.state} />
 
-      <RepositorySelector scope={displayedScope} onSelect={setPendingRepository} />
+      <RepositorySelector scope={displayedScope} onSelect={selectRepository} />
 
       <DateRangeFilter from={range.from} to={range.to} onApply={applyRange} />
 

@@ -1438,6 +1438,44 @@ sessions and 297 ranked findings and the app state returned to `ready` — which
 result's own sentence makes ("Run ingest to rebuild the store from your Copilot sessions"), now
 measured rather than asserted.
 
+### The repository selector re-scopes the analysis, like the date filter — and until it did, most of the corpus was unreachable
+
+`BuildRepositoryScope(sessions)` took no caller input at all: it always picked whichever repository
+carried the most sessions (ties ordinal), and `/api/digest` had no parameter through which a client
+could say otherwise. The web app's `RepositorySelector` was built against that as a deliberate seam
+(`web/CLAUDE.md`'s own former "seam, not a working cross-repository switch" note) — selecting a
+different repository changed what the `<select>` displayed and nothing else. The consequence was not
+cosmetic: on the live 35-session reference corpus, 25 sessions belong to the dominant repository, so
+the **other repository's findings were unreachable through the entire product** — no surface could
+rank them, behind a control that looked live. `/rules` and `/monitor` still reuse this same default
+and have no selector at all; that is untouched here and remains open.
+
+`RepositoryParameter` (`repository`) closes it for the Digest, deliberately mirroring the date
+filter's own shape rather than inventing a second one:
+
+- **It re-scopes, it does not display-filter.** `BuildRepositoryScope(sessions, requested)` resolves
+  `SelectedRepository` before anything else runs, so `repositorySessionIds` → `scopedSessionIds` →
+  `BuildFindingsForScope` → `servedRepositoryScope` all follow with no further change. Every count,
+  recurrence and rank is computed over the requested repository's own sessions, exactly as they
+  already were for the default one — the same (b)-not-(a) reasoning the date-filter entry below sets
+  out at length. It also composes with `from`/`to`: repository picks the session set, the date range
+  narrows it further.
+- **An unknown value is a caller error, not a fallback.** Falling back to the default would serve the
+  default repository's entire ranking under the name of a repository the operator asked for — "this
+  repository has these findings" is a worse answer than a refusal. It throws `ArgumentException`,
+  which the route's existing `catch` (built for the inverted range) already turns into a 400, so this
+  needed no new error path.
+- **`AvailableRepositories` is never narrowed to the selection.** It is what the selector offers, so
+  narrowing it would collapse the control to one option after the first switch and strand the operator
+  in the repository they just moved to. `A_requested_repository_still_serves_every_available_repository`
+  pins it.
+- **`MastheadCounters` stays corpus-wide; rule coverage follows the selection.** The same split the
+  date filter already draws, for the same reason — the masthead states a fact about the store, while
+  `BuildRuleCoverageStatus` resolves through `repositoryScope.SelectedRepository` and so describes
+  whichever repository is actually being ranked. A coverage bar describing one repository's rules
+  above a ranking of another's would be the same figure-contradicts-its-own-scope defect the
+  methodology footer had to be corrected for once already.
+
 ### A date-range filter re-scopes the whole analysis, not merely which already-computed findings display
 
 The pager & date-range filter task's own real design question, settled before writing any code:

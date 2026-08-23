@@ -21,6 +21,12 @@ export const FromParameter = 'from'
 
 export const ToParameter = 'to'
 
+/** The repository filter's query parameter — matches `ApiHost.RepositoryParameter`
+ * (`src/AecoPostMortem.Api/ApiHost.cs`). One of `RepositoryScopeEnvelope.availableRepositories`;
+ * anything else is a caller error the server answers 400 for, so `RepositorySelector` (which only
+ * ever offers that list) is structurally unable to produce one. */
+export const RepositoryParameter = 'repository'
+
 /** Wire values for `AecoPostMortem.Findings.FindingClass` — camelCase because they carry no
  * per-property `JsonConverter` of their own, so they pick up `ApiHost`'s global
  * `JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` once a real endpoint serves them. */
@@ -210,18 +216,33 @@ export interface DateRange {
   to: string | null
 }
 
+/** Everything that narrows what the server ranks: the date range's own two bounds plus the selected
+ * repository. All three `null` fetches exactly the corpus-wide-then-default-repository digest this
+ * app served before either filter existed. Mirrors `ApiHost.GetDigest(store, from, to, repository)`'s
+ * own three optional parameters.
+ *
+ * `repository` lives here rather than on `DateRange` because the two are independent narrowings that
+ * compose (`Api/CLAUDE.md`) — `DateRangeFilter` and `MethodologyFooter` still take a plain
+ * `DateRange`, and neither has any business carrying a repository. */
+export interface DigestScope extends DateRange {
+  repository: string | null
+}
+
 /** Throws on a non-2xx response or a network failure; callers (see `useDigest`) turn that into a
  * state a component can render rather than an unhandled rejection. */
 export async function fetchDigest(
-  range: DateRange = { from: null, to: null },
+  scope: DigestScope = { from: null, to: null, repository: null },
   signal?: AbortSignal,
 ): Promise<DigestEnvelope> {
   const query = new URLSearchParams()
-  if (range.from !== null) {
-    query.set(FromParameter, range.from)
+  if (scope.from !== null) {
+    query.set(FromParameter, scope.from)
   }
-  if (range.to !== null) {
-    query.set(ToParameter, range.to)
+  if (scope.to !== null) {
+    query.set(ToParameter, scope.to)
+  }
+  if (scope.repository !== null) {
+    query.set(RepositoryParameter, scope.repository)
   }
   const url = query.size === 0 ? DigestRoute : `${DigestRoute}?${query.toString()}`
 

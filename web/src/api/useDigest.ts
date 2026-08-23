@@ -32,7 +32,11 @@ export type DigestQuery =
  * previous `digest` still attached and `isRefetching: true`, so `DigestPage` can keep the whole page
  * rendered and show a small "updating" status instead of blanking everything. Only the very first
  * fetch (no previous digest to keep showing) still reports bare `status: 'loading'`. */
-export function useDigest(from: string | null = null, to: string | null = null): DigestQuery {
+export function useDigest(
+  from: string | null = null,
+  to: string | null = null,
+  repository: string | null = null,
+): DigestQuery {
   const [query, setQuery] = useState<DigestQuery>({ status: 'loading' })
 
   useEffect(() => {
@@ -42,9 +46,9 @@ export function useDigest(from: string | null = null, to: string | null = null):
     )
 
     // Guarded on the resolution path too, not just the rejection: a response that settles after
-    // from/to changed would otherwise overwrite the new request's state with the previous range's
-    // digest — the same guard `useRulesInventory` applies for the identical reason.
-    fetchDigest({ from, to }, controller.signal)
+    // from/to/repository changed would otherwise overwrite the new request's state with the previous
+    // scope's digest — the same guard `useRulesInventory` applies for the identical reason.
+    fetchDigest({ from, to, repository }, controller.signal)
       .then((digest) => {
         if (!controller.signal.aborted) {
           setQuery({ status: 'loaded', digest, isRefetching: false })
@@ -57,7 +61,7 @@ export function useDigest(from: string | null = null, to: string | null = null):
       })
 
     return () => controller.abort()
-  }, [from, to])
+  }, [from, to, repository])
 
   return query
 }

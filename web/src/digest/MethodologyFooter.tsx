@@ -74,6 +74,13 @@ export function MethodologyFooter({
   range?: AppliedRange | null
 }) {
   const sessionsInScope = masthead.repositoryScope.sessionIds.length
+  // The repository filter: while `RepositorySelector` was display-only, the digest could only ever
+  // be one repository and "the selected repository" was unambiguous. Selecting now genuinely
+  // re-scopes the ranking, so this sentence names which one — read off the served scope already in
+  // hand rather than taken as a new prop, the same "nothing on this page counts or is told anything
+  // twice" discipline the figures above follow. Null (no session in the store records a repository
+  // at all) keeps the original unnamed wording, since there is no name to give.
+  const repository = masthead.repositoryScope.selectedRepository
 
   return (
     <footer className="methodology-footer">
@@ -96,10 +103,11 @@ export function MethodologyFooter({
         session, with no paraphrasing or normalisation.
       </p>
       <p>
-        Each finding&rsquo;s session strip lays out the {plural(sessionsInScope, 'session')} in the
-        selected repository{range !== null && ' within the applied date range'} in chronological
-        order, and lights the ones that finding actually touched — the same session set every check
-        on this page was run over.
+        Each finding&rsquo;s session strip lays out the {plural(sessionsInScope, 'session')} in{' '}
+        {repository ?? 'the selected repository'}
+        {range !== null && ' within the applied date range'} in chronological order, and lights the
+        ones that finding actually touched — the same session set every check on this page was run
+        over.
       </p>
     </footer>
   )

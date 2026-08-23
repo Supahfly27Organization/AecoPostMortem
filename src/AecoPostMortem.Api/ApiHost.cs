@@ -37,6 +37,16 @@ public static class ApiHost
 
     public const string ToParameter = "to";
 
+    /// <summary>The optional repository filter's query parameter. Omitted, <see cref="GetDigest"/>
+    /// picks the repository carrying the most sessions exactly as it always has; supplied, it must
+    /// name one of <see cref="Findings.RepositoryScope.AvailableRepositories"/> or the request is a
+    /// caller error (400), the same honest refusal an inverted <see cref="FromParameter"/>/
+    /// <see cref="ToParameter"/> pair already gets. Like the date range, this re-scopes <em>which
+    /// sessions every check runs over</em> rather than filtering an already-computed ranking — see
+    /// the "The repository selector re-scopes the analysis, like the date filter" non-obvious
+    /// decision in <c>Api/CLAUDE.md</c>.</summary>
+    public const string RepositoryParameter = "repository";
+
     /// <summary>FR-40's Rules Inventory route (S-22, issue #35), first served for real here.</summary>
     public const string RulesInventoryRoute = "/api/rules-inventory";
 
@@ -192,14 +202,16 @@ public static class ApiHost
                     : RefusedUnconfirmed()
                 : RefusedOrigin());
 
-        app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to) =>
+        app.MapGet(DigestRoute, (DateOnly? from, DateOnly? to, string? repository) =>
         {
             // GetDigest is the one place this validates — no separate pre-check here that could
             // silently drift from what the method itself enforces (or stop firing if GetDigest's own
-            // rule ever changes without this route being touched).
+            // rule ever changes without this route being touched). That covers the unknown-repository
+            // refusal too: BuildRepositoryScope throws the same ArgumentException an inverted range
+            // does, so this one catch already turns both into an honest 400.
             try
             {
-                return Results.Ok(GetDigest(store, from, to));
+                return Results.Ok(GetDigest(store, from, to, repository));
             }
             catch (ArgumentException ex) when (ex is not ArgumentNullException)
             {
@@ -546,7 +558,8 @@ public static class ApiHost
     /// opens the store, so there is no live "still ingesting" signal for a separate <c>serve</c>
     /// process to read.
     /// </summary>
-    public static DigestEnvelope GetDigest(LocalStore store, DateOnly? from = null, DateOnly? to = null)
+    public static DigestEnvelope GetDigest(
+        LocalStore store, DateOnly? from = null, DateOnly? to = null, string? repository = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         if (from is not null && to is not null && from > to)
@@ -564,7 +577,7 @@ public static class ApiHost
         var permissions = context.Permissions.ToList();
         var agents = context.Agents.ToList();
 
-        var repositoryScope = BuildRepositoryScope(sessions);
+        var repositoryScope = BuildRepositoryScope(sessions, repository);
         // repositoryScope.SessionIds is already exactly this scope's session ids (BuildRepositoryScope
         // computes both from the same selected-repository filter) — reusing it here, rather than
         // re-filtering sessions a second time, is what guarantees the served session-strip positions
@@ -881,7 +894,16 @@ public static class ApiHost
     /// (<c>scopedSessionIds</c>), computed once here so both a finding's own ranking and the served
     /// session-strip positions agree on exactly which sessions are "in scope".
     /// </summary>
-    static RepositoryScope BuildRepositoryScope(IReadOnlyList<Session> sessions)
+    /// <summary><paramref name="requested"/> is the caller's own repository selection
+    /// (<see cref="RepositoryParameter"/>); <see langword="null"/> keeps the most-sessions default this
+    /// has always picked. An unrecognised value throws rather than silently falling back — a fallback
+    /// would serve the default repository's whole ranking under the wrong repository's name, which
+    /// reads as "this repository has these findings" and is worse than an honest refusal.
+    ///
+    /// <see cref="RepositoryScope.AvailableRepositories"/> stays the corpus's full list either way,
+    /// never narrowed to the selection: it is what the selector offers, so narrowing it would collapse
+    /// the control to a single option after the first switch and strand the operator there.</summary>
+    static RepositoryScope BuildRepositoryScope(IReadOnlyList<Session> sessions, string? requested = null)
     {
         var repositories = sessions
             .Select(session => session.Repository)
@@ -889,7 +911,19 @@ public static class ApiHost
             .Select(repository => repository!)
             .ToList();
 
-        var selected = repositories
+        var available = repositories
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(repository => repository, StringComparer.Ordinal)
+            .ToList();
+
+        if (requested is not null && !available.Contains(requested, StringComparer.Ordinal))
+        {
+            throw new ArgumentException(
+                $"'{RepositoryParameter}' ('{requested}') is not a repository recorded in this store.",
+                RepositoryParameter);
+        }
+
+        var selected = requested ?? repositories
             .GroupBy(repository => repository, StringComparer.Ordinal)
             .OrderByDescending(group => group.Count())
             .ThenBy(group => group.Key, StringComparer.Ordinal)
@@ -903,10 +937,7 @@ public static class ApiHost
         return new RepositoryScope
         {
             SelectedRepository = selected,
-            AvailableRepositories = repositories
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(repository => repository, StringComparer.Ordinal)
-                .ToList(),
+            AvailableRepositories = available,
             SessionIds = OrderedSessionIds(scopedSessions),
         };
     }

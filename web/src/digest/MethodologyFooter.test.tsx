@@ -115,6 +115,35 @@ describe('MethodologyFooter', () => {
     expect(screen.getByText(/within the applied date range/i)).toBeInTheDocument()
   })
 
+  // The repository filter: "the selected repository" was unambiguous while the digest could only
+  // ever be one repository — the selector was display-only, so there was nothing else it could mean.
+  // Now that selecting genuinely re-scopes the ranking, this sentence has to name which repository
+  // it is talking about, or it reads identically for every one of them.
+  it('names the repository the ranking is scoped to, not just "the selected repository"', () => {
+    render(<MethodologyFooter masthead={mastheadWith()} />)
+
+    expect(screen.getByText(/chronological order/i)).toHaveTextContent('aeco/AecoPostMortem')
+  })
+
+  // `RepositoryScopeEnvelope.selectedRepository` is genuinely nullable (a store where no session
+  // records a repository at all), so there is a real case with no name to use.
+  it('keeps the unnamed wording when no repository is recorded at all', () => {
+    render(
+      <MethodologyFooter
+        masthead={mastheadWith({
+          repositoryScope: {
+            selectedRepository: null,
+            availableRepositories: [],
+            sessionIds: [],
+            sessionLabels: {},
+          },
+        })}
+      />,
+    )
+
+    expect(screen.getByText(/chronological order/i)).toHaveTextContent('the selected repository')
+  })
+
   it('a range with only one bound still states it, e.g. "from 1 Jun 2026 onward"', () => {
     render(<MethodologyFooter masthead={mastheadWith()} range={{ from: '2026-06-01', to: null }} />)
 
